@@ -90,6 +90,38 @@ local GameConfig = {
     MAGNET_RADIUS = 15,       -- 磁吸范围
     COLLECT_RADIUS = 5,       -- 拾取范围
     MAGNET_SPEED = 75,        -- 磁吸飞行速度
+
+    -- 10. 局外天赋商店配置
+	TALENTS = {
+		Talent_HP = {
+			Name = "血量强化",
+			BaseCost = 50,       -- 初始价格
+			CostMulti = 1.5,     -- 每次升级的价格乘数
+			StatIncrease = 20,   -- 每级增加 20 点生命上限
+		},
+		Talent_ATK = {
+			Name = "攻击强化",
+			BaseCost = 100,
+			CostMulti = 2.0,
+			StatIncrease = 5,    -- 每级增加 5 点攻击力
+		},
+		Talent_ASPD = {
+			Name = "攻速强化",
+			BaseCost = 200,
+			CostMulti = 2.5,
+			StatIncrease = 0.15, -- 每级增加 0.15 攻速
+		}
+	}
+    
 }
+
+-- 商品计算价格方法，全局共享
+function GameConfig.GetTalentCost(talentId, currentLevel)
+	local talent = GameConfig.TALENTS[talentId]
+	if not talent then return math.huge end -- 如果查不到配置，返回无限大价格防止被刷
+	
+	-- 计算公式：基础价格 * (乘数 ^ 当前等级)
+	return math.floor(talent.BaseCost * (talent.CostMulti ^ currentLevel))
+end
 
 return GameConfig

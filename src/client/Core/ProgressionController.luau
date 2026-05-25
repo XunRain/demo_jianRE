@@ -53,16 +53,12 @@ end
 function ProgressionController.CalculateStartingStats()
 	local Config = Controllers.Config
 	
-	-- 读取玩家的局外养成等级
-	local lvlHP = player:GetAttribute("Talent_HP") or 0
-	local lvlATK = player:GetAttribute("Talent_ATK") or 0
-	local lvlASPD = player:GetAttribute("Talent_ASPD") or 0
+	-- 从 Config 读取每级的成长加成系数
+	local extraHp = (player:GetAttribute("Talent_HP") or 0) * Config.TALENTS.Talent_HP.StatIncrease
+	local extraAtk = (player:GetAttribute("Talent_ATK") or 0) * Config.TALENTS.Talent_ATK.StatIncrease
+	local extraAspd = (player:GetAttribute("Talent_ASPD") or 0) * Config.TALENTS.Talent_ASPD.StatIncrease
 	
-	-- 转换为实际面板（比如升一级HP加20点，ATK加5点，ASPD加0.15）
-	local extraHp = lvlHP * 20
-	local extraAtk = lvlATK * 5
-	local extraAspd = lvlASPD * 0.15
-	
+	-- 基础值 + 局外天赋加成 = 本局开局最终属性
 	return {
 		MaxHP = Config.BASE_HP + extraHp,
 		ATK = Config.BASE_ATK + extraAtk,

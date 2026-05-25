@@ -220,7 +220,7 @@ function UIController.Start()
 				local buffPool = {
 					{ name = "攻击力提升", attr = "ATK", amount = 5, color = Color3.fromRGB(255, 100, 100) },
 					{ name = "攻速提升", attr = "ASPD", amount = 0.5, color = Color3.fromRGB(100, 255, 100) },
-					{ name = "最大生命", attr = "HP", amount = 10, color = Color3.fromRGB(100, 255, 255) },
+					{ name = "最大血量", attr = "HP", amount = 10, color = Color3.fromRGB(100, 255, 255) },
 					{ name = "小幅全能", attr = "ALL", amount = 0, color = Color3.fromRGB(255, 215, 0) },
                { name = "磁力范围", attr = "MagnetRadius", amount = 5, color = Color3.fromRGB(180, 100, 255) }
 				}
@@ -257,36 +257,29 @@ function UIController.Start()
 	end
 
    -- 商店 UI 初始化函数
-	   local function setupShopUI()
+	local function setupShopUI()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
 		local shopPanel = mainUI:WaitForChild("ShopPanel", 5)
 		if not shopPanel then return end
 
-		-- 价格计算公式（与服务端保持绝对一致）
-		local function getCost(base, multi, level)
-			return math.floor(base * (multi ^ level))
-		end
+		local Config = Controllers.Config -- 拿到全局配置
 
-		-- 刷新商店文本显示
+		-- 刷新商店文本显示 (完全数据驱动！)
 		local function refreshShopText()
-			local lvlHP = player:GetAttribute("Talent_HP") or 0
-			local lvlATK = player:GetAttribute("Talent_ATK") or 0
-			local lvlASPD = player:GetAttribute("Talent_ASPD") or 0
-			
-			local btnHp = shopPanel:FindFirstChild("BtnBuyHP")
-			if btnHp and btnHp:FindFirstChild("TextLabel") then
-				btnHp.TextLabel.Text = "血量强化 Lv." .. lvlHP .. "\n金币: " .. getCost(50, 1.5, lvlHP)
-			end
-			
-			local btnAtk = shopPanel:FindFirstChild("BtnBuyATK")
-			if btnAtk and btnAtk:FindFirstChild("TextLabel") then
-				btnAtk.TextLabel.Text = "攻击强化 Lv." .. lvlATK .. "\n金币: " .. getCost(100, 2.0, lvlATK)
-			end
-
-			local btnAspd = shopPanel:FindFirstChild("BtnBuyASPD")
-			if btnAspd and btnAspd:FindFirstChild("TextLabel") then
-				btnAspd.TextLabel.Text = "攻速强化 Lv." .. lvlASPD .. "\n金币: " .. getCost(200, 2.5, lvlASPD)
+			for talentId, talentData in pairs(Config.TALENTS) do
+				-- 自动推断按钮名字：比如 Talent_HP 对应 BtnBuyHP
+				local suffix = string.gsub(talentId, "Talent_", "")
+				local btnName = "BtnBuy" .. suffix
+				local btn = shopPanel:FindFirstChild(btnName)
+				
+				if btn and btn:FindFirstChild("TextLabel") then
+					local currentLevel = player:GetAttribute(talentId) or 0
+					local cost = Config.GetTalentCost(talentId, currentLevel)
+					
+					-- 自动套用 Config 里的天赋名称和算出的动态价格
+					btn.TextLabel.Text = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. cost
+				end
 			end
 		end
 

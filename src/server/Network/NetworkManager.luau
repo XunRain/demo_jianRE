@@ -4,6 +4,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Services -- 全局服务引用指针
 
+-- 引入公共配置
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConfig"))
+
 function NetworkManager.Init(deps)
 	Services = deps
 end
@@ -46,29 +50,23 @@ function NetworkManager.Start()
 	local buyTalentEvent = remotes:FindFirstChild("BuyTalent") or Instance.new("RemoteEvent", remotes)
 	buyTalentEvent.Name = "BuyTalent"
 
-	-- 天赋价格配置 (基础价格 与 每次升级的价格乘数)
-	local TALENT_COSTS = {
-		Talent_HP = { base = 50, multi = 1.5 },
-		Talent_ATK = { base = 100, multi = 2.0 },
-		Talent_ASPD = { base = 200, multi = 2.5 }
-	}
-
 	-- 监听客户端的购买请求
-	buyTalentEvent.OnServerEvent:Connect(function(player, talentName)
-		local costConfig = TALENT_COSTS[talentName]
-		if not costConfig then return end -- 防止发送非法天赋名
+	buyTalentEvent.OnServerEvent:Connect(function(player, talentId)
+		-- 从公共配置表校验是否有这个天赋
+		local talentConfig = GameConfig.TALENTS[talentId]
+		if not talentConfig then return end 
 
-		local currentLevel = player:GetAttribute(talentName) or 0
+		local currentLevel = player:GetAttribute(talentId) or 0
 		local currentCoins = player:GetAttribute("Coins") or 0
 
-		-- 计算当前等级需要的真实金币：基础价格 * (乘数 ^ 当前等级)
-		local cost = math.floor(costConfig.base * (costConfig.multi ^ currentLevel))
+		-- 统一调用公共配置表里的计费公式
+		local cost = GameConfig.GetTalentCost(talentId, currentLevel)
 
-		-- 钱够就扣钱，加等级（服务端修改会自动下发给客户端）
+		-- 钱够就扣钱加级
 		if currentCoins >= cost then
 			player:SetAttribute("Coins", currentCoins - cost)
-			player:SetAttribute(talentName, currentLevel + 1)
-			print(player.Name .. " 成功购买了 " .. talentName .. " Lv." .. (currentLevel + 1))
+			player:SetAttribute(talentId, currentLevel + 1)
+			print(string.format("%s 成功购买 %s Lv.%d (花费: %d)", player.Name, talentConfig.Name, currentLevel + 1, cost))
 		end
 	end)
 end
