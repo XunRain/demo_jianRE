@@ -2,11 +2,13 @@
 -- 客户端启动入口：负责加载模块、初始化依赖关系并启动主逻辑
 
 print("Initializing Client Architecture...")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 -- 1. 定义模块路径表
 local Controllers = {
     -- 配置层
-    Config      = require(script.Configs:WaitForChild("GameConfig")),
+    Config      = require(Shared:WaitForChild("Configs"):WaitForChild("GameConfig")),
     
     -- 核心逻辑层
     Game        = require(script.Core:WaitForChild("GameController")),

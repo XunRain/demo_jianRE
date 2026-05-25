@@ -35,6 +35,7 @@ local GameConfig = {
     BASE_ASPD = 2,            -- 每秒发射次数
     BASE_LEVEL = 1,
     BASE_EXP = 0,
+    EXP_PER_LEVEL = 20,       -- 升级经验倍率 (每一级所需经验 = 当前等级 * EXP_PER_LEVEL)
 
     -- 6. 关卡(Stage)与遭遇配置中心
     STAGES = {

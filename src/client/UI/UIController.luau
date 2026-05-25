@@ -44,7 +44,7 @@ function UIController.Start()
 		local atk = player:GetAttribute("ATK") or 0
 		local lvl = player:GetAttribute("Level") or 1
 		local exp = player:GetAttribute("EXP") or 0
-		local requiredExp = player:GetAttribute("RequiredEXP") or (lvl * 10) 
+		local requiredExp = player:GetAttribute("RequiredEXP") or (lvl * Controllers.Config.EXP_PER_LEVEL) 
 		local inCombat = player:GetAttribute("InCombat") == true
       local currentStage = player:GetAttribute("CurrentStage") or 1
 
@@ -145,6 +145,8 @@ function UIController.Start()
 				statsLabel.Text = string.format("Lv.%d | ATK: %d", lvl, atk)
 			end
 		end
+
+      
 	end
 
 	-- 升级卡片 UI 控制模块
@@ -216,9 +218,9 @@ function UIController.Start()
 				
 				-- 增益池中依然保留了攻速，玩家可以抽到，但不会在屏幕上显示文本数值，全靠子弹射速直观感知
 				local buffPool = {
-					{ name = "攻击力大增", attr = "ATK", amount = 10, color = Color3.fromRGB(255, 100, 100) },
+					{ name = "攻击力提升", attr = "ATK", amount = 5, color = Color3.fromRGB(255, 100, 100) },
 					{ name = "攻速提升", attr = "ASPD", amount = 0.5, color = Color3.fromRGB(100, 255, 100) },
-					{ name = "恢复生命", attr = "HP", amount = 50, color = Color3.fromRGB(100, 255, 255) },
+					{ name = "最大生命", attr = "HP", amount = 10, color = Color3.fromRGB(100, 255, 255) },
 					{ name = "小幅全能", attr = "ALL", amount = 0, color = Color3.fromRGB(255, 215, 0) },
                { name = "磁力范围", attr = "MagnetRadius", amount = 5, color = Color3.fromRGB(180, 100, 255) }
 				}
@@ -254,6 +256,76 @@ function UIController.Start()
 		end)
 	end
 
+   -- 商店 UI 初始化函数
+	   local function setupShopUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI")
+		local shopPanel = mainUI:WaitForChild("ShopPanel", 5)
+		if not shopPanel then return end
+
+		-- 价格计算公式（与服务端保持绝对一致）
+		local function getCost(base, multi, level)
+			return math.floor(base * (multi ^ level))
+		end
+
+		-- 刷新商店文本显示
+		local function refreshShopText()
+			local lvlHP = player:GetAttribute("Talent_HP") or 0
+			local lvlATK = player:GetAttribute("Talent_ATK") or 0
+			local lvlASPD = player:GetAttribute("Talent_ASPD") or 0
+			
+			local btnHp = shopPanel:FindFirstChild("BtnBuyHP")
+			if btnHp and btnHp:FindFirstChild("TextLabel") then
+				btnHp.TextLabel.Text = "血量强化 Lv." .. lvlHP .. "\n金币: " .. getCost(50, 1.5, lvlHP)
+			end
+			
+			local btnAtk = shopPanel:FindFirstChild("BtnBuyATK")
+			if btnAtk and btnAtk:FindFirstChild("TextLabel") then
+				btnAtk.TextLabel.Text = "攻击强化 Lv." .. lvlATK .. "\n金币: " .. getCost(100, 2.0, lvlATK)
+			end
+
+			local btnAspd = shopPanel:FindFirstChild("BtnBuyASPD")
+			if btnAspd and btnAspd:FindFirstChild("TextLabel") then
+				btnAspd.TextLabel.Text = "攻速强化 Lv." .. lvlASPD .. "\n金币: " .. getCost(200, 2.5, lvlASPD)
+			end
+		end
+
+		-- 当玩家金币或者局外天赋等级变动时，实时计算并刷新商店界面价格
+		player.AttributeChanged:Connect(function(attr)
+			if attr == "Coins" or string.match(attr, "Talent_") then
+				refreshShopText()
+			end
+		end)
+
+		-- 监听商店开关状态
+		player:GetAttributeChangedSignal("IsShopOpen"):Connect(function()
+			shopPanel.Visible = player:GetAttribute("IsShopOpen") == true
+			if shopPanel.Visible then refreshShopText() end
+		end)
+
+		-- 绑定关闭面板按钮
+		local closeBtn = shopPanel:FindFirstChild("CloseButton")
+		if closeBtn then
+			closeBtn.Activated:Connect(function()
+				player:SetAttribute("IsShopOpen", false)
+			end)
+		end
+
+		-- 获取网络信道，绑定购买按钮的点击发包协议
+		local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+		local buyEvent = remotes:WaitForChild("BuyTalent")
+
+		if shopPanel:FindFirstChild("BtnBuyHP") then
+			shopPanel.BtnBuyHP.Activated:Connect(function() buyEvent:FireServer("Talent_HP") end)
+		end
+		if shopPanel:FindFirstChild("BtnBuyATK") then
+			shopPanel.BtnBuyATK.Activated:Connect(function() buyEvent:FireServer("Talent_ATK") end)
+		end
+		if shopPanel:FindFirstChild("BtnBuyASPD") then
+			shopPanel.BtnBuyASPD.Activated:Connect(function() buyEvent:FireServer("Talent_ASPD") end)
+		end
+	end
+
 	local function bindExitButton()
 		local playerGui = player:FindFirstChild("PlayerGui")
 		if not playerGui then return end
@@ -282,13 +354,16 @@ function UIController.Start()
 		local playerGui = player:WaitForChild("PlayerGui")
 		playerGui:WaitForChild("MainUI", 5)
 		playerGui:WaitForChild("CharacterStatsUI", 5) 
+		-- 1. 铺设开局初始数据渲染面
 		updateUI()
-		bindExitButton()
+		-- 2. 依次加载且仅加载一次各个独立的交互面板初始化，完成安全的底层网络绑定
 		setupLevelUpUI() 
+		setupShopUI() 
 	end)
 
+	-- 全局属性改变触发器
 	player.AttributeChanged:Connect(function(attributeName)
-		updateUI()
+		updateUI() -- 属性一变，只驱动轻量级的渲染，绝不重复绑定事件
 	end)
 	
 	player.CharacterAdded:Connect(function(newCharacter)

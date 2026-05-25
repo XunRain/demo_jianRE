@@ -8,6 +8,9 @@ local PlayerDataStore = DataStoreService:GetDataStore("GameData_V1")
 local Services -- 全局服务引用指针
 local DEFAULT_STATS = {
 	Coins = 0, -- 局外永久金币底模
+    Talent_HP = 0,   -- 血量强化等级
+	Talent_ATK = 0,  -- 攻击强化等级
+	Talent_ASPD = 0, -- 攻速强化等级
 }
 
 function DataManager.Init(deps)
@@ -47,7 +50,10 @@ end
 -- ==========================================
 function DataManager.SavePlayerData(player)
 	local dataToSave = {
-		Coins = player:GetAttribute("Coins") or 0
+		Coins = player:GetAttribute("Coins") or 0,
+		Talent_HP = player:GetAttribute("Talent_HP") or 0,
+		Talent_ATK = player:GetAttribute("Talent_ATK") or 0,
+		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
 	}
 
 	local success, err = pcall(function()

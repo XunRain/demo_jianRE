@@ -19,6 +19,7 @@ end
 function GameController.Start()
 	-- 初始化挂载大厅交互触发器
 	GameController.SetupStartButton()
+	GameController.SetupNPC()
 	
 	-- 统一的角色重生/复活处理核心函数（彻底收拢生命周期，防止属性回厅变负数）
 	local function onCharacterAdded(newCharacter)
@@ -60,16 +61,18 @@ end
 -- 重置玩家属性至配置的基础安全数值
 function GameController.ResetPlayerStats()
 	local Config = Controllers.Config
-	player:SetAttribute("MaxHP", Config.BASE_HP)
-	player:SetAttribute("HP", Config.BASE_HP)
-	player:SetAttribute("ATK", Config.BASE_ATK)
-	player:SetAttribute("ASPD", Config.BASE_ASPD)
+	local startingStats = Controllers.Progression.CalculateStartingStats()
+
+	player:SetAttribute("MaxHP", startingStats.MaxHP)
+	player:SetAttribute("HP", startingStats.MaxHP)
+	player:SetAttribute("ATK", startingStats.ATK)
+	player:SetAttribute("ASPD", startingStats.ASPD)
 	player:SetAttribute("Level", Config.BASE_LEVEL)
 	player:SetAttribute("EXP", Config.BASE_EXP)
-	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * 10)
+	
+	-- 使用配置表计算开局升第 2 级所需的初始经验
+	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)
 	player:SetAttribute("IsLevelingUp", false)
-	player:SetAttribute("MagnetRadius", Config.MAGNET_RADIUS)
-	player:SetAttribute("CurrentStage", 1)
 end
 
 -- 触发单局跑酷战斗开局
@@ -134,4 +137,21 @@ function GameController.SetupStartButton()
 	end)
 end
 
+-- NPC 绑定逻辑
+function GameController.SetupNPC()
+	task.spawn(function()
+		local npc = Workspace:WaitForChild("ShopNPC", 10)
+		if npc then
+			local prompt = npc:FindFirstChildOfClass("ProximityPrompt")
+			if prompt then
+				prompt.Triggered:Connect(function(triggeringPlayer)
+					if triggeringPlayer == player and not GameController.IsCombatActive then
+						-- 告诉 UI 系统：玩家打开了商店
+						player:SetAttribute("IsShopOpen", true)
+					end
+				end)
+			end
+		end
+	end)
+end
 return GameController

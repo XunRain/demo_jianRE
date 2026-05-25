@@ -40,6 +40,37 @@ function NetworkManager.Start()
 		local currentCoins = player:GetAttribute("Coins") or 0
 		player:SetAttribute("Coins", currentCoins + amount)
 	end)
+
+
+    -- 注册购买天赋的网络信道
+	local buyTalentEvent = remotes:FindFirstChild("BuyTalent") or Instance.new("RemoteEvent", remotes)
+	buyTalentEvent.Name = "BuyTalent"
+
+	-- 天赋价格配置 (基础价格 与 每次升级的价格乘数)
+	local TALENT_COSTS = {
+		Talent_HP = { base = 50, multi = 1.5 },
+		Talent_ATK = { base = 100, multi = 2.0 },
+		Talent_ASPD = { base = 200, multi = 2.5 }
+	}
+
+	-- 监听客户端的购买请求
+	buyTalentEvent.OnServerEvent:Connect(function(player, talentName)
+		local costConfig = TALENT_COSTS[talentName]
+		if not costConfig then return end -- 防止发送非法天赋名
+
+		local currentLevel = player:GetAttribute(talentName) or 0
+		local currentCoins = player:GetAttribute("Coins") or 0
+
+		-- 计算当前等级需要的真实金币：基础价格 * (乘数 ^ 当前等级)
+		local cost = math.floor(costConfig.base * (costConfig.multi ^ currentLevel))
+
+		-- 钱够就扣钱，加等级（服务端修改会自动下发给客户端）
+		if currentCoins >= cost then
+			player:SetAttribute("Coins", currentCoins - cost)
+			player:SetAttribute(talentName, currentLevel + 1)
+			print(player.Name .. " 成功购买了 " .. talentName .. " Lv." .. (currentLevel + 1))
+		end
+	end)
 end
 
 return NetworkManager
