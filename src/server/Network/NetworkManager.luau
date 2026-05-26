@@ -29,9 +29,7 @@ function NetworkManager.Start()
 		addCoinEvent.Parent = remotes
 	end
 
-	-- ==========================================
 	-- 网络监听协议族
-	-- ==========================================
 	-- 协议 A：处理客户端发来的拾取金币请求
 	addCoinEvent.OnServerEvent:Connect(function(player, amount)
 		-- 安全网闸：过滤各种非法数值，防止作弊刷钱
@@ -67,6 +65,47 @@ function NetworkManager.Start()
 			player:SetAttribute("Coins", currentCoins - cost)
 			player:SetAttribute(talentId, currentLevel + 1)
 			print(string.format("%s 成功购买 %s Lv.%d (花费: %d)", player.Name, talentConfig.Name, currentLevel + 1, cost))
+		end
+	end)
+
+
+    -- 宠物抽卡与装备宠物
+    local HttpService = game:GetService("HttpService")
+
+	-- 1. 抽卡请求 (使用 RemoteFunction，因为需要向客户端返回抽到了什么)
+	local rollPetRF = remotes:FindFirstChild("RollPet") or Instance.new("RemoteFunction", remotes)
+	rollPetRF.Name = "RollPet"
+	
+	rollPetRF.OnServerInvoke = function(player)
+		local coins = player:GetAttribute("Coins") or 0
+		if coins >= GameConfig.PET_GACHA_COST then
+			-- 扣钱
+			player:SetAttribute("Coins", coins - GameConfig.PET_GACHA_COST)
+			
+			-- 随机出货
+			local pool = GameConfig.PET_POOL
+			local resultId = pool[math.random(1, #pool)]
+			
+			-- 解析 JSON 背包 -> 塞入新宠物 -> 重新压成 JSON 存入玩家属性
+			local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+			table.insert(owned, resultId)
+			player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
+			
+			print(player.Name .. " 抽中了宠物: " .. resultId)
+			return resultId -- 将抽奖结果返回给客户端用于展示特效
+		end
+		return nil
+	end
+
+	-- 2. 装备宠物请求
+	local equipPetEvent = remotes:FindFirstChild("EquipPet") or Instance.new("RemoteEvent", remotes)
+	equipPetEvent.Name = "EquipPet"
+	
+	equipPetEvent.OnServerEvent:Connect(function(player, petId)
+		local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+		-- 校验是否真的拥有该宠物（防外挂）
+		if table.find(owned, petId) then
+			player:SetAttribute("EquippedPet", petId)
 		end
 	end)
 end

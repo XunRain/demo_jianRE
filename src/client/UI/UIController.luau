@@ -2,6 +2,8 @@
 -- 屏幕 2D UI 与 角色常驻 3D 头顶 UI 控制器
 local UIController = {}
 
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
@@ -60,6 +62,19 @@ function UIController.Start()
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
 				exitButton.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
+			end
+
+         -- 大厅专属 UI 的战斗隔离控制
+			-- 1. 进战斗后隐藏“打开宠物背包”按钮
+			local openBagBtn = mainUI:FindFirstChild("BtnOpenPetBag")
+			if openBagBtn then
+				openBagBtn.Visible = not inCombat -- 只有不在战斗中（大厅状态）才显示
+			end
+			
+			-- 2. 如果玩家开着背包直接冲进了跑道门，强制关掉面板
+			local petBagPanel = mainUI:FindFirstChild("PetBagPanel")
+			if petBagPanel and inCombat then
+				petBagPanel.Visible = false
 			end
 
          -- 关卡文本 UI 动态控制与自动兜底
@@ -319,6 +334,200 @@ function UIController.Start()
 		end
 	end
 
+	local HttpService = game:GetService("HttpService")
+
+	-- =======================================================
+	-- 【重构版】：宠物背包 UI (完全对接 Studio 美术控件)
+	-- =======================================================
+	local function setupPetBagUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI")
+		
+		-- 等待美术在 Studio 中建好的控件
+		local openBagBtn = mainUI:WaitForChild("BtnOpenPetBag", 5)
+		local bagPanel = mainUI:WaitForChild("PetBagPanel", 5)
+		if not openBagBtn or not bagPanel then 
+			warn("未找到宠物背包 UI 控件，请确保名字为 BtnOpenPetBag 和 PetBagPanel")
+			return 
+		end
+		
+		local closeBtn = bagPanel:WaitForChild("BtnClose")
+		local petList = bagPanel:WaitForChild("PetList")
+		local petTemplate = petList:WaitForChild("PetItemTemplate") 
+
+		-- 刷新背包列表 (带同名宠物堆叠优化)
+		local function refreshBag()
+			-- 清理旧的宠物条目 (保留模板和自动排版组件)
+			for _, child in ipairs(petList:GetChildren()) do
+				if child:IsA("GuiButton") and child ~= petTemplate then 
+					child:Destroy() 
+				end
+			end
+			
+			local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+			local equipped = player:GetAttribute("EquippedPet") or ""
+
+			-- =======================================================
+			-- 【核心优化】：统计同种宠物的数量 (将一维数组转为计数字典)
+			-- =======================================================
+			local petCounts = {}
+			for _, petId in ipairs(owned) do
+				petCounts[petId] = (petCounts[petId] or 0) + 1
+			end
+
+			-- 遍历统计好的字典来生成 UI
+			for petId, count in pairs(petCounts) do
+				local petConfig = Controllers.Config.PETS[petId]
+				if petConfig then
+					local btn = petTemplate:Clone()
+					btn.Visible = true 
+					btn.Parent = petList
+					
+					-- 状态与文本组装
+					local status = (equipped == petId) and "[出战中] " or ""
+					-- 如果数量大于 1，则追加 "x数量" 后缀
+					local countText = (count > 1) and (" x" .. count) or "" 
+					
+					btn.Text = status .. petConfig.Name .. countText .. " (ATK:" .. petConfig.ATK .. ")"
+					
+					-- 简单的状态反馈
+					btn.BackgroundColor3 = (equipped == petId) and Color3.fromRGB(100, 255, 100) or petTemplate.BackgroundColor3
+					
+					-- 点击装备宠物
+					btn.Activated:Connect(function()
+						local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+						remotes:WaitForChild("EquipPet"):FireServer(petId)
+					end)
+				end
+			end
+		end
+
+		openBagBtn.Activated:Connect(function()
+			bagPanel.Visible = not bagPanel.Visible
+			if bagPanel.Visible then refreshBag() end
+		end)
+		closeBtn.Activated:Connect(function() bagPanel.Visible = false end)
+		
+		player:GetAttributeChangedSignal("EquippedPet"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+	end
+
+
+	-- =======================================================
+	-- 【重构版】：3D ViewportFrame 宠物蛋破壳动画 (对接 Studio)
+	-- =======================================================
+	local function setupPetHatching()
+		local eggPart = Workspace:WaitForChild("PetEgg", 10)
+		if not eggPart then return end
+		local prompt = eggPart:FindFirstChildOfClass("ProximityPrompt") or Instance.new("ProximityPrompt", eggPart)
+      prompt.ActionText = "花费 " .. tostring(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
+		
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI")
+		
+		-- 等待美术做好的全屏抽卡界面
+		local hatchScreen = mainUI:WaitForChild("HatchScreen", 5)
+		if not hatchScreen then return end
+		
+		local viewport = hatchScreen:WaitForChild("PetViewport")
+		local clickArea = hatchScreen:WaitForChild("BtnClickArea")
+		local tipText = hatchScreen:WaitForChild("TipText")
+		
+		local ReplicatedStorage = game:GetService("ReplicatedStorage")
+		local petModels = ReplicatedStorage:WaitForChild("Pets") 
+		
+		-- ViewportFrame 的摄像机必须用代码动态创建并绑定，不然容易出 Bug
+		local camera = Instance.new("Camera")
+		camera.FieldOfView = 60
+		viewport.CurrentCamera = camera
+		
+		local clickCount = 0
+		local isHatching = false
+		local current3DModel = nil
+		local spinConnection = nil 
+		
+		local function clearViewport()
+			if current3DModel then current3DModel:Destroy() end
+			if spinConnection then spinConnection:Disconnect() end
+		end
+		
+		prompt.Triggered:Connect(function(triggeringPlayer)
+			if triggeringPlayer ~= player or isHatching then return end
+			local coins = player:GetAttribute("Coins") or 0
+			if coins < Controllers.Config.PET_GACHA_COST then
+				print("金币不足！") return
+			end
+			
+			isHatching = true
+			clearViewport()
+			
+			local remotes = ReplicatedStorage:WaitForChild("Remotes")
+			local resultPetId = remotes:WaitForChild("RollPet"):InvokeServer()
+			
+			-- 挂载 3D 蛋模型
+			local eggTemplate = petModels:FindFirstChild("Egg")
+			if eggTemplate then
+				current3DModel = eggTemplate:Clone()
+				current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
+				current3DModel.Parent = viewport
+				camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, 6), Vector3.new(0, 0, 0))
+			end
+			
+			hatchScreen.Visible = true
+			clickCount = 0
+			tipText.Text = "疯狂点击蛋壳使其破裂！"
+			tipText.TextColor3 = Color3.new(1,1,1)
+			
+			local clickConn
+			clickConn = clickArea.Activated:Connect(function()
+				clickCount = clickCount + 1
+				
+				-- 物理晃动反馈
+				if current3DModel and current3DModel.PrimaryPart then
+					local angle = (clickCount % 2 == 0) and 15 or -15
+					local goalCFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(angle))
+					local tween = TweenService:Create(current3DModel.PrimaryPart, TweenInfo.new(0.08, Enum.EasingStyle.Bounce), {CFrame = goalCFrame})
+					tween:Play()
+				end
+				
+				-- 破壳！
+				if clickCount >= 5 then
+					clickConn:Disconnect() 
+					clearViewport()
+					
+					if resultPetId then
+						local petTemplate = petModels:FindFirstChild(resultPetId)
+						local petData = Controllers.Config.PETS[resultPetId]
+						
+						if petTemplate and petData then
+							current3DModel = petTemplate:Clone()
+							current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
+							current3DModel.Parent = viewport
+							
+							tipText.Text = string.format("恭喜获得 %s (%s)\nATK: %d | ASPD: %s", petData.Rarity, petData.Name, petData.ATK, tostring(petData.ASPD))
+							tipText.TextColor3 = petData.Color
+							
+							-- 匀速自转
+							local rotationY = 0
+							spinConnection = RunService.RenderStepped:Connect(function(dt)
+								if current3DModel and current3DModel.PrimaryPart then
+									rotationY = rotationY + math.rad(45 * dt)
+									current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0) * CFrame.Angles(0, rotationY, 0))
+								end
+							end)
+						end
+					end
+					
+					task.wait(3) 
+					hatchScreen.Visible = false
+					isHatching = false
+					clearViewport()
+				end
+			end)
+		end)
+	end
+
 	local function bindExitButton()
 		local playerGui = player:FindFirstChild("PlayerGui")
 		if not playerGui then return end
@@ -352,6 +561,8 @@ function UIController.Start()
 		-- 2. 依次加载且仅加载一次各个独立的交互面板初始化，完成安全的底层网络绑定
 		setupLevelUpUI() 
 		setupShopUI() 
+      setupPetBagUI()
+      setupPetHatching()
 	end)
 
 	-- 全局属性改变触发器
@@ -373,6 +584,8 @@ function UIController.Start()
 			updateUI()
 		end)
 	end
+
+
 end
 
 return UIController

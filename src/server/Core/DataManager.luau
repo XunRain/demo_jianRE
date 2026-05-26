@@ -11,6 +11,10 @@ local DEFAULT_STATS = {
     Talent_HP = 0,   -- 血量强化等级
 	Talent_ATK = 0,  -- 攻击强化等级
 	Talent_ASPD = 0, -- 攻速强化等级
+
+    -- 宠物相关存档
+	OwnedPets_JSON = "[]", -- 用 JSON 字符串格式存储拥有的宠物数组
+	EquippedPet = "",      -- 当前上阵的宠物 ID
 }
 
 function DataManager.Init(deps)
@@ -54,6 +58,8 @@ function DataManager.SavePlayerData(player)
 		Talent_HP = player:GetAttribute("Talent_HP") or 0,
 		Talent_ATK = player:GetAttribute("Talent_ATK") or 0,
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
+        OwnedPets_JSON = player:GetAttribute("OwnedPets_JSON") or "[]",
+		EquippedPet = player:GetAttribute("EquippedPet") or "",
 	}
 
 	local success, err = pcall(function()

@@ -65,7 +65,9 @@ function CombatController.ShootProjectile()
 	bullet.Parent = localProjectiles
 
 	game.Debris:AddItem(bullet, Controllers.Config.BULLET_LIFETIME) 
-	table.insert(CombatController.ActiveBullets, { part = bullet })
+	-- 【修改】：记录子弹实体时，顺便带上玩家当前的攻击力！
+	local playerAtk = player:GetAttribute("ATK") or Controllers.Config.BASE_ATK
+	table.insert(CombatController.ActiveBullets, { part = bullet, damage = playerAtk })
 end
 
 function CombatController.ClearBullets()
@@ -101,7 +103,9 @@ function CombatController.CheckCollisions(rootPart)
 			if math.abs(bPos.X - ePos.X) < (eSize.X/2 + 1) and 
 			   math.abs(bPos.Z - ePos.Z) < (eSize.Z/2 + 2) then 
 				
-				e.hp = e.hp - playerAtk
+				-- 扣除的血量等于这颗子弹自身携带的伤害值，如果是 nil 兜底为玩家伤害
+				local dmg = b.damage or (player:GetAttribute("ATK") or Controllers.Config.BASE_ATK)
+				e.hp = e.hp - dmg
 				e.label.Text = tostring(e.hp)
 				
 				b.part:Destroy()

@@ -14,6 +14,7 @@ local Controllers = {
     Game        = require(script.Core:WaitForChild("GameController")),
     Player      = require(script.Core:WaitForChild("PlayerController")),
     Progression = require(script.Core:WaitForChild("ProgressionController")),
+	Pet 		= require(script.Core:WaitForChild("PetController")),
     
     -- 战斗与场景层
     Combat      = require(script.Combat:WaitForChild("CombatController")),

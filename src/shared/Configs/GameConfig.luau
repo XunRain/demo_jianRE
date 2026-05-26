@@ -18,8 +18,11 @@ local GameConfig = {
     -- CAMERA_LOOK_OFFSET = Vector3.new(0, 2, -15),
 
 	-- 高空无人机镜头
-	CAMERA_OFFSET = Vector3.new(0, 48, 10),
-    CAMERA_LOOK_OFFSET = Vector3.new(0, 10, -20),
+	-- CAMERA_OFFSET = Vector3.new(0, 48, 10),
+    -- CAMERA_LOOK_OFFSET = Vector3.new(0, 10, -20),
+
+    CAMERA_OFFSET = Vector3.new(0, 40, 15),
+    CAMERA_LOOK_OFFSET = Vector3.new(0, 8, -18),
 
     -- 4. 地图与跑道生成配置
     TRACK_LENGTH = 120,       -- 单块跑道长度
@@ -111,6 +114,39 @@ local GameConfig = {
 			CostMulti = 2.5,
 			StatIncrease = 0.15, -- 每级增加 0.15 攻速
 		}
+	},
+
+    -- 11. 宠物与抽卡系统配置
+	PET_GACHA_COST = 1, -- 抽一次宠物消耗的金币
+	PETS = {
+		["Slime"] = { 
+			Name = "风精灵", 
+			Rarity = "普通", 
+			ATK = 5,      -- 宠物固定攻击力
+			ASPD = 1.0,   -- 宠物固定攻速 (1秒1发)
+			Color = Color3.fromRGB(150, 255, 150) -- 暂时代替模型的颜色
+		},
+		["Dragon"] = { 
+			Name = "小火龙", 
+			Rarity = "稀有", 
+			ATK = 15, 
+			ASPD = 1.5, 
+			Color = Color3.fromRGB(255, 100, 100) 
+		},
+		["Angel"] = { 
+			Name = "大天使", 
+			Rarity = "史诗", 
+			ATK = 40, 
+			ASPD = 2.5, 
+			Color = Color3.fromRGB(255, 215, 0) 
+		}
+	},
+	
+	-- 简易抽卡权重池 (普通概率高，史诗概率低)
+	PET_POOL = {
+		"Slime", "Slime", "Slime", "Slime", "Slime",
+		"Dragon", "Dragon", "Dragon",
+		"Angel"
 	}
     
 }
