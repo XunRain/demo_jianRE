@@ -69,6 +69,7 @@ function GameController.ResetPlayerStats()
 	player:SetAttribute("ASPD", startingStats.ASPD)
 	player:SetAttribute("Level", Config.BASE_LEVEL)
 	player:SetAttribute("EXP", Config.BASE_EXP)
+	player:SetAttribute("MagnetRadius", Config.MAGNET_RADIUS)
 	
 	-- 使用配置表计算开局升第 2 级所需的初始经验
 	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)

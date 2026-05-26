@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
 
 local Controllers -- 全局依赖指针
 
@@ -279,21 +280,42 @@ function UIController.Start()
 		if not shopPanel then return end
 
 		local Config = Controllers.Config -- 拿到全局配置
+		
+		-- 等待美术做好的滑动列表和模板
+		local shopList = shopPanel:WaitForChild("ShopList")
+		local itemTemplate = shopPanel:WaitForChild("ShopItemTemplate")
 
-		-- 刷新商店文本显示 (完全数据驱动！)
-		local function refreshShopText()
+		-- 刷新商店文本显示 (支持滑动列表的智能增量更新)
+		local function refreshShopUI()
 			for talentId, talentData in pairs(Config.TALENTS) do
-				-- 自动推断按钮名字：比如 Talent_HP 对应 BtnBuyHP
-				local suffix = string.gsub(talentId, "Talent_", "")
-				local btnName = "BtnBuy" .. suffix
-				local btn = shopPanel:FindFirstChild(btnName)
+				local btnName = "Btn_" .. talentId
+				local btn = shopList:FindFirstChild(btnName)
 				
-				if btn and btn:FindFirstChild("TextLabel") then
-					local currentLevel = player:GetAttribute(talentId) or 0
-					local cost = Config.GetTalentCost(talentId, currentLevel)
+				local currentLevel = player:GetAttribute(talentId) or 0
+				local cost = Config.GetTalentCost(talentId, currentLevel)
+
+				-- 如果这个商品的按钮还不存在，就克隆模板并绑定购买事件
+				if not btn then
+					btn = itemTemplate:Clone()
+					btn.Name = btnName
+					btn.Visible = true 
+					btn.Parent = shopList
 					
-					-- 自动套用 Config 里的天赋名称和算出的动态价格
-					btn.TextLabel.Text = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. cost
+					-- 绑定购买事件
+					btn.Activated:Connect(function()
+						local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+						remotes:WaitForChild("BuyTalent"):FireServer(talentId)
+					end)
+				end
+				
+				-- 刷新价格与等级文本 (兼容模板内部有 TextLabel 或直接使用 Button 的 Text)
+				local textLabel = btn:FindFirstChild("TextLabel")
+				local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. cost
+				
+				if textLabel and textLabel:IsA("TextLabel") then
+					textLabel.Text = displayText
+				else
+					btn.Text = displayText
 				end
 			end
 		end
@@ -301,14 +323,14 @@ function UIController.Start()
 		-- 当玩家金币或者局外天赋等级变动时，实时计算并刷新商店界面价格
 		player.AttributeChanged:Connect(function(attr)
 			if attr == "Coins" or string.match(attr, "Talent_") then
-				refreshShopText()
+				if shopPanel.Visible then refreshShopUI() end
 			end
 		end)
 
 		-- 监听商店开关状态
 		player:GetAttributeChangedSignal("IsShopOpen"):Connect(function()
 			shopPanel.Visible = player:GetAttribute("IsShopOpen") == true
-			if shopPanel.Visible then refreshShopText() end
+			if shopPanel.Visible then refreshShopUI() end
 		end)
 
 		-- 绑定关闭面板按钮
@@ -318,23 +340,8 @@ function UIController.Start()
 				player:SetAttribute("IsShopOpen", false)
 			end)
 		end
-
-		-- 获取网络信道，绑定购买按钮的点击发包协议
-		local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-		local buyEvent = remotes:WaitForChild("BuyTalent")
-
-		if shopPanel:FindFirstChild("BtnBuyHP") then
-			shopPanel.BtnBuyHP.Activated:Connect(function() buyEvent:FireServer("Talent_HP") end)
-		end
-		if shopPanel:FindFirstChild("BtnBuyATK") then
-			shopPanel.BtnBuyATK.Activated:Connect(function() buyEvent:FireServer("Talent_ATK") end)
-		end
-		if shopPanel:FindFirstChild("BtnBuyASPD") then
-			shopPanel.BtnBuyASPD.Activated:Connect(function() buyEvent:FireServer("Talent_ASPD") end)
-		end
 	end
 
-	local HttpService = game:GetService("HttpService")
 
 	-- =======================================================
 	-- 【双区重构版】：宠物背包 UI (对接 Studio 栅格布局)
@@ -506,7 +513,7 @@ function UIController.Start()
 				current3DModel = eggTemplate:Clone()
 				current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
 				current3DModel.Parent = viewport
-				camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, 6), Vector3.new(0, 0, 0))
+				camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -6), Vector3.new(0, 0, 0))
 			end
 			
 			hatchScreen.Visible = true
@@ -518,15 +525,10 @@ function UIController.Start()
 			clickConn = clickArea.Activated:Connect(function()
 				clickCount = clickCount + 1
 				
-				-- 物理晃动反馈
-				if current3DModel and current3DModel.PrimaryPart then
-					local angle = (clickCount % 2 == 0) and 15 or -15
-					local goalCFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(angle))
-					local tween = TweenService:Create(current3DModel.PrimaryPart, TweenInfo.new(0.08, Enum.EasingStyle.Bounce), {CFrame = goalCFrame})
-					tween:Play()
-				end
+				-- 1. 呼叫 VFX 模块处理物理晃动反馈
+				Controllers.VFX.PlayEggShakeVFX(current3DModel)
 				
-				-- 破壳！
+				-- 2. 破壳！
 				if clickCount >= 5 then
 					clickConn:Disconnect() 
 					clearViewport()
@@ -543,14 +545,8 @@ function UIController.Start()
 							tipText.Text = string.format("恭喜获得 %s (%s)\nATK: %d | ASPD: %s", petData.Name, petData.Rarity, petData.ATK, tostring(petData.ASPD))
 							tipText.TextColor3 = petData.Color
 							
-							-- 匀速自转
-							local rotationY = 0
-							spinConnection = RunService.RenderStepped:Connect(function(dt)
-								if current3DModel and current3DModel.PrimaryPart then
-									rotationY = rotationY + math.rad(45 * dt)
-									current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0) * CFrame.Angles(0, rotationY, 0))
-								end
-							end)
+							-- 3. 呼叫 VFX 模块接管匀速自转动画，并把循环指针存起来以便清理
+							spinConnection = Controllers.VFX.StartPetSpinVFX(current3DModel)
 						end
 					end
 					

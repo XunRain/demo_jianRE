@@ -128,20 +128,27 @@ end
 -- 生成单扇属性门 (随机决定是红门减益还是绿门增益)
 local function CreateGate(xOffset, zPos, trackStartX, trackStartY)
 	local Config = Controllers.Config
-	local isBuff = math.random() > 0.3 -- 70%概率是增益
+	-- 安全锁定当前正在跑的关卡配置，若处于开局未加载状态则拿第 1 关兜底
+	local currentStageConfig = stageConfig or Config.STAGES[1]
+	local isBuff = math.random() > 0.5 -- 50%概率是增益
 	local attributes = {"ATK", "ASPD", "HP"}
 	local attr = attributes[math.random(1, #attributes)]
 	
-	-- 根据不同属性，使用不同的随机逻辑
+	-- 根据不同属性，使用对应关卡的随机范围逻辑
 	local amount = 0
 	if attr == "HP" then
-		amount = math.random(Config.GATE_HP_MIN, Config.GATE_HP_MAX)
+		-- 从当前关卡配置读取
+		amount = math.random(currentStageConfig.GATE_HP_MIN, currentStageConfig.GATE_HP_MAX)
 	elseif attr == "ATK" then
-		amount = math.random(Config.GATE_ATK_MIN, Config.GATE_ATK_MAX)
+		-- 从当前关卡配置读取
+		amount = math.random(currentStageConfig.GATE_ATK_MIN, currentStageConfig.GATE_ATK_MAX)
 	elseif attr == "ASPD" then
-		local rawVal = Config.GATE_ASPD_MIN + math.random() * (Config.GATE_ASPD_MAX - Config.GATE_ASPD_MIN)
+		-- 从当前关卡配置读取攻速范围，并保留原有的 1 位小数精度
+		local minAspd = currentStageConfig.GATE_ASPD_MIN
+		local maxAspd = currentStageConfig.GATE_ASPD_MAX
+		local rawVal = minAspd + math.random() * (maxAspd - minAspd)
 		amount = math.floor(rawVal * 10) / 10 
-		if amount == 0 then amount = Config.GATE_ASPD_MIN end 
+		if amount == 0 then amount = minAspd end 
 	end
 
 	if not isBuff then amount = -amount end

@@ -52,31 +52,46 @@ local GameConfig = {
             
             BasicHP = 30,            -- 普通怪 30 血
             EliteHP = 150,           -- 精英怪 150 血
-            BossHP = 500,           -- Boss 500 血
+            BossHP = 500,            -- Boss 500 血
+
+            -- 【新增关卡 1 属性门控制】：新手体验数值
+            GATE_HP_MIN = 10,  GATE_HP_MAX = 30,
+            GATE_ATK_MIN = 1,  GATE_ATK_MAX = 3,
+            GATE_ASPD_MIN = 0.2, GATE_ASPD_MAX = 0.6,
         },
         [2] = {
-            Length = 1500,           
-            GateInterval = 120,      
-            MobInterval = 80,        
-            MobsPerGroup = {3, 4},   
-            EliteCount = 2,          
-            HasBoss = true,           
+            Length = 1500,          
+            GateInterval = 120,     
+            MobInterval = 80,       
+            MobsPerGroup = {3, 4},  
+            EliteCount = 2,         
+            HasBoss = true,          
             
             BasicHP = 60,            -- 数值开始膨胀
-            EliteHP = 300,           
-            BossHP = 2500,           
+            EliteHP = 300,          
+            BossHP = 2500,          
+
+            -- 【新增关卡 2 属性门控制】：中等强化数值
+            GATE_HP_MIN = 25,  GATE_HP_MAX = 60,
+            GATE_ATK_MIN = 3,  GATE_ATK_MAX = 7,
+            GATE_ASPD_MIN = 0.4, GATE_ASPD_MAX = 1.0,
         },
         [3] = {
-            Length = 2000,           
-            GateInterval = 100,      
+            Length = 2000,          
+            GateInterval = 100,     
             MobInterval = 60,       
-            MobsPerGroup = {3, 5},   
-            EliteCount = 3,          
-            HasBoss = true,           
+            MobsPerGroup = {3, 5},  
+            EliteCount = 3,         
+            HasBoss = true,          
             
-            BasicHP = 120,           
-            EliteHP = 600,           
-            BossHP = 6000,           
+            BasicHP = 120,          
+            EliteHP = 600,          
+            BossHP = 6000,          
+
+            -- 【新增关卡 3 属性门控制】：终局高加成数值（对应高血量怪）
+            GATE_HP_MIN = 50,  GATE_HP_MAX = 150,
+            GATE_ATK_MIN = 6,  GATE_ATK_MAX = 15,
+            GATE_ASPD_MIN = 0.6, GATE_ASPD_MAX = 1.5,
         }
     },
 
@@ -113,6 +128,30 @@ local GameConfig = {
 			BaseCost = 200,
 			CostMulti = 2.5,
 			StatIncrease = 0.15, -- 每级增加 0.15 攻速
+		},
+        Talent_TEST_1 = {
+			Name = "测试1",
+			BaseCost = 150,      -- 初始价格 150
+			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
+			StatIncrease = 2,    -- 每级增加 2 点移速
+		},
+        Talent_TEST_2 = {
+			Name = "测试2",
+			BaseCost = 150,      -- 初始价格 150
+			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
+			StatIncrease = 2,    -- 每级增加 2 点移速
+		},
+        Talent_TEST_3 = {
+			Name = "测试3",
+			BaseCost = 150,      -- 初始价格 150
+			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
+			StatIncrease = 2,    -- 每级增加 2 点移速
+		},
+        Talent_TEST_4 = {
+			Name = "测试4",
+			BaseCost = 150,      -- 初始价格 150
+			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
+			StatIncrease = 2,    -- 每级增加 2 点移速
 		}
 	},
 
