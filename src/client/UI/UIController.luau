@@ -337,67 +337,98 @@ function UIController.Start()
 	local HttpService = game:GetService("HttpService")
 
 	-- =======================================================
-	-- 【重构版】：宠物背包 UI (完全对接 Studio 美术控件)
+	-- 【双区重构版】：宠物背包 UI (对接 Studio 栅格布局)
 	-- =======================================================
 	local function setupPetBagUI()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
 		
-		-- 等待美术在 Studio 中建好的控件
 		local openBagBtn = mainUI:WaitForChild("BtnOpenPetBag", 5)
 		local bagPanel = mainUI:WaitForChild("PetBagPanel", 5)
-		if not openBagBtn or not bagPanel then 
-			warn("未找到宠物背包 UI 控件，请确保名字为 BtnOpenPetBag 和 PetBagPanel")
-			return 
-		end
+		if not openBagBtn or not bagPanel then return end
 		
 		local closeBtn = bagPanel:WaitForChild("BtnClose")
 		local petList = bagPanel:WaitForChild("PetList")
-		local petTemplate = petList:WaitForChild("PetItemTemplate") 
+		
+		-- 获取刚才新建的两个独立栅格容器
+		local equippedContainer = petList:WaitForChild("EquippedContainer")
+		local standbyContainer = petList:WaitForChild("StandbyContainer")
+		
+		-- 获取放在 Panel 根目录的两个模板
+		local petTemplate = bagPanel:WaitForChild("PetItemTemplate") 
+		local emptySlotTemplate = bagPanel:WaitForChild("EmptySlotTemplate")
 
-		-- 刷新背包列表 (带同名宠物堆叠优化)
+		local MAX_EQUIP_SLOTS = 1 -- 目前只开放1个槽位，以后如果要拓展改这里就行
+
 		local function refreshBag()
-			-- 清理旧的宠物条目 (保留模板和自动排版组件)
-			for _, child in ipairs(petList:GetChildren()) do
-				if child:IsA("GuiButton") and child ~= petTemplate then 
-					child:Destroy() 
-				end
+			-- 安全清理两个容器内的旧 UI (千万别把 UIGridLayout 删了)
+			for _, child in ipairs(equippedContainer:GetChildren()) do
+				if not child:IsA("UIGridLayout") then child:Destroy() end
+			end
+			for _, child in ipairs(standbyContainer:GetChildren()) do
+				if not child:IsA("UIGridLayout") then child:Destroy() end
 			end
 			
 			local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
 			local equipped = player:GetAttribute("EquippedPet") or ""
 
-			-- =======================================================
-			-- 【核心优化】：统计同种宠物的数量 (将一维数组转为计数字典)
-			-- =======================================================
+			-- 统计同种宠物
 			local petCounts = {}
 			for _, petId in ipairs(owned) do
 				petCounts[petId] = (petCounts[petId] or 0) + 1
 			end
 
-			-- 遍历统计好的字典来生成 UI
+			-- ==========================================
+			-- 1. 渲染【出战区】
+			-- ==========================================
+			local equippedCount = 0
+			if equipped ~= "" and petCounts[equipped] and petCounts[equipped] > 0 then
+				equippedCount = 1
+				petCounts[equipped] = petCounts[equipped] - 1 -- 从待机区扣除1个
+				
+				local petConfig = Controllers.Config.PETS[equipped]
+				local btn = petTemplate:Clone()
+				btn.Visible = true 
+				btn.Parent = equippedContainer
+				
+				btn.Text = petConfig.Name .. "\n(出战中)"
+				btn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+				
+				-- 点击出战区的宠物：向服务器发送空字符串进行【卸下】
+				btn.Activated:Connect(function()
+					local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+					remotes:WaitForChild("EquipPet"):FireServer("")
+				end)
+			end
+
+			-- 补齐空槽位 (让 UI 显示出明显的虚线空槽感)
+			for i = equippedCount + 1, MAX_EQUIP_SLOTS do
+				local emptySlot = emptySlotTemplate:Clone()
+				emptySlot.Visible = true
+				emptySlot.Parent = equippedContainer
+			end
+
+			-- ==========================================
+			-- 2. 渲染【待机区】
+			-- ==========================================
 			for petId, count in pairs(petCounts) do
-				local petConfig = Controllers.Config.PETS[petId]
-				if petConfig then
-					local btn = petTemplate:Clone()
-					btn.Visible = true 
-					btn.Parent = petList
-					
-					-- 状态与文本组装
-					local status = (equipped == petId) and "[出战中] " or ""
-					-- 如果数量大于 1，则追加 "x数量" 后缀
-					local countText = (count > 1) and (" x" .. count) or "" 
-					
-					btn.Text = status .. petConfig.Name .. countText .. " (ATK:" .. petConfig.ATK .. ")"
-					
-					-- 简单的状态反馈
-					btn.BackgroundColor3 = (equipped == petId) and Color3.fromRGB(100, 255, 100) or petTemplate.BackgroundColor3
-					
-					-- 点击装备宠物
-					btn.Activated:Connect(function()
-						local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-						remotes:WaitForChild("EquipPet"):FireServer(petId)
-					end)
+				if count > 0 then -- 如果还有剩余宠物在待机
+					local petConfig = Controllers.Config.PETS[petId]
+					if petConfig then
+						local btn = petTemplate:Clone()
+						btn.Visible = true 
+						btn.Parent = standbyContainer
+						
+						local countText = (count > 1) and (" x" .. count) or "" 
+						btn.Text = petConfig.Name .. countText .. "\nATK:" .. petConfig.ATK
+						btn.BackgroundColor3 = petTemplate.BackgroundColor3
+						
+						-- 点击待机区的宠物：向服务器发送 petId 进行【替换出战】
+						btn.Activated:Connect(function()
+							local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+							remotes:WaitForChild("EquipPet"):FireServer(petId)
+						end)
+					end
 				end
 			end
 		end
@@ -408,7 +439,11 @@ function UIController.Start()
 		end)
 		closeBtn.Activated:Connect(function() bagPanel.Visible = false end)
 		
+		-- 装备发生变动、或者刚好抽到新宠物时，实时刷新面板
 		player:GetAttributeChangedSignal("EquippedPet"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+		player:GetAttributeChangedSignal("OwnedPets_JSON"):Connect(function()
 			if bagPanel.Visible then refreshBag() end
 		end)
 	end
@@ -505,7 +540,7 @@ function UIController.Start()
 							current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
 							current3DModel.Parent = viewport
 							
-							tipText.Text = string.format("恭喜获得 %s (%s)\nATK: %d | ASPD: %s", petData.Rarity, petData.Name, petData.ATK, tostring(petData.ASPD))
+							tipText.Text = string.format("恭喜获得 %s (%s)\nATK: %d | ASPD: %s", petData.Name, petData.Rarity, petData.ATK, tostring(petData.ASPD))
 							tipText.TextColor3 = petData.Color
 							
 							-- 匀速自转

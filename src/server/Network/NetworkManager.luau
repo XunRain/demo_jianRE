@@ -97,13 +97,19 @@ function NetworkManager.Start()
 		return nil
 	end
 
-	-- 2. 装备宠物请求
+	-- 2. 装备/卸下宠物请求
 	local equipPetEvent = remotes:FindFirstChild("EquipPet") or Instance.new("RemoteEvent", remotes)
 	equipPetEvent.Name = "EquipPet"
 	
 	equipPetEvent.OnServerEvent:Connect(function(player, petId)
+		-- 如果传过来的是空字符串，说明玩家点击了卸下宠物
+		if petId == "" then
+			player:SetAttribute("EquippedPet", "")
+			return
+		end
+
 		local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
-		-- 校验是否真的拥有该宠物（防外挂）
+		-- 校验是否真的拥有该宠物
 		if table.find(owned, petId) then
 			player:SetAttribute("EquippedPet", petId)
 		end
