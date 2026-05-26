@@ -15,6 +15,9 @@ local DEFAULT_STATS = {
     -- 宠物相关存档
 	OwnedPets_JSON = "[]", -- 用 JSON 字符串格式存储拥有的宠物数组
 	EquippedPet = "",      -- 当前上阵的宠物 ID
+
+    -- 记录玩家是否已经看过第二关的引导
+	HasSeenStage2Guide = false,
 }
 
 function DataManager.Init(deps)
@@ -60,6 +63,9 @@ function DataManager.SavePlayerData(player)
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
         OwnedPets_JSON = player:GetAttribute("OwnedPets_JSON") or "[]",
 		EquippedPet = player:GetAttribute("EquippedPet") or "",
+
+        -- 将第二关引导标记一起存入云端
+		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,
 	}
 
 	local success, err = pcall(function()

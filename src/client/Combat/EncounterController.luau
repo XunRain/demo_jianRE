@@ -126,11 +126,11 @@ function EncounterController.ResetPointers(startZ)
 end
 
 -- 生成单扇属性门 (随机决定是红门减益还是绿门增益)
-local function CreateGate(xOffset, zPos, trackStartX, trackStartY)
+local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	local Config = Controllers.Config
 	-- 安全锁定当前正在跑的关卡配置，若处于开局未加载状态则拿第 1 关兜底
 	local currentStageConfig = stageConfig or Config.STAGES[1]
-	local isBuff = math.random() > 0.5 -- 50%概率是增益
+
 	local attributes = {"ATK", "ASPD", "HP"}
 	local attr = attributes[math.random(1, #attributes)]
 	
@@ -175,48 +175,46 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY)
 	return { part = gate, attr = attr, amount = amount }
 end
 
--- 根据类型生成怪物 (蓝方块小怪 / 紫方块精英 / 红方块Boss)
--- 根据类型生成怪物 (血量完全由当前关卡配置决定)
+-- 根据类型生成怪物 (血量 = 关卡基础血量 * 距离动态倍率)
 local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackStartY)
 	local Config = Controllers.Config
 	local enemy = Instance.new("Part")
 	enemy.Anchored = true
 	enemy.CanCollide = false 
 	
-	-- 1. 获取成长系数（保留原本随距离微幅膨胀的机制，如果不需要也可以在下面把 hpMultiplier 删掉）
-	-- local distance = math.abs(zPos) 
-	-- local hpMultiplier = 1 + math.floor(distance / Config.ENEMY_HP_SCALE_DIST) * Config.ENEMY_HP_SCALE_RATE
+	-- 安全保护：如果超越了第 5 关，自动沿用最后一关 (第 5 关) 的环境配置
+	local currentStageConfig = stageConfig or Config.STAGES[#Config.STAGES]
 	
-	-- 安全保护：获取当前关卡的配置，如果没加载完则默认用第一关兜底
-	local currentStageConfig = stageConfig or Config.STAGES[1]
+	-- =======================================================
+	-- 【重新激活】：根据玩家跑过的绝对距离，无限放大怪物血量
+	-- =======================================================
+	local distance = math.abs(zPos) 
+	local hpMultiplier = 1 + math.floor(distance / Config.ENEMY_HP_SCALE_DIST) * Config.ENEMY_HP_SCALE_RATE
 	
-	-- 2. 核心修改：动态匹配血量变量
 	local hp = 0
 	if enemyType == "Basic" then
 		enemy.Size = Vector3.new(4, 4, 4)
 		enemy.Color = Color3.fromRGB(0, 0, 255) 
 		
-		-- 【修改】读取当前关卡的普通怪血量
+		-- 关卡基础血量 × 距离膨胀倍率
 		local baseHP = currentStageConfig.BasicHP or 30
-		hp = math.floor(baseHP) 
+		hp = math.floor(baseHP * hpMultiplier) 
 		
 	elseif enemyType == "Elite" then
 		enemy.Size = Vector3.new(Config.RUNWAY_LIMIT * 2, 8, 8) 
 		enemy.Color = Color3.fromRGB(128, 0, 128) 
 		
-		-- 【修改】读取当前关卡的精英怪血量
 		local baseHP = currentStageConfig.EliteHP or 150
-		hp = math.floor(baseHP) 
-		xOffset = 0 -- 强制居中
+		hp = math.floor(baseHP * hpMultiplier) 
+		xOffset = 0 
 		
 	elseif enemyType == "Boss" then
 		enemy.Size = Vector3.new(Config.RUNWAY_LIMIT * 2, 16, 16) 
 		enemy.Color = Color3.fromRGB(255, 0, 0) 
 		
-		-- 【修改】读取当前关卡的Boss血量
 		local baseHP = currentStageConfig.BossHP or 1000
-		hp = math.floor(baseHP) 
-		xOffset = 0 -- 强制居中
+		hp = math.floor(baseHP * hpMultiplier) 
+		xOffset = 0 
 	end
 	
 	enemy.Position = Vector3.new(trackStartX + xOffset, trackStartY + (enemy.Size.Y / 2), zPos)
@@ -260,8 +258,28 @@ function EncounterController.SpawnEncountersInBlock(startZ, endZ, trackStartX, t
 		-- 额外保护：哪怕算上避让，门也不能刷在 Boss 脸上。给关底留出 60 米的绝对空场！
 		if nextGateZ > stageEndZ + 60 then
 			local finalZ = GetSafeZ(nextGateZ, 20)
-			local leftGate = CreateGate(-Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY)
-			local rightGate = CreateGate(Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY)
+			
+			-- 安全锁定当前关卡配置，拿第一关配置或 0.5 兜底
+			local currentStageConfig = stageConfig
+			local buffChance = currentStageConfig.GateBuffChance or 0.5
+			
+			-- 【数据驱动】：根据当前关卡的 GateBuffChance 动态决定红绿门
+			local leftIsBuff = math.random() <= buffChance
+			local rightIsBuff = math.random() <= buffChance
+			
+			-- 强力防双红保底机制依然生效：如果运气极差双双随出红门，强制洗白一扇
+			if not leftIsBuff and not rightIsBuff then
+				if math.random() > 0.5 then
+					leftIsBuff = true
+				else
+					rightIsBuff = true
+				end
+			end
+			
+			-- 将判定好的状态传给生成函数
+			local leftGate = CreateGate(-Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY, leftIsBuff)
+			local rightGate = CreateGate(Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY, rightIsBuff)
+			
 			table.insert(EncounterController.ActiveGateGroups, { left = leftGate, right = rightGate, z = finalZ })
 		end
 		nextGateZ = nextGateZ - stageConfig.GateInterval

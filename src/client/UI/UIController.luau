@@ -496,9 +496,14 @@ function UIController.Start()
 		
 		prompt.Triggered:Connect(function(triggeringPlayer)
 			if triggeringPlayer ~= player or isHatching then return end
+
+         -- 玩家响应了引导点击抽卡，清除光束！
+			player:SetAttribute("NeedsGuide", false)
+			Controllers.VFX.ClearGuide()
+
 			local coins = player:GetAttribute("Coins") or 0
 			if coins < Controllers.Config.PET_GACHA_COST then
-				print("金币不足！") return
+				print("金币不足！"); return
 			end
 			
 			isHatching = true

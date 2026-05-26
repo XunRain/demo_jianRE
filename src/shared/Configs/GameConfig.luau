@@ -5,6 +5,7 @@
 local GameConfig = {
     -- 1. 物理与移动控制
     RUN_SPEED = 25,           -- 跑酷基础速度
+    RUN_SPEED_INCREMENT = 2,  -- 每过一关，移速增加 2 点
     LATERAL_SPEED = 30,       -- 左右移动速度
     RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
 
@@ -22,7 +23,7 @@ local GameConfig = {
     -- CAMERA_LOOK_OFFSET = Vector3.new(0, 10, -20),
 
     CAMERA_OFFSET = Vector3.new(0, 40, 15),
-    CAMERA_LOOK_OFFSET = Vector3.new(0, 8, -18),
+    CAMERA_LOOK_OFFSET = Vector3.new(0, 8, -15),
 
     -- 4. 地图与跑道生成配置
     TRACK_LENGTH = 120,       -- 单块跑道长度
@@ -40,142 +41,165 @@ local GameConfig = {
     BASE_EXP = 0,
     EXP_PER_LEVEL = 20,       -- 升级经验倍率 (每一级所需经验 = 当前等级 * EXP_PER_LEVEL)
 
-    -- 6. 关卡(Stage)与遭遇配置中心
+-- 6. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
     STAGES = {
         [1] = {
-            Length = 1000,           -- 本关全长 1000 米
-            GateInterval = 150,      -- 每 150 米生成一次属性门
-            MobInterval = 100,       -- 每 100 米生成一波普通怪
-            MobsPerGroup = {2, 3},   -- 普通怪每波生成 2~3 只
-            EliteCount = 1,          -- 本关路途中均匀散布 1 只精英怪
-            HasBoss = true,          -- 是否有关底 Boss
+            Length = 1000,           
+            GateInterval = 150,      
+            MobInterval = 100,       
+            MobsPerGroup = {2, 3},   
+            EliteCount = 1,          
+            HasBoss = true,          
             
-            BasicHP = 30,            -- 普通怪 30 血
-            EliteHP = 150,           -- 精英怪 150 血
-            BossHP = 500,            -- Boss 500 血
+            BasicHP = 20,            
+            EliteHP = 100,           
+            BossHP = 400,            
 
-            -- 【新增关卡 1 属性门控制】：新手体验数值
-            GATE_HP_MIN = 10,  GATE_HP_MAX = 30,
+            GATE_HP_MIN = 10,  GATE_HP_MAX = 20,
             GATE_ATK_MIN = 1,  GATE_ATK_MAX = 3,
-            GATE_ASPD_MIN = 0.2, GATE_ASPD_MAX = 0.6,
+            GATE_ASPD_MIN = 0.1, GATE_ASPD_MAX = 0.3,
+
+            GateBuffChance = 1.0, -- 100% 绿门，绝对不卡关
         },
         [2] = {
-            Length = 1500,          
+            Length = 1200,          
             GateInterval = 120,     
             MobInterval = 80,       
             MobsPerGroup = {3, 4},  
             EliteCount = 2,         
             HasBoss = true,          
             
-            BasicHP = 60,            -- 数值开始膨胀
-            EliteHP = 300,          
-            BossHP = 2500,          
+            BasicHP = 35,            
+            EliteHP = 200,          
+            BossHP = 800,          
 
-            -- 【新增关卡 2 属性门控制】：中等强化数值
-            GATE_HP_MIN = 25,  GATE_HP_MAX = 60,
-            GATE_ATK_MIN = 3,  GATE_ATK_MAX = 7,
-            GATE_ASPD_MIN = 0.4, GATE_ASPD_MAX = 1.0,
+            GATE_HP_MIN = 15,  GATE_HP_MAX = 30,
+            GATE_ATK_MIN = 2,  GATE_ATK_MAX = 4,
+            GATE_ASPD_MIN = 0.2, GATE_ASPD_MAX = 0.4,
+
+            GateBuffChance = 1.0, -- 100% 绿门
         },
         [3] = {
-            Length = 2000,          
+            Length = 1500,          
+            GateInterval = 100,     
+            MobInterval = 70,       
+            MobsPerGroup = {4, 5},  
+            EliteCount = 2,         
+            HasBoss = true,          
+            
+            BasicHP = 60,          
+            EliteHP = 350,          
+            BossHP = 1500,          
+
+            GATE_HP_MIN = 20,  GATE_HP_MAX = 40,
+            GATE_ATK_MIN = 3,  GATE_ATK_MAX = 5,
+            GATE_ASPD_MIN = 0.2, GATE_ASPD_MAX = 0.5,
+
+            GateBuffChance = 1.0, -- 100% 绿门
+        },
+        [4] = {
+            Length = 1800,          
             GateInterval = 100,     
             MobInterval = 60,       
-            MobsPerGroup = {3, 5},  
+            MobsPerGroup = {4, 6},  
             EliteCount = 3,         
             HasBoss = true,          
             
-            BasicHP = 120,          
+            BasicHP = 100,          
             EliteHP = 600,          
-            BossHP = 6000,          
+            BossHP = 2500,          
 
-            -- 【新增关卡 3 属性门控制】：终局高加成数值（对应高血量怪）
-            GATE_HP_MIN = 50,  GATE_HP_MAX = 150,
-            GATE_ATK_MIN = 6,  GATE_ATK_MAX = 15,
-            GATE_ASPD_MIN = 0.6, GATE_ASPD_MAX = 1.5,
+            GATE_HP_MIN = 30,  GATE_HP_MAX = 50,
+            GATE_ATK_MIN = 4,  GATE_ATK_MAX = 7,
+            GATE_ASPD_MIN = 0.3, GATE_ASPD_MAX = 0.6,
+
+            GateBuffChance = 1.0, -- 100% 绿门
+        },
+        [5] = {
+            Length = 2000,          
+            GateInterval = 90,     
+            MobInterval = 50,       
+            MobsPerGroup = {5, 7},  
+            EliteCount = 3,         
+            HasBoss = true,          
+            
+            -- 第 5 关作为无尽模式的基底，怪群非常密集
+            BasicHP = 160,          
+            EliteHP = 900,          
+            BossHP = 4000,          
+
+            GATE_HP_MIN = 40,  GATE_HP_MAX = 60,
+            GATE_ATK_MIN = 5,  GATE_ATK_MAX = 8,
+            GATE_ASPD_MIN = 0.3, GATE_ASPD_MAX = 0.8,
+
+            GateBuffChance = 1.0, -- 100% 绿门
         }
     },
 
-    -- 7. 难度成长配置
-    ENEMY_HP_SCALE_DIST = 500, -- 难度提升距离阈值
-    ENEMY_HP_SCALE_RATE = 0.5, -- 血量增长率 (50%)
+    -- 7. 无尽模式难度动态成长配置
+    ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
+    ENEMY_HP_SCALE_RATE = 0.3,  -- 怪物血量额外增加 30%（乘区） 
 
-    -- 8. 属性门数值范围
-    GATE_HP_MIN = 10, GATE_HP_MAX = 50,
-    GATE_ATK_MIN = 1, GATE_ATK_MAX = 5,
-    GATE_ASPD_MIN = 1, GATE_ASPD_MAX = 2,
+    -- 8. 属性门数值范围 (已废弃，可删可留)
+    -- GATE_HP_MIN = 10, GATE_HP_MAX = 50,
+    -- GATE_ATK_MIN = 1, GATE_ATK_MAX = 5,
+    -- GATE_ASPD_MIN = 1, GATE_ASPD_MAX = 2,
 
     -- 9. 掉落物与磁吸机制
-    MAGNET_RADIUS = 15,       -- 磁吸范围
-    COLLECT_RADIUS = 5,       -- 拾取范围
-    MAGNET_SPEED = 75,        -- 磁吸飞行速度
+    MAGNET_RADIUS = 15,       
+    COLLECT_RADIUS = 5,       
+    MAGNET_SPEED = 75,        
 
-    -- 10. 局外天赋商店配置
+    -- ==========================================
+    -- 10. 局外天赋商店配置 (清理测试数据，回归正式数值)
+    -- ==========================================
 	TALENTS = {
 		Talent_HP = {
 			Name = "血量强化",
-			BaseCost = 50,       -- 初始价格
-			CostMulti = 1.5,     -- 每次升级的价格乘数
-			StatIncrease = 20,   -- 每级增加 20 点生命上限
+			BaseCost = 50,       
+			CostMulti = 1.5,     
+			StatIncrease = 20,   
 		},
 		Talent_ATK = {
 			Name = "攻击强化",
 			BaseCost = 100,
 			CostMulti = 2.0,
-			StatIncrease = 5,    -- 每级增加 5 点攻击力
+			StatIncrease = 5,    
 		},
 		Talent_ASPD = {
 			Name = "攻速强化",
-			BaseCost = 200,
+			BaseCost = 150,
 			CostMulti = 2.5,
-			StatIncrease = 0.15, -- 每级增加 0.15 攻速
-		},
-        Talent_TEST_1 = {
-			Name = "测试1",
-			BaseCost = 150,      -- 初始价格 150
-			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
-			StatIncrease = 2,    -- 每级增加 2 点移速
-		},
-        Talent_TEST_2 = {
-			Name = "测试2",
-			BaseCost = 150,      -- 初始价格 150
-			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
-			StatIncrease = 2,    -- 每级增加 2 点移速
-		},
-        Talent_TEST_3 = {
-			Name = "测试3",
-			BaseCost = 150,      -- 初始价格 150
-			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
-			StatIncrease = 2,    -- 每级增加 2 点移速
-		},
-        Talent_TEST_4 = {
-			Name = "测试4",
-			BaseCost = 150,      -- 初始价格 150
-			CostMulti = 1.8,     -- 每次升级变贵 1.8 倍
-			StatIncrease = 2,    -- 每级增加 2 点移速
+			StatIncrease = 0.15, 
 		}
 	},
 
+    -- ==========================================
     -- 11. 宠物与抽卡系统配置
-	PET_GACHA_COST = 1, -- 抽一次宠物消耗的金币
+    -- ==========================================
+    -- 一局第一关打通大概能获得 150~200 金币。
+    -- 定价 200 保证玩家死一两次后，必定能抽第一只宠物！
+	PET_GACHA_COST = 200, 
+	
 	PETS = {
 		["Slime"] = { 
 			Name = "风精灵", 
 			Rarity = "普通", 
-			ATK = 5,      -- 宠物固定攻击力
-			ASPD = 1.0,   -- 宠物固定攻速 (1秒1发)
-			Color = Color3.fromRGB(150, 255, 150) -- 暂时代替模型的颜色
+			ATK = 10,      -- 增强普通宠物，让玩家抽到就能质变度过前期
+			ASPD = 1.2,   
+			Color = Color3.fromRGB(150, 255, 150) 
 		},
 		["Dragon"] = { 
 			Name = "小火龙", 
 			Rarity = "稀有", 
-			ATK = 15, 
+			ATK = 25, 
 			ASPD = 1.5, 
 			Color = Color3.fromRGB(255, 100, 100) 
 		},
 		["Angel"] = { 
 			Name = "大天使", 
 			Rarity = "史诗", 
-			ATK = 40, 
+			ATK = 60, 
 			ASPD = 2.5, 
 			Color = Color3.fromRGB(255, 215, 0) 
 		}
@@ -197,6 +221,19 @@ function GameConfig.GetTalentCost(talentId, currentLevel)
 	
 	-- 计算公式：基础价格 * (乘数 ^ 当前等级)
 	return math.floor(talent.BaseCost * (talent.CostMulti ^ currentLevel))
+end
+
+-- 动态获取指定关卡的前进速度 (基础速度 + 随关卡递增)
+function GameConfig.GetRunSpeed(stageNum)
+	-- 公式：基础速度 25 + (当前关卡数 - 1) * 每关增加的速度 2
+	local currentSpeed = GameConfig.RUN_SPEED + (stageNum - 1) * GameConfig.RUN_SPEED_INCREMENT
+	
+	-- 可选：加上一个绝对速度上限，防止玩家跑到 20 关时速度达到 60 直接瞬移穿墙
+	-- 如果不需要上限，直接 return currentSpeed 即可
+	local MAX_SPEED = 45 
+	if currentSpeed > MAX_SPEED then currentSpeed = MAX_SPEED end
+	
+	return currentSpeed
 end
 
 return GameConfig

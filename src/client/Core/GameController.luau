@@ -37,6 +37,19 @@ function GameController.Start()
 			
 			-- 监听角色死亡事件，执行核心清场
 			humanoid.Died:Connect(function()
+				-- 如果玩家死在了第二关及以上，打上“需要引导”的思想钢印
+				-- 【修改】：增加了对 HasSeenStage2Guide 的判断
+				if (player:GetAttribute("CurrentStage") or 1) >= 2 and not player:GetAttribute("HasSeenStage2Guide") then
+					player:SetAttribute("NeedsGuide", true)
+					
+					-- 触发引导的同时，立刻呼叫服务器打上永久标记，以后再死就不会触发了
+					local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+					local markGuideEvent = remotes:FindFirstChild("MarkGuideSeen")
+					if markGuideEvent then
+						markGuideEvent:FireServer()
+					end
+				end
+
 				GameController.IsCombatActive = false
 				player:SetAttribute("InCombat", false)
 				player:SetAttribute("IsLevelingUp", false)
@@ -49,6 +62,29 @@ function GameController.Start()
 				print("玩家已阵亡，世界实体已彻底卸载清空。")
 			end)
 		end
+
+		-- 玩家重生回大厅后，延迟 1 秒弹出智能引导
+		task.delay(1, function()
+			if player:GetAttribute("NeedsGuide") and not GameController.IsCombatActive then
+				local coins = player:GetAttribute("Coins") or 0
+				local target = nil
+				local text = ""
+				
+				-- 智能引导算法：有钱抽卡就指引去抽宠物，没钱就指引去商店点小天赋
+				if coins >= Controllers.Config.PET_GACHA_COST then
+					target = Workspace:FindFirstChild("PetEgg")
+					text = "去抽取宠物增强火力！"
+				else
+					local npc = Workspace:FindFirstChild("ShopNPC")
+					target = npc and (npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart"))
+					text = "去商店升级天赋！"
+				end
+				
+				if target then
+					Controllers.VFX.CreateGuide(target, text)
+				end
+			end
+		end)
 	end
 	
 	-- 绑定角色加载与后续重生
@@ -79,6 +115,9 @@ end
 -- 触发单局跑酷战斗开局
 function GameController.EnterCombat()
 	if GameController.IsCombatActive then return end
+	-- 进入跑道自动清除引导
+	player:SetAttribute("NeedsGuide", false)
+	Controllers.VFX.ClearGuide()
 	
 	local character = player.Character
 	local startPart = Workspace:FindFirstChild("StartButton")
@@ -149,6 +188,9 @@ function GameController.SetupNPC()
 					if triggeringPlayer == player and not GameController.IsCombatActive then
 						-- 告诉 UI 系统：玩家打开了商店
 						player:SetAttribute("IsShopOpen", true)
+						-- 成功打开商店，使命完成，清除光束！
+						player:SetAttribute("NeedsGuide", false)
+						Controllers.VFX.ClearGuide()
 					end
 				end)
 			end

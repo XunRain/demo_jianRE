@@ -6,6 +6,7 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService") -- 引入 RunService 用于处理自转动画
+local Players = game:GetService("Players") -- 引入 Players 服务
 
 -- 预加载吃门的粒子特效
 local vfxFolder = ReplicatedStorage:WaitForChild("VFX", 10)
@@ -193,6 +194,57 @@ function VFXController.StartPetSpinVFX(model)
 	
 	-- 返回这个事件连接，以便 UIController 能够在关闭界面时把它清理掉
 	return spinConnection
+end
+
+
+
+local currentGuideBeam = nil
+local currentGuideAtt0 = nil
+local currentGuideAtt1 = nil
+local currentGuideLabel = nil
+
+-- 接口 6：创建大厅 3D 光束引导与悬浮文字
+function VFXController.CreateGuide(targetPart, text)
+	VFXController.ClearGuide() -- 先清理旧的，防止重叠
+	
+	local character = Players.LocalPlayer.Character
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not targetPart then return end
+
+	-- 1. 创建起点(玩家)和终点(目标)的挂载点
+	currentGuideAtt0 = Instance.new("Attachment", rootPart)
+	currentGuideAtt1 = Instance.new("Attachment", targetPart)
+
+	-- 2. 创建流动光束
+	currentGuideBeam = Instance.new("Beam")
+	currentGuideBeam.Attachment0 = currentGuideAtt1 -- 起点设为 NPC
+	currentGuideBeam.Attachment1 = currentGuideAtt0 -- 终点设为 玩家
+	currentGuideBeam.FaceCamera = true -- 永远正对屏幕
+	currentGuideBeam.Width0 = 2
+	currentGuideBeam.Width1 = 2
+	currentGuideBeam.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0)) -- 金黄色光束
+	-- 使用经典的 Roblox 流动箭头贴图
+	currentGuideBeam.Texture = "rbxassetid://9006027964" 
+	currentGuideBeam.TextureMode = Enum.TextureMode.Wrap
+	currentGuideBeam.TextureSpeed = -3  -- 箭头流动速度，负数为反向流动
+	currentGuideBeam.TextureLength = 4 -- 箭头密集度
+	currentGuideBeam.LightEmission = 1 -- 光束自带发光效果
+	currentGuideBeam.Parent = rootPart
+
+	-- 3. 创建目标头顶的悬浮提示文字（复用接口1）
+	currentGuideLabel = VFXController.CreateBillboard(targetPart, "⭐ " .. text, Color3.fromRGB(255, 255, 100), 4)
+end
+
+-- 接口 7：清理引导光束
+function VFXController.ClearGuide()
+	if currentGuideBeam then currentGuideBeam:Destroy();currentGuideBeam = nil end
+	if currentGuideAtt0 then currentGuideAtt0:Destroy();currentGuideAtt0 = nil end
+	if currentGuideAtt1 then currentGuideAtt1:Destroy();currentGuideAtt1 = nil end
+	if currentGuideLabel then 
+		currentGuideLabel.Parent:Destroy() -- Label 的 Parent 是 BillboardGui，直接销毁 Gui
+		currentGuideLabel = nil 
+	end
 end
 
 return VFXController

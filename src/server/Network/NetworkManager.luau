@@ -114,6 +114,16 @@ function NetworkManager.Start()
 			player:SetAttribute("EquippedPet", petId)
 		end
 	end)
+
+    -- 注册并监听第二关引导标记的写入请求
+	local markGuideEvent = remotes:FindFirstChild("MarkGuideSeen") or Instance.new("RemoteEvent", remotes)
+	markGuideEvent.Name = "MarkGuideSeen"
+
+	markGuideEvent.OnServerEvent:Connect(function(player)
+		-- 在服务端写下标记，Roblox 底层会自动将这个 Attribute 同步回客户端
+		player:SetAttribute("HasSeenStage2Guide", true)
+		print(player.Name .. " 已触发过第二关引导，打上永久防打扰思想钢印。")
+	end)
 end
 
 return NetworkManager

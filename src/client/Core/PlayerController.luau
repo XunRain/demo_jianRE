@@ -109,8 +109,12 @@ function PlayerController.OnRenderStepped(dt)
 		effectiveMoveDirection = 0
 	end
 	
-	-- 计算最终想要移动的速度向量 (侧向移动 + 强制向前奔跑)
-	local desiredVelocity = Vector3.new(effectiveMoveDirection * Config.LATERAL_SPEED, 0, -Config.RUN_SPEED)
+	-- 【核心优化】：实时获取并应用当前游戏进程的配置速度
+	local currentStage = player:GetAttribute("CurrentStage") or 1
+	local currentRunSpeed = Config.GetRunSpeed(currentStage)
+	
+	-- 计算最终想要移动的速度向量 (侧向移动 + 动态向前奔跑速度)
+	local desiredVelocity = Vector3.new(effectiveMoveDirection * Config.LATERAL_SPEED, 0, -currentRunSpeed)
 	humanoid.WalkSpeed = desiredVelocity.Magnitude
 	humanoid:Move(desiredVelocity.Unit, false)
 	
