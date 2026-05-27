@@ -18,6 +18,9 @@ local DEFAULT_STATS = {
 
     -- 记录玩家是否已经看过第二关的引导
 	HasSeenStage2Guide = false,
+
+    -- 默认装备的武器 ID
+	EquippedWeapon = "DefaultWeapon",
 }
 
 function DataManager.Init(deps)
@@ -66,6 +69,7 @@ function DataManager.SavePlayerData(player)
 
         -- 将第二关引导标记一起存入云端
 		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,
+		EquippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon",
 	}
 
 	local success, err = pcall(function()

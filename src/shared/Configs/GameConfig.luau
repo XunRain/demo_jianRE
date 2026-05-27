@@ -210,7 +210,28 @@ local GameConfig = {
 		"Slime", "Slime", "Slime", "Slime", "Slime",
 		"Dragon", "Dragon", "Dragon",
 		"Angel"
-	}
+	},
+
+    -- 12. 武器与特效配置表
+    WEAPONS = {
+        ["DefaultWeapon"] = {
+            Name = "新手短剑",
+            BulletVFX = "DefaultBullet", -- 对应 ReplicatedStorage/VFX/Weapons 里的子弹预制体名称
+            HitVFX = "DefaultHit",       -- 对应命中怪物时的爆炸预制体名称
+        },
+        ["FireWand"] = {
+            Name = "火焰法杖",
+            BulletVFX = "Fireball",
+            HitVFX = "FireExplosion",
+        }
+    },
+
+    -- 13. 怪物特效配置表
+    ENEMY_VFX = {
+        Basic = "BasicDeath", -- 普通怪死亡特效名称
+        Elite = "EliteDeath", -- 精英怪死亡特效名称
+        Boss = "BossDeath"    -- Boss 死亡特效名称
+    }
     
 }
 

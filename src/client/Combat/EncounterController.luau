@@ -247,7 +247,8 @@ local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackStartY)
 		hp = hp, 
 		maxHp = hp, 
 		label = hpLabel, 
-		type = enemyType 
+		type = enemyType,
+		baseSize = enemy.Size -- 记录初始尺寸，用于受击物理反馈！
 	})
 end
 

@@ -43,31 +43,79 @@ function CombatController.ShootProjectile()
 	
 	local humanoid = character:FindFirstChild("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then return end
-	
 	local rootPart = character.PrimaryPart
-	local bullet = Instance.new("Part")
-	bullet.Size = Vector3.new(1, 1, 2)
-	bullet.Color = Color3.fromRGB(0, 255, 255)
-	bullet.Material = Enum.Material.Neon
-	bullet.CanCollide = false
-	bullet.CFrame = rootPart.CFrame * CFrame.new(0, 0, -2) -- 生成在胸前
 	
-	local bv = Instance.new("LinearVelocity")
-	local attachment = Instance.new("Attachment", bullet)
-	bv.Attachment0 = attachment
+	-- 1. 查找武器配置
+	local equippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon"
+	local weaponConfig = Controllers.Config.WEAPONS[equippedWeapon] or Controllers.Config.WEAPONS["DefaultWeapon"]
 	
-	bv.VectorVelocity = Vector3.new(0, 0, -Controllers.Config.BULLET_SPEED) 
-	bv.MaxForce = math.huge
-	bv.Parent = bullet
+	-- 2. 尝试从 ReplicatedStorage 提取子弹预制体
+	local bullet = nil
+	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
+	local weaponsFolder = vfxFolder and vfxFolder:FindFirstChild("Weapons")
+	local bulletPrefab = weaponsFolder and weaponsFolder:FindFirstChild(weaponConfig.BulletVFX)
+	-- 只取玩家的绝对位置，抛弃身体的扭转角度
+	local spawnPos = rootPart.Position + Vector3.new(0, 0, -2)
+	
+	if bulletPrefab then
+		bullet = bulletPrefab:Clone()
+		if bullet:IsA("Model") then
+			-- 纯净位置 + 预制体在 Studio 里的完美原始朝向
+			bullet:PivotTo(CFrame.new(spawnPos) * bulletPrefab:GetPivot().Rotation)
+		else
+			bullet.CFrame = CFrame.new(spawnPos) * bulletPrefab.CFrame.Rotation
+		end
+	else
+		-- 【兜底保护】：如果你还没在 Studio 里建好对应特效，自动降级为默认白模！
+		bullet = Instance.new("Part")
+		bullet.Size = Vector3.new(1, 1, 2)
+		bullet.Color = Color3.fromRGB(0, 255, 255)
+		bullet.Material = Enum.Material.Neon
+		bullet.CFrame = rootPart.CFrame * CFrame.new(0, 0, -2)
+	end
+	
+	-- 3. 施加物理推动力
+	local targetPart = bullet:IsA("Model") and bullet.PrimaryPart or bullet
+	-- 如果是 Model 但没设置 PrimaryPart，自动找一个 Part 顶替
+	if bullet:IsA("Model") and not targetPart then
+		targetPart = bullet:FindFirstChildWhichIsA("BasePart", true)
+		bullet.PrimaryPart = targetPart
+	end
+	if targetPart and targetPart:IsA("BasePart") then
+		-- 遍历子弹的所有部件，强制取消碰撞并解除锚定！
+		-- 这样物理引擎的 LinearVelocity 才能真正推动它飞行
+		local partsToProcess = bullet:IsA("Model") and bullet:GetDescendants() or {}
+		table.insert(partsToProcess, bullet) -- 把本体也塞进去一起处理
+		
+		for _, obj in ipairs(partsToProcess) do
+			if obj:IsA("BasePart") then
+				obj.CanCollide = false
+				obj.Anchored = false  -- 彻底解开物理封印！
+			end
+		end
+		
+		local bv = Instance.new("LinearVelocity")
+		local attachment = Instance.new("Attachment", targetPart)
+		bv.Attachment0 = attachment
+
+		-- 强制参照世界坐标系飞行
+		-- 无论剑的模型怎么转，它都必须死死贴着 Z轴 的负方向直线飞驰
+		bv.RelativeTo = Enum.ActuatorRelativeTo.World 
+		bv.VectorVelocity = Vector3.new(0, 0, -Controllers.Config.BULLET_SPEED)
+
+		bv.MaxForce = math.huge
+		bv.Parent = targetPart
+	end
 	
 	local localProjectiles = Workspace:FindFirstChild("LocalProjectiles") or Instance.new("Folder", Workspace)
 	localProjectiles.Name = "LocalProjectiles"
 	bullet.Parent = localProjectiles
 
 	game.Debris:AddItem(bullet, Controllers.Config.BULLET_LIFETIME) 
-	-- 【修改】：记录子弹实体时，顺便带上玩家当前的攻击力！
+	
+	-- 【核心】：记录子弹时，把它是哪把武器射出来的标记带上！
 	local playerAtk = player:GetAttribute("ATK") or Controllers.Config.BASE_ATK
-	table.insert(CombatController.ActiveBullets, { part = bullet, damage = playerAtk })
+	table.insert(CombatController.ActiveBullets, { part = bullet, damage = playerAtk, weaponId = equippedWeapon })
 end
 
 function CombatController.ClearBullets()
@@ -107,12 +155,24 @@ function CombatController.CheckCollisions(rootPart)
 				local dmg = b.damage or (player:GetAttribute("ATK") or Controllers.Config.BASE_ATK)
 				e.hp = e.hp - dmg
 				e.label.Text = tostring(e.hp)
+
+				-- 播放怪物受击“一大一小”抖动！
+				Controllers.VFX.PlayHitJitterVFX(e.part, e.baseSize)
+				
+				-- 读取子弹身份，播放专属爆炸特效！
+				local weaponConfig = Controllers.Config.WEAPONS[b.weaponId] or Controllers.Config.WEAPONS["DefaultWeapon"]
+				Controllers.VFX.PlayBulletExplosion(weaponConfig.HitVFX, bPos)
 				
 				b.part:Destroy()
 				table.remove(CombatController.ActiveBullets, i)
 				
 				-- 怪物血条清空
 				if e.hp <= 0 then
+					-- 播放怪物死亡特效
+					-- 根据怪物类型 (Basic/Elite/Boss) 去配置表拿对应的特效名字
+					local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
+					Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
+
 					e.part:Destroy()
 					table.remove(activeEnemies, j)
 					-- 呼叫 EncounterController 爆出战利品满地散落
@@ -179,6 +239,9 @@ function CombatController.CheckCollisions(rootPart)
 			local newHp = currentHp - damage
 			player:SetAttribute("HP", newHp)
 			
+			-- 玩家撞怪受伤时，全屏红光+屏幕摇晃
+			Controllers.VFX.PlayPlayerDamageVFX()
+
 			e.part:Destroy()
 			table.remove(activeEnemies, i)
 			
@@ -189,6 +252,9 @@ function CombatController.CheckCollisions(rootPart)
 				humanoid.Health = newHp
 			end
 			
+			-- 播放怪物死亡特效，根据怪物类型 (Basic/Elite/Boss) 去配置表拿对应的特效名字
+			local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
+			Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 			-- 用肉身撞死也掉战利品
 			Controllers.Encounter.TriggerDrops(e.type, ePos)
 		end

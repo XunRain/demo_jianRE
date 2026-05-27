@@ -20,7 +20,10 @@ end
 -- 启动输入监听与渲染主循环
 function PlayerController.Start()
 	PlayerController.SetupInput()
-	RunService.RenderStepped:Connect(PlayerController.OnRenderStepped)
+	-- 将无优先级的 Connect 改为有优先级的 BindToRenderStep
+	-- 绑定在 Camera.Value (200)。由于 200 先执行，震屏的 201 后执行，
+	-- 这样震动位移就永远可以成功叠加在基础相机锁定的坐标之上了
+	RunService:BindToRenderStep("PlayerCoreLoop", Enum.RenderPriority.Camera.Value, PlayerController.OnRenderStepped)
 end
 
 -- 供外部模块调用的接口 (例如：升级暂停、重置开局时，强制重置移动状态)

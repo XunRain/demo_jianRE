@@ -53,13 +53,26 @@ function GameController.Start()
 				GameController.IsCombatActive = false
 				player:SetAttribute("InCombat", false)
 				player:SetAttribute("IsLevelingUp", false)
-				camera.CameraType = Enum.CameraType.Custom
+
+				-- 死亡画面定格与碎尸表现
+				-- 1. 剥夺相机跟随，让相机以 Scriptable 模式永远定格在死亡瞬间的坐标！
+				camera.CameraType = Enum.CameraType.Scriptable 
 				
-				-- 玩家死亡瞬间，呼叫各大模块协作：清空世界跑道、怪物实体、散落掉落物以及飞行的子弹
-				Controllers.Map.ClearTracks()
-				Controllers.Encounter.ClearAll()
-				Controllers.Combat.ClearBullets()
-				print("玩家已阵亡，世界实体已彻底卸载清空。")
+				-- 2. 呼叫物理接口，把玩家炸碎成满地零件
+				Controllers.VFX.PlayPlayerDeathExplosion(newCharacter)
+				
+				-- 3. 延迟 2.5 秒后再进行清场（给玩家留足“欣赏”散落零件的时间）
+				task.delay(2.5, function()
+					-- 清理世界
+					Controllers.Map.ClearTracks()
+					Controllers.Encounter.ClearAll()
+					Controllers.Combat.ClearBullets()
+					
+					-- 恢复相机控制权，准备迎接大厅的新生肉体
+					camera.CameraType = Enum.CameraType.Custom
+					
+					print("画面定格结束，世界实体已彻底卸载清空。")
+				end)
 			end)
 		end
 
@@ -110,6 +123,9 @@ function GameController.ResetPlayerStats()
 	-- 使用配置表计算开局升第 2 级所需的初始经验
 	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)
 	player:SetAttribute("IsLevelingUp", false)
+
+	-- 开局默认带入云端武器，如果没有则拿默认武器
+	player:SetAttribute("EquippedWeapon", player:GetAttribute("EquippedWeapon") or "DefaultWeapon")
 end
 
 -- 触发单局跑酷战斗开局

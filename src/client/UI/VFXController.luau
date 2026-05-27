@@ -7,6 +7,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService") -- 引入 RunService 用于处理自转动画
 local Players = game:GetService("Players") -- 引入 Players 服务
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting") -- 引入光照服务，用于屏幕滤镜
 
 -- 预加载吃门的粒子特效
 local vfxFolder = ReplicatedStorage:WaitForChild("VFX", 10)
@@ -247,4 +249,189 @@ function VFXController.ClearGuide()
 	end
 end
 
+-- ==========================================
+-- 接口 8：实体受击抖动特效 (一大一小快速回弹)
+-- 支持敌方 Part 和 我方 Model！
+-- ==========================================
+function VFXController.PlayHitJitterVFX(target, baseSize)
+	if not target then return end
+	
+	-- 增加动画锁，防止密集子弹不断打断缩回动画
+	if target:GetAttribute("IsJittering") then return end
+	target:SetAttribute("IsJittering", true)
+	
+	task.spawn(function()
+		if target:IsA("BasePart") and baseSize then
+			-- 针对单体 Part（现在的怪物）
+			local tInfo = TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, 0, true)
+			local tween = TweenService:Create(target, tInfo, {Size = baseSize * 1.3})
+			tween:Play()
+			
+			-- 等待这段动画彻底播完 (0.05 * 2 = 0.1秒)
+			tween.Completed:Wait()
+			
+			if target and target.Parent then
+				-- 兜底强行恢复初始尺寸，防止引擎卡顿丢帧
+				target.Size = baseSize 
+				-- 播完后，解开动画锁，允许下一次受击动画
+				target:SetAttribute("IsJittering", false)
+			end
+			
+		elseif target:IsA("Model") then
+			-- 针对完整的模型（玩家肉身）
+			local originalScale = target:GetScale()
+			target:ScaleTo(originalScale * 1.2)
+			task.wait(0.05)
+			
+			if target and target.Parent then
+				target:ScaleTo(originalScale)
+				target:SetAttribute("IsJittering", false)
+			end
+		end
+	end)
+end
+
+-- ==========================================
+-- 接口 9：播放子弹命中爆炸特效 (完全数据驱动)
+-- ==========================================
+function VFXController.PlayBulletExplosion(hitVfxName, position)
+	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
+	local weaponsFolder = vfxFolder and vfxFolder:FindFirstChild("Weapons")
+	local vfxPrefab = weaponsFolder and weaponsFolder:FindFirstChild(hitVfxName)
+	
+	if vfxPrefab then
+		local vfx = vfxPrefab:Clone()
+		
+		-- 自动适配你放的是 Part 还是 Model
+		if vfx:IsA("BasePart") then
+			-- CFrame = 新位置 * 预制体原本的旋转角度
+			vfx.CFrame = CFrame.new(position) * vfxPrefab.CFrame.Rotation
+		elseif vfx:IsA("Model") then
+			-- 保留 Model 在 Studio 中打包时的初始朝向
+			vfx:PivotTo(CFrame.new(position) * vfxPrefab:GetPivot().Rotation)
+		end
+		
+		vfx.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+		
+		-- 自动遍历寻找粒子特效并瞬间爆发
+		for _, emitter in ipairs(vfx:GetDescendants()) do
+			if emitter:IsA("ParticleEmitter") then
+				emitter.Enabled = false -- 关闭持续喷发
+				-- 读取你在 Studio 里配置的爆发数量，默认 15 个粒子
+				emitter:Emit(emitter:GetAttribute("EmitCount") or 10) 
+			end
+		end
+		
+		Debris:AddItem(vfx, 0.25) -- 特效 1 秒后自动销毁，防内存泄漏
+	end
+end
+
+-- 接口 10：播放怪物死亡爆浆/爆炸特效
+function VFXController.PlayDeathVFX(vfxName, position)
+	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
+	-- 去专属的 Enemies 文件夹下找死亡特效
+	local enemiesFolder = vfxFolder and vfxFolder:FindFirstChild("Enemies") 
+	local vfxPrefab = enemiesFolder and enemiesFolder:FindFirstChild(vfxName)
+	
+	if vfxPrefab then
+		local vfx = vfxPrefab:Clone()
+		
+		if vfx:IsA("BasePart") then
+			vfx.CFrame = CFrame.new(position) * vfxPrefab.CFrame.Rotation
+		elseif vfx:IsA("Model") then
+			vfx:PivotTo(CFrame.new(position) * vfxPrefab:GetPivot().Rotation)
+		end
+		
+		vfx.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+		
+		-- 瞬间爆发所有粒子
+		for _, emitter in ipairs(vfx:GetDescendants()) do
+			if emitter:IsA("ParticleEmitter") then
+				emitter.Enabled = false 
+				-- 死亡爆发通常比子弹击中更剧烈，默认给 30 个粒子
+				emitter:Emit(emitter:GetAttribute("EmitCount") or 10) 
+			end
+		end
+		
+		-- 留出 1.5 秒让粒子慢慢消散再销毁载体
+		Debris:AddItem(vfx, 1.5)
+	end
+end
+
+-- 接口 11：玩家专属受击反馈 (全屏闪红 + 屏幕震动)
+function VFXController.PlayPlayerDamageVFX()
+	-- 1. 全屏闪红效果 (利用 Lighting 的 ColorCorrectionEffect)
+	local hitCC = Lighting:FindFirstChild("PlayerHitCC")
+	if not hitCC then
+		hitCC = Instance.new("ColorCorrectionEffect")
+		hitCC.Name = "PlayerHitCC"
+		hitCC.Parent = Lighting
+	end
+	
+	-- 每次受击，瞬间变成刺眼的血红色
+	hitCC.TintColor = Color3.new(1, 0.2, 0.2) 
+	
+	-- 平滑褪色回正常白光，即使被连续攻击也会无缝重置动画
+	local ccTweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(hitCC, ccTweenInfo, {TintColor = Color3.new(1, 1, 1)}):Play()
+	
+	-- 2. 屏幕震动 (利用 RenderStepped 优先级机制)
+	local shakeDuration = 0.25
+	local startTime = os.clock()
+	local camera = game.Workspace.CurrentCamera
+	
+	-- 【核心机制】：绑定在 Camera.Value + 1 优先级，确保在 PlayerController 锁死相机之后强行叠加偏移！
+	RunService:BindToRenderStep("PlayerScreenShake", Enum.RenderPriority.Camera.Value + 1, function()
+		local elapsed = os.clock() - startTime
+		if elapsed >= shakeDuration then
+			-- 震动时间结束，解绑事件
+			RunService:UnbindFromRenderStep("PlayerScreenShake")
+			return
+		end
+		
+		-- 震动强度随时间平滑衰减 (最大偏移 0.8 距离)
+		local intensity = (1 - (elapsed / shakeDuration)) * 0.8
+		local offsetX = (math.random() - 0.5) * 2 * intensity
+		local offsetY = (math.random() - 0.5) * 2 * intensity
+		
+		-- 在原有相机的坐标基础上，强行揉进去随机位移，实现暴力晃动
+		camera.CFrame = camera.CFrame * CFrame.new(offsetX, offsetY, 0)
+	end)
+end
+
+-- 接口 12：玩家死亡表现 (碎尸爆开散落)
+function VFXController.PlayPlayerDeathExplosion(character)
+	if not character then return end
+	
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	-- 获取爆炸中心点，如果找不到 rootPart 就取模型中心
+	local centerPos = rootPart and rootPart.Position or character:GetPivot().Position
+	
+	-- 1. 瞬间粉碎所有骨骼关节，让身体散架
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			descendant:Destroy()
+		end
+	end
+	
+	-- 2. 给每个身体零件施加物理爆炸冲击力
+	for _, part in ipairs(character:GetChildren()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = true -- 确保零件能掉在地上弹跳，而不是穿透地板
+			
+			-- 计算从中心向外炸开的向量
+			local dir = (part.Position - centerPos).Unit
+			-- 稍微加一点向上的力 (Y 轴)，并加入随机散布偏移
+			local burstVector = (dir + Vector3.new(math.random()-0.5, 1.5, math.random()-0.5)).Unit
+			
+			-- ApplyImpulse 需要乘以零件的质量 (Mass) 才能获得一致的炸开速度
+			local impulseForce = burstVector * math.random(60, 120) * part.Mass
+			part:ApplyImpulse(impulseForce)
+			
+			-- 加上随机的旋转力，让零件在空中翻滚
+			local angularForce = Vector3.new(math.random(-50, 50), math.random(-50, 50), math.random(-50, 50)) * part.Mass
+			part:ApplyAngularImpulse(angularForce)
+		end
+	end
+end
 return VFXController
