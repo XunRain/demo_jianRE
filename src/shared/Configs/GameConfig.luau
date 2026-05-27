@@ -4,9 +4,9 @@
 
 local GameConfig = {
     -- 1. 物理与移动控制
-    RUN_SPEED = 25,           -- 跑酷基础速度
+    RUN_SPEED = 20,           -- 跑酷基础速度
     RUN_SPEED_INCREMENT = 2,  -- 每过一关，移速增加 2 点
-    LATERAL_SPEED = 30,       -- 左右移动速度
+    LATERAL_SPEED = 20,       -- 左右移动速度
     RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
 
     -- 2. 战斗参数
@@ -22,8 +22,8 @@ local GameConfig = {
 	-- CAMERA_OFFSET = Vector3.new(0, 48, 10),
     -- CAMERA_LOOK_OFFSET = Vector3.new(0, 10, -20),
 
-    CAMERA_OFFSET = Vector3.new(0, 40, 15),
-    CAMERA_LOOK_OFFSET = Vector3.new(0, 8, -15),
+    CAMERA_OFFSET = Vector3.new(0, 20, 10),
+    CAMERA_LOOK_OFFSET = Vector3.new(0, 4, -10),
 
     -- 4. 地图与跑道生成配置
     TRACK_LENGTH = 120,       -- 单块跑道长度
@@ -44,7 +44,7 @@ local GameConfig = {
 -- 6. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
     STAGES = {
         [1] = {
-            Length = 1000,           
+            Length = 1200,           
             GateInterval = 150,      
             MobInterval = 100,       
             MobsPerGroup = {2, 3},   
@@ -53,7 +53,7 @@ local GameConfig = {
             
             BasicHP = 20,            
             EliteHP = 100,           
-            BossHP = 400,            
+            BossHP = 300,            
 
             GATE_HP_MIN = 10,  GATE_HP_MAX = 20,
             GATE_ATK_MIN = 1,  GATE_ATK_MAX = 3,
@@ -62,7 +62,7 @@ local GameConfig = {
             GateBuffChance = 1.0, -- 100% 绿门，绝对不卡关
         },
         [2] = {
-            Length = 1200,          
+            Length = 1400,          
             GateInterval = 120,     
             MobInterval = 80,       
             MobsPerGroup = {3, 4},  
@@ -71,7 +71,7 @@ local GameConfig = {
             
             BasicHP = 35,            
             EliteHP = 200,          
-            BossHP = 800,          
+            BossHP = 600,          
 
             GATE_HP_MIN = 15,  GATE_HP_MAX = 30,
             GATE_ATK_MIN = 2,  GATE_ATK_MAX = 4,
@@ -80,7 +80,7 @@ local GameConfig = {
             GateBuffChance = 1.0, -- 100% 绿门
         },
         [3] = {
-            Length = 1500,          
+            Length = 1600,          
             GateInterval = 100,     
             MobInterval = 70,       
             MobsPerGroup = {4, 5},  
@@ -88,8 +88,8 @@ local GameConfig = {
             HasBoss = true,          
             
             BasicHP = 60,          
-            EliteHP = 350,          
-            BossHP = 1500,          
+            EliteHP = 300,          
+            BossHP = 900,          
 
             GATE_HP_MIN = 20,  GATE_HP_MAX = 40,
             GATE_ATK_MIN = 3,  GATE_ATK_MAX = 5,
@@ -107,7 +107,7 @@ local GameConfig = {
             
             BasicHP = 100,          
             EliteHP = 600,          
-            BossHP = 2500,          
+            BossHP = 1800,          
 
             GATE_HP_MIN = 30,  GATE_HP_MAX = 50,
             GATE_ATK_MIN = 4,  GATE_ATK_MAX = 7,
@@ -132,13 +132,13 @@ local GameConfig = {
             GATE_ATK_MIN = 5,  GATE_ATK_MAX = 8,
             GATE_ASPD_MIN = 0.3, GATE_ASPD_MAX = 0.8,
 
-            GateBuffChance = 1.0, -- 100% 绿门
+            GateBuffChance = 0.5, -- 50% 绿门
         }
     },
 
     -- 7. 无尽模式难度动态成长配置
     ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
-    ENEMY_HP_SCALE_RATE = 0.3,  -- 怪物血量额外增加 30%（乘区） 
+    ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 30%（乘区） 
 
     -- 8. 属性门数值范围 (已废弃，可删可留)
     -- GATE_HP_MIN = 10, GATE_HP_MAX = 50,

@@ -166,7 +166,8 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	local text = string.format("%s %s%s", attr, sign, tostring(amount))
 	
 	-- 呼叫 VFX 模块生成近大远小的 3D 文本
-	Controllers.VFX.CreateBillboard(gate, text, Color3.new(1,1,1), 1)
+	-- 传入负的半高 -(gate.Size.Y / 2) 抵消头顶偏移，使其绝对居中
+	Controllers.VFX.CreateBillboard(gate, text, Color3.new(1,1,1), -(gate.Size.Y / 2))
 
 	local folder = Workspace:FindFirstChild("LocalEncounters") or Instance.new("Folder", Workspace)
 	folder.Name = "LocalEncounters"
@@ -185,11 +186,23 @@ local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackStartY)
 	-- 安全保护：如果超越了第 5 关，自动沿用最后一关 (第 5 关) 的环境配置
 	local currentStageConfig = stageConfig or Config.STAGES[#Config.STAGES]
 	
-	-- =======================================================
-	-- 【重新激活】：根据玩家跑过的绝对距离，无限放大怪物血量
-	-- =======================================================
-	local distance = math.abs(zPos) 
-	local hpMultiplier = 1 + math.floor(distance / Config.ENEMY_HP_SCALE_DIST) * Config.ENEMY_HP_SCALE_RATE
+	-- 前 5 关福利期免检，第 6 关起启用动态难度膨胀
+	local hpMultiplier = 1
+	if currentStage > 5 then
+		-- 动态计算前 5 关的新手保护总长度 (免维护设计)
+		local safeZoneLength = 0
+		for i = 1, 5 do
+			if Config.STAGES[i] then
+				safeZoneLength = safeZoneLength + Config.STAGES[i].Length
+			end
+		end
+		
+		-- 减去前 5 关的距离，让第 6 关的倍率从 1.0 开始平滑起步
+		local effectiveDistance = math.abs(zPos) - safeZoneLength
+		if effectiveDistance > 0 then
+			hpMultiplier = 1 + math.floor(effectiveDistance / Config.ENEMY_HP_SCALE_DIST) * Config.ENEMY_HP_SCALE_RATE
+		end
+	end
 	
 	local hp = 0
 	if enemyType == "Basic" then
@@ -225,9 +238,17 @@ local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackStartY)
 	enemy.Parent = folder
 	
 	-- 呼叫 VFX 模块生成 3D 文本
-	local hpLabel = Controllers.VFX.CreateBillboard(enemy, tostring(hp), Color3.new(1,1,1), 1)
+	-- 减去怪物的完整高度 (-enemy.Size.Y) 将其拉到脚底，
+	-- 并加上 1 Stud 的安全抬升 (+ 1)，防止血量文字穿透嵌进地板里
+	local hpLabel = Controllers.VFX.CreateBillboard(enemy, tostring(hp), Color3.new(1,1,1), -enemy.Size.Y + 1)
 	
-	table.insert(EncounterController.ActiveEnemies, { part = enemy, hp = hp, maxHp = hp, label = hpLabel, type = enemyType })
+	table.insert(EncounterController.ActiveEnemies, { 
+		part = enemy, 
+		hp = hp, 
+		maxHp = hp, 
+		label = hpLabel, 
+		type = enemyType 
+	})
 end
 
 -- 无缝跨关卡处理，带避让机制与跨关卡处理
