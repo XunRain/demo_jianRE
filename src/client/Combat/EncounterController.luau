@@ -131,7 +131,7 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	-- 安全锁定当前正在跑的关卡配置，若处于开局未加载状态则拿第 1 关兜底
 	local currentStageConfig = stageConfig or Config.STAGES[1]
 
-	local attributes = {"ATK", "ASPD", "HP"}
+	local attributes = Config.GATE_ATTRIBUTE_POOL
 	local attr = attributes[math.random(1, #attributes)]
 	
 	-- 根据不同属性，使用对应关卡的随机范围逻辑
@@ -149,6 +149,18 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 		local rawVal = minAspd + math.random() * (maxAspd - minAspd)
 		amount = math.floor(rawVal * 10) / 10 
 		if amount == 0 then amount = minAspd end 
+	elseif attr == "SPD" then
+		-- 【新增】：弹速数值计算
+		local minSpd = currentStageConfig.GATE_SPD_MIN or 10
+		local maxSpd = currentStageConfig.GATE_SPD_MAX or 30
+		amount = math.random(minSpd, maxSpd)
+	elseif attr == "RNG" then
+		-- 【新增】：射程数值计算 (和攻速一样保留1位小数)
+		local minRng = currentStageConfig.GATE_RNG_MIN or 0.1
+		local maxRng = currentStageConfig.GATE_RNG_MAX or 0.4
+		local rawVal = minRng + math.random() * (maxRng - minRng)
+		amount = math.floor(rawVal * 10) / 10
+		if amount == 0 then amount = minRng end
 	end
 
 	if not isBuff then amount = -amount end
@@ -163,7 +175,8 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	gate.Color = isBuff and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0) 
 	
 	local sign = amount > 0 and "+" or ""
-	local text = string.format("%s %s%s", attr, sign, tostring(amount))
+	local displayName = Config.ATTRIBUTE_NAMES_CN[attr] or attr
+	local text = string.format("%s %s%s", displayName, sign, tostring(amount))
 	
 	-- 呼叫 VFX 模块生成近大远小的 3D 文本
 	-- 传入负的半高 -(gate.Size.Y / 2) 抵消头顶偏移，使其绝对居中

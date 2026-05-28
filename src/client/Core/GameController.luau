@@ -54,22 +54,92 @@ function GameController.Start()
 				player:SetAttribute("InCombat", false)
 				player:SetAttribute("IsLevelingUp", false)
 
-				-- 死亡画面定格与碎尸表现
 				-- 1. 剥夺相机跟随，让相机以 Scriptable 模式永远定格在死亡瞬间的坐标！
 				camera.CameraType = Enum.CameraType.Scriptable 
 				
-				-- 2. 呼叫物理接口，把玩家炸碎成满地零件
-				Controllers.VFX.PlayPlayerDeathExplosion(newCharacter)
+				-- 【终极安全版】：纯视觉替身布娃娃
+				-- ==========================================
+				newCharacter.Archivable = true
+				local fakeCorpse = newCharacter:Clone()
+				fakeCorpse.Name = "LocalCorpse"
 				
-				-- 3. 延迟 2.5 秒后再进行清场（给玩家留足“欣赏”散落零件的时间）
-				task.delay(2.5, function()
+				-- 2. 仅仅隐藏真实的物理角色，绝对不要去修改它的 Anchored 和 CanCollide！
+				-- 让它自然穿过本地跑道掉进虚空，这样 Roblox 服务器就能完美判定死亡并触发正常的重生
+				for _, obj in ipairs(newCharacter:GetDescendants()) do
+					if obj:IsA("BasePart") then
+						obj.Transparency = 1
+					elseif obj:IsA("Decal") or obj:IsA("Texture") then
+						obj.Transparency = 1
+					end
+				end
+				
+				-- 3. 把替身放到本地世界里
+				fakeCorpse.Parent = Workspace
+				local fakeHum = fakeCorpse:FindFirstChild("Humanoid")
+				if fakeHum then
+					fakeHum:ChangeState(Enum.HumanoidStateType.Physics)
+					fakeHum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None -- 隐藏假尸体头顶的名字和血条
+				end
+				
+				-- 4. 继承死亡瞬间的物理速度，让假尸体在跑道上翻滚
+				for _, p in ipairs(newCharacter:GetDescendants()) do
+					if p:IsA("BasePart") then
+						local fakeP = fakeCorpse:FindFirstChild(p.Name, true)
+						if fakeP and fakeP:IsA("BasePart") then
+							fakeP.AssemblyLinearVelocity = p.AssemblyLinearVelocity
+							fakeP.AssemblyAngularVelocity = p.AssemblyAngularVelocity
+						end
+					end
+				end
+				
+				-- 5. 对替身执行布娃娃关节改造
+				for _, desc in ipairs(fakeCorpse:GetDescendants()) do
+					if desc:IsA("Motor6D") then
+						if desc.Name == "Root" or desc.Name == "RootJoint" then
+							desc:Destroy()
+						else
+							local part0 = desc.Part0
+							local part1 = desc.Part1
+							if part0 and part1 then
+								local a0 = Instance.new("Attachment", part0)
+								a0.CFrame = desc.C0
+								local a1 = Instance.new("Attachment", part1)
+								a1.CFrame = desc.C1
+								
+								local socket = Instance.new("BallSocketConstraint", desc.Parent)
+								socket.Attachment0 = a0
+								socket.Attachment1 = a1
+								socket.LimitsEnabled = true
+								socket.TwistLimitsEnabled = true
+								
+								desc:Destroy()
+							end
+						end
+					end
+				end
+
+				-- 6. 仅开启替身核心躯干的碰撞，稳稳落在本地跑道上
+				local coreParts = {"Head", "UpperTorso", "LowerTorso", "Torso"}
+				for _, partName in ipairs(coreParts) do
+					local part = fakeCorpse:FindFirstChild(partName)
+					if part and part:IsA("BasePart") then
+						part.CanCollide = true
+					end
+				end
+				
+				-- 2. 延迟 5 秒后再进行清场
+				task.delay(5, function()
 					-- 清理世界
 					Controllers.Map.ClearTracks()
 					Controllers.Encounter.ClearAll()
 					Controllers.Combat.ClearBullets()
-					
+					if fakeCorpse then fakeCorpse:Destroy() end -- 记得销毁假尸体
 					-- 恢复相机控制权，准备迎接大厅的新生肉体
-					camera.CameraType = Enum.CameraType.Custom
+					-- 重置回大厅时，确保相机的目标对准新生健康的玩家
+					if player.Character and player.Character:FindFirstChild("Humanoid") then
+						camera.CameraType = Enum.CameraType.Custom
+						camera.CameraSubject = player.Character:FindFirstChild("Humanoid")
+					end
 					
 					print("画面定格结束，世界实体已彻底卸载清空。")
 				end)
@@ -119,6 +189,8 @@ function GameController.ResetPlayerStats()
 	player:SetAttribute("Level", Config.BASE_LEVEL)
 	player:SetAttribute("EXP", Config.BASE_EXP)
 	player:SetAttribute("MagnetRadius", Config.MAGNET_RADIUS)
+	player:SetAttribute("SPD", Config.BASE_SPD)
+	player:SetAttribute("RNG", Config.BASE_RNG)
 	
 	-- 使用配置表计算开局升第 2 级所需的初始经验
 	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)
@@ -182,7 +254,10 @@ function GameController.SetupStartButton()
 			prompt.ObjectText = "跑道入口"
 			prompt.ActionText = "开始挑战"
 			prompt.HoldDuration = 0.2
+			prompt.RequiresLineOfSight = false -- 防止视线判定 Bug
 			prompt.Parent = startPart
+		else
+			prompt.RequiresLineOfSight = false -- 如果是 Studio 里建好的，也强行关掉
 		end
 		
 		prompt.Triggered:Connect(function(triggeringPlayer)

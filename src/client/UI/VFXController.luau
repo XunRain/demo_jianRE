@@ -399,39 +399,5 @@ function VFXController.PlayPlayerDamageVFX()
 	end)
 end
 
--- 接口 12：玩家死亡表现 (碎尸爆开散落)
-function VFXController.PlayPlayerDeathExplosion(character)
-	if not character then return end
-	
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	-- 获取爆炸中心点，如果找不到 rootPart 就取模型中心
-	local centerPos = rootPart and rootPart.Position or character:GetPivot().Position
-	
-	-- 1. 瞬间粉碎所有骨骼关节，让身体散架
-	for _, descendant in ipairs(character:GetDescendants()) do
-		if descendant:IsA("Motor6D") then
-			descendant:Destroy()
-		end
-	end
-	
-	-- 2. 给每个身体零件施加物理爆炸冲击力
-	for _, part in ipairs(character:GetChildren()) do
-		if part:IsA("BasePart") then
-			part.CanCollide = true -- 确保零件能掉在地上弹跳，而不是穿透地板
-			
-			-- 计算从中心向外炸开的向量
-			local dir = (part.Position - centerPos).Unit
-			-- 稍微加一点向上的力 (Y 轴)，并加入随机散布偏移
-			local burstVector = (dir + Vector3.new(math.random()-0.5, 1.5, math.random()-0.5)).Unit
-			
-			-- ApplyImpulse 需要乘以零件的质量 (Mass) 才能获得一致的炸开速度
-			local impulseForce = burstVector * math.random(60, 120) * part.Mass
-			part:ApplyImpulse(impulseForce)
-			
-			-- 加上随机的旋转力，让零件在空中翻滚
-			local angularForce = Vector3.new(math.random(-50, 50), math.random(-50, 50), math.random(-50, 50)) * part.Mass
-			part:ApplyAngularImpulse(angularForce)
-		end
-	end
-end
+
 return VFXController

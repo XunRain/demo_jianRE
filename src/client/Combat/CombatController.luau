@@ -101,7 +101,9 @@ function CombatController.ShootProjectile()
 		-- 强制参照世界坐标系飞行
 		-- 无论剑的模型怎么转，它都必须死死贴着 Z轴 的负方向直线飞驰
 		bv.RelativeTo = Enum.ActuatorRelativeTo.World 
-		bv.VectorVelocity = Vector3.new(0, 0, -Controllers.Config.BULLET_SPEED)
+		-- 读取动态弹速 (找不到时用配置表兜底)
+		local currentSpd = player:GetAttribute("SPD") or Controllers.Config.BASE_SPD
+		bv.VectorVelocity = Vector3.new(0, 0, -currentSpd)
 
 		bv.MaxForce = math.huge
 		bv.Parent = targetPart
@@ -111,7 +113,15 @@ function CombatController.ShootProjectile()
 	localProjectiles.Name = "LocalProjectiles"
 	bullet.Parent = localProjectiles
 
-	game.Debris:AddItem(bullet, Controllers.Config.BULLET_LIFETIME) 
+	-- 获取玩家的动态弹速和动态射程距离
+	local currentSpd = player:GetAttribute("SPD") or Controllers.Config.BASE_SPD
+	local currentRng = player:GetAttribute("RNG") or Controllers.Config.BASE_RNG
+	
+	-- 【核心修改】：通过 距离/速度 计算出子弹真正应该存活的时间
+	local actualLifetime = currentRng / currentSpd
+	
+	-- 按照计算出的精准时间销毁子弹
+	game.Debris:AddItem(bullet, actualLifetime)
 	
 	-- 【核心】：记录子弹时，把它是哪把武器射出来的标记带上！
 	local playerAtk = player:GetAttribute("ATK") or Controllers.Config.BASE_ATK

@@ -195,9 +195,9 @@ function UIController.Start()
 						player:SetAttribute("ASPD", (player:GetAttribute("ASPD") or 0) + 0.2)
 						
 						-- 全能增益时，同步提升最大生命上限与当前生命值
-                  local currentMax = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
+                  		local currentMax = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
 						player:SetAttribute("MaxHP", currentMax + 20)
-                  local currentHp = player:GetAttribute("HP") or Controllers.Config.BASE_HP
+                  		local currentHp = player:GetAttribute("HP") or Controllers.Config.BASE_HP
 						player:SetAttribute("HP", currentHp + 20)
 					else
 						if attr == "HP" then
@@ -232,26 +232,26 @@ function UIController.Start()
 			if isLeveling then
 				levelUpPanel.Visible = true
 				
-				-- 增益池中依然保留了攻速，玩家可以抽到，但不会在屏幕上显示文本数值，全靠子弹射速直观感知
-				local buffPool = {
-					{ name = "攻击力提升", attr = "ATK", amount = 5, color = Color3.fromRGB(255, 100, 100) },
-					{ name = "攻速提升", attr = "ASPD", amount = 0.5, color = Color3.fromRGB(100, 255, 100) },
-					{ name = "最大血量", attr = "HP", amount = 10, color = Color3.fromRGB(100, 255, 255) },
-					{ name = "小幅全能", attr = "ALL", amount = 0, color = Color3.fromRGB(255, 215, 0) },
-               { name = "磁力范围", attr = "MagnetRadius", amount = 5, color = Color3.fromRGB(180, 100, 255) }
-				}
+				-- 【核心修改】：从配置表动态加载可选增益池，完全替代原有的硬编码数组
+				local buffPool = Controllers.Config.LEVEL_UP_BUFF_POOL
 
 				for i, card in ipairs(cards) do
 					if card and card:IsA("GuiButton") then
+						-- 从配置池中随机抽取一张卡片
 						local buff = buffPool[math.random(1, #buffPool)]
 						
-						card:SetAttribute("BuffAttr", buff.attr)
-						card:SetAttribute("BuffAmount", buff.amount)
+						-- 将配置信息绑定到 UI 按钮属性上，供后面的 Activated 事件结算读取
+						card:SetAttribute("BuffAttr", buff.Attr)
+						card:SetAttribute("BuffAmount", buff.Amount)
 						
-						card.Text = buff.name .. "\n+" .. tostring(buff.amount)
-						if buff.attr == "ALL" then card.Text = "攻击+5\n攻速+0.2\n最大血量+20" end
-						card.BackgroundColor3 = buff.color
+						-- 组装卡片显示文本与背景颜色
+						card.Text = buff.Name .. "\n+" .. tostring(buff.Amount)
+						if buff.Attr == "ALL" then 
+							card.Text = "攻击+5\n攻速+0.2\n最大血量+20" 
+						end
+						card.BackgroundColor3 = buff.Color
 						
+						-- 弹出动画重置
 						card.Rotation = -180
 						card.Size = UDim2.new(0, 0, 0, 0) 
 						

@@ -67,11 +67,6 @@ function PlayerController.OnRenderStepped(dt)
 	if not Controllers.Game.IsCombatActive then
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		humanoid.AutoRotate = true
-		-- 如果相机还被脚本锁着，释放回给玩家自由控制
-		if camera.CameraType == Enum.CameraType.Scriptable then
-			camera.CameraType = Enum.CameraType.Custom
-			camera.CameraSubject = humanoid
-		end
 		return 
 	end
 

@@ -113,13 +113,22 @@ function PetController.ShootProjectile(petConfig)
 	local bv = Instance.new("LinearVelocity")
 	local attachment = Instance.new("Attachment", bullet)
 	bv.Attachment0 = attachment
-	bv.VectorVelocity = Vector3.new(0, 0, -Controllers.Config.BULLET_SPEED) 
+
+	-- 宠物子弹同样继承玩家的弹速属性
+	local currentSpd = player:GetAttribute("SPD") or Controllers.Config.BASE_SPD
+	bv.VectorVelocity = Vector3.new(0, 0, -currentSpd)
+
 	bv.MaxForce = math.huge
 	bv.Parent = bullet
 	
 	local folder = Workspace:FindFirstChild("LocalProjectiles")
 	bullet.Parent = folder
-	game.Debris:AddItem(bullet, Controllers.Config.BULLET_LIFETIME) 
+
+	-- 宠物子弹同样继承玩家的射程属性
+	local currentRng = player:GetAttribute("RNG") or Controllers.Config.BASE_RNG
+	-- 【核心修改】：通过 距离/速度 计算出子弹真正应该存活的时间
+	local actualLifetime = currentRng / currentSpd
+	game.Debris:AddItem(bullet, actualLifetime)
 	
 	-- 【核心】：将宠物的子弹塞进 CombatController 的判定池里，并附带宠物的固定攻击力！
 	table.insert(Controllers.Combat.ActiveBullets, { part = bullet, damage = petConfig.ATK })
