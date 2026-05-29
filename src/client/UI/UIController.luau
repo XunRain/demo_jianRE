@@ -43,13 +43,15 @@ function UIController.Start()
 		-- 获取当前最新数值
 		local coins = player:GetAttribute("Coins") or 0
 		local hp = player:GetAttribute("HP") or 0
-      local maxHp = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
-		local atk = player:GetAttribute("ATK") or 0
+      	local maxHp = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
+		local atkBonus = player:GetAttribute("ATK_Bonus") or 0
+		-- 根据公式逆推当前的实际攻击面板展示给玩家看
+		local displayAtk = math.floor(Controllers.Config.BASE_ATK * (1 + (atkBonus / 100)))
 		local lvl = player:GetAttribute("Level") or 1
 		local exp = player:GetAttribute("EXP") or 0
 		local requiredExp = player:GetAttribute("RequiredEXP") or (lvl * Controllers.Config.EXP_PER_LEVEL) 
 		local inCombat = player:GetAttribute("InCombat") == true
-      local currentStage = player:GetAttribute("CurrentStage") or 1
+      	local currentStage = player:GetAttribute("CurrentStage") or 1
 
 		-- 1. 刷新屏幕 UI 控制
 		if mainUI then
@@ -158,7 +160,7 @@ function UIController.Start()
 			-- 刷新 3D UI 内部的文本
 			local statsLabel = statsUI:FindFirstChild("StatsLabel")
 			if statsLabel and statsLabel:IsA("TextLabel") then
-				statsLabel.Text = string.format("Lv.%d | ATK: %d", lvl, atk)
+				statsLabel.Text = string.format("Lv.%d | ATK: %d", lvl, displayAtk)
 			end
 		end
 
@@ -189,26 +191,37 @@ function UIController.Start()
 					local amount = card:GetAttribute("BuffAmount")
 					if not attr then return end
 
+					-- 【核心逻辑】：专门处理最大生命值百分比提升的辅助函数
+					local function applyMaxHpBonus(bonusAmount)
+						local currentBonus = player:GetAttribute("MaxHP_Bonus") or 0
+						player:SetAttribute("MaxHP_Bonus", currentBonus + bonusAmount)
+						
+						local startingStats = Controllers.Progression.CalculateStartingStats()
+						local baseMaxHp = startingStats.MaxHP
+						local newMaxHp = math.floor(baseMaxHp * (1 + ((currentBonus + bonusAmount) / 100)))
+						
+						local oldMaxHp = player:GetAttribute("MaxHP") or baseMaxHp
+						player:SetAttribute("MaxHP", newMaxHp)
+						
+						local diff = newMaxHp - oldMaxHp
+						if diff > 0 then
+							player:SetAttribute("HP", (player:GetAttribute("HP") or oldMaxHp) + diff)
+						elseif diff < 0 then
+							local currentHp = player:GetAttribute("HP") or oldMaxHp
+							if currentHp > newMaxHp then player:SetAttribute("HP", newMaxHp) end
+						end
+					end
+
 					-- 应用玩家选择的增益
 					if attr == "ALL" then
-						player:SetAttribute("ATK", (player:GetAttribute("ATK") or 0) + 5)
-						player:SetAttribute("ASPD", (player:GetAttribute("ASPD") or 0) + 0.2)
-						
-						-- 全能增益时，同步提升最大生命上限与当前生命值
-                  		local currentMax = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
-						player:SetAttribute("MaxHP", currentMax + 20)
-                  		local currentHp = player:GetAttribute("HP") or Controllers.Config.BASE_HP
-						player:SetAttribute("HP", currentHp + 20)
+						player:SetAttribute("ATK_Bonus", (player:GetAttribute("ATK_Bonus") or 0) + 10)
+						player:SetAttribute("ASPD_Bonus", (player:GetAttribute("ASPD_Bonus") or 0) + 10)
+						applyMaxHpBonus(10) -- 全能增益：生命上限 + 10%
+					elseif attr == "MaxHP_Bonus" then
+						applyMaxHpBonus(amount)
 					else
-						if attr == "HP" then
-							-- 单独选择生命加成卡片时，同步提升最大生命上限与当前生命值
-							local currentMax = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
-							player:SetAttribute("MaxHP", currentMax + amount)
-							local currentHp = player:GetAttribute("HP") or Controllers.Config.BASE_HP
-							player:SetAttribute("HP", currentHp + amount)
-						else
-							player:SetAttribute(attr, (player:GetAttribute(attr) or 0) + amount)
-						end
+						-- 其他属性 (ATK_Bonus, SPD_Bonus, MultiShot 等直接数值相加)
+						player:SetAttribute(attr, (player:GetAttribute(attr) or 0) + amount)
 					end
 					
 					-- 同步实际血量给原生的人偶模型
@@ -232,26 +245,58 @@ function UIController.Start()
 			if isLeveling then
 				levelUpPanel.Visible = true
 				
-				-- 【核心修改】：从配置表动态加载可选增益池，完全替代原有的硬编码数组
-				local buffPool = Controllers.Config.LEVEL_UP_BUFF_POOL
+				-- =======================================================
+				-- 【核心修改】：引入权重与弹道上限的卡池过滤机制
+				-- =======================================================
+				local originalPool = Controllers.Config.LEVEL_UP_BUFF_POOL
+				local validPool = {}
+				local totalWeight = 0
+				
+				-- 获取玩家当前的弹道数量和当前武器的上限
+				local currentMultiShot = player:GetAttribute("MultiShot") or 1
+				local equippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon"
+				local weaponConfig = Controllers.Config.WEAPONS[equippedWeapon] or Controllers.Config.WEAPONS["DefaultWeapon"]
+				local maxMultiShot = weaponConfig.MaxMultiShot or 3
+				
+				-- 遍历原始池子，生成合法的抽卡池
+				for _, buff in ipairs(originalPool) do
+					-- 如果弹道数已经达到了当前武器的上限，这辈子都不会再把它放入抽卡池！
+					if buff.Attr == "MultiShot" and currentMultiShot >= maxMultiShot then
+						continue
+					end
+					
+					table.insert(validPool, buff)
+					totalWeight = totalWeight + (buff.Weight or 100) -- 没配权重兜底为 100
+				end
 
 				for i, card in ipairs(cards) do
 					if card and card:IsA("GuiButton") then
-						-- 从配置池中随机抽取一张卡片
-						local buff = buffPool[math.random(1, #buffPool)]
+						-- 按照权重随机抽取卡片
+						local rand = math.random(1, totalWeight)
+						local currentWeight = 0
+						local buff = validPool[1] 
 						
-						-- 将配置信息绑定到 UI 按钮属性上，供后面的 Activated 事件结算读取
+						for _, b in ipairs(validPool) do
+							currentWeight = currentWeight + (b.Weight or 100)
+							if rand <= currentWeight then
+								buff = b
+								break
+							end
+						end
+						
 						card:SetAttribute("BuffAttr", buff.Attr)
 						card:SetAttribute("BuffAmount", buff.Amount)
 						
-						-- 组装卡片显示文本与背景颜色
-						card.Text = buff.Name .. "\n+" .. tostring(buff.Amount)
+						-- 智能添加 % 符号
 						if buff.Attr == "ALL" then 
-							card.Text = "攻击+5\n攻速+0.2\n最大血量+20" 
+							card.Text = "全能提升\n各项 +10%" 
+						else
+							local suffix = string.find(buff.Attr, "Bonus") and "%" or ""
+							card.Text = buff.Name .. "\n+" .. tostring(buff.Amount) .. suffix
 						end
+						
 						card.BackgroundColor3 = buff.Color
 						
-						-- 弹出动画重置
 						card.Rotation = -180
 						card.Size = UDim2.new(0, 0, 0, 0) 
 						

@@ -15,6 +15,7 @@ function PetController.Init(deps)
 end
 
 function PetController.Start()
+	print("🐾 PetController.Start() 已成功被调用，循环开始运行！")
 	-- 监听装备宠物变动，刷新实体模型
 	player:GetAttributeChangedSignal("EquippedPet"):Connect(PetController.RefreshPetModel)
 	PetController.RefreshPetModel()
@@ -43,16 +44,49 @@ function PetController.Start()
 	-- 宠物独立开火循环
 	task.spawn(function()
 		while true do
-			local equipped = player:GetAttribute("EquippedPet")
-			if equipped and equipped ~= "" and Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") then
-				local petConfig = Controllers.Config.PETS[equipped]
-				if currentPetModel and petConfig then
-					PetController.ShootProjectile(petConfig)
-					task.wait(1 / petConfig.ASPD)
+			-- 1. 检查战斗与升级状态
+			if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") then
+				
+				-- 2. 检查玩家是否装备了宠物
+				local equippedPet = player:GetAttribute("EquippedPet") 
+				if not equippedPet or equippedPet == "" then
+					-- print("当前没有装备宠物...") 
+					task.wait(1)
 					continue
 				end
+				
+				-- 3. 检查配置表里有没有这个宠物
+				local petConfig = Controllers.Config.PETS and Controllers.Config.PETS[equippedPet]
+				if not petConfig then
+					warn("⚠️ 宠物表里找不到这个宠物的配置: ", equippedPet)
+					task.wait(1)
+					continue
+				end
+			
+				-- 寻找宠物模型
+				local character = player.Character
+				local petModel = Workspace:FindFirstChild("ActivePet") 
+				                 or (character and character:FindFirstChild("ActivePet"))
+				                 or Workspace:FindFirstChild(equippedPet)
+				                 or (character and character:FindFirstChild(equippedPet))
+				
+				if not petModel then
+					warn("⚠️ 宠物属性都有，但在 3D 场景里找不到宠物模型！请检查你生成宠物时给它命名成了什么，以及放到了哪个 Parent 下！")
+					task.wait(1)
+					continue
+				end
+
+				-- 4. 万事俱备，执行开火
+				local petAspd = petConfig.ASPD or 1
+				local actualInterval = 1 / petAspd
+				
+				PetController.ShootProjectile(petConfig, petModel)
+				task.wait(actualInterval)
+				
+			else
+				-- 没有进入战斗，或者正在选卡片
+				task.wait(0.5) 
 			end
-			task.wait(0.2)
 		end
 	end)
 end
@@ -100,38 +134,60 @@ function PetController.RefreshPetModel()
 	-- end
 end
 
-function PetController.ShootProjectile(petConfig)
-	if not currentPetModel then return end
+-- 生成并弹射宠物子弹
+function PetController.ShootProjectile(petConfig, petModel)
+	if not petModel or not petModel.PrimaryPart then return end
 	
+	-- 宠物的发射点在宠物模型前方
+	local spawnPos = petModel.PrimaryPart.Position + Vector3.new(0, 0, -2)
+	
+	-- 【落实公式】：宠物继承玩家的百分比弹速与射程加成
+	local baseSpd = Controllers.Config.BASE_SPD
+	local spdBonus = player:GetAttribute("SPD_Bonus") or 0
+	local currentSpd = baseSpd * (1 + (spdBonus / 100))
+	
+	local baseRng = Controllers.Config.BASE_RNG
+	local rngBonus = player:GetAttribute("RNG_Bonus") or 0
+	local currentRng = baseRng * (1 + (rngBonus / 100))
+	
+	local actualLifetime = currentRng / currentSpd
+
+	-- 创建宠物子弹 (可以用统一的圆球或者你配置的特效)
 	local bullet = Instance.new("Part")
-	bullet.Size = Vector3.new(0.5, 0.5, 3)
-	bullet.Color = petConfig.Color -- 子弹颜色和宠物一样
+	bullet.Size = Vector3.new(1, 1, 1)
+	bullet.Shape = Enum.PartType.Ball
+	bullet.Color = Color3.fromRGB(255, 255, 100) -- 宠物子弹弄个醒目的颜色
 	bullet.Material = Enum.Material.Neon
+	bullet.CFrame = CFrame.new(spawnPos)
 	bullet.CanCollide = false
-	bullet.CFrame = currentPetModel:GetPivot() * CFrame.new(0, 0, -2)
+	bullet.Anchored = false
 	
 	local bv = Instance.new("LinearVelocity")
 	local attachment = Instance.new("Attachment", bullet)
 	bv.Attachment0 = attachment
-
-	-- 宠物子弹同样继承玩家的弹速属性
-	local currentSpd = player:GetAttribute("SPD") or Controllers.Config.BASE_SPD
+	bv.RelativeTo = Enum.ActuatorRelativeTo.World 
+	-- 宠物直接往正前方打
 	bv.VectorVelocity = Vector3.new(0, 0, -currentSpd)
-
 	bv.MaxForce = math.huge
 	bv.Parent = bullet
 	
-	local folder = Workspace:FindFirstChild("LocalProjectiles")
-	bullet.Parent = folder
-
-	-- 宠物子弹同样继承玩家的射程属性
-	local currentRng = player:GetAttribute("RNG") or Controllers.Config.BASE_RNG
-	-- 【核心修改】：通过 距离/速度 计算出子弹真正应该存活的时间
-	local actualLifetime = currentRng / currentSpd
-	game.Debris:AddItem(bullet, actualLifetime)
+	local localProjectiles = Workspace:FindFirstChild("LocalProjectiles") or Instance.new("Folder", Workspace)
+	bullet.Parent = localProjectiles
+	game.Debris:AddItem(bullet, actualLifetime) 
 	
-	-- 【核心】：将宠物的子弹塞进 CombatController 的判定池里，并附带宠物的固定攻击力！
-	table.insert(Controllers.Combat.ActiveBullets, { part = bullet, damage = petConfig.ATK })
+	-- 宠物伤害：读取配置表里大天使/小火龙的自带固定攻击力
+	local petDmg = petConfig.ATK or 10
+
+	-- =======================================================
+	-- 【核心修复】：为宠物子弹补齐防抖字段，完美兼容穿透碰撞检测！
+	-- =======================================================
+	table.insert(Controllers.Combat.ActiveBullets, { 
+		part = bullet, 
+		damage = petDmg, 
+		weaponId = "PetWeapon", -- 占位符，防止特效检测报错
+		hitsLeft = 1,           -- 宠物子弹默认穿透 1 次 (即碰到就销毁)
+		hitTargets = {}         -- 必须加这个空表！否则碰到怪瞬间报错卡死
+	})
 end
 
 return PetController

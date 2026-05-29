@@ -53,6 +53,19 @@ function VFXController.CreateBillboard(part, text, textColor, yOffset)
 	if label and label:IsA("TextLabel") then
 		label.Text = text
 		label.TextColor3 = textColor
+		-- 动态高度自适应
+		-- 如果检测到文字里包含换行符 "\n"，就把 BillboardGui 的高度强行拉大
+		if string.find(text, "\n") then
+			billboard.Size = UDim2.new(
+				billboard.Size.X.Scale, 
+				billboard.Size.X.Offset, 
+				billboard.Size.Y.Scale * 1.5, -- 高度直接乘以 1.5 倍，给足两行字的空间
+				billboard.Size.Y.Offset
+			)
+			
+			-- 顺手把行间距 (LineHeight) 调紧凑一点，让两行字看起来更像一个整体
+			label.LineHeight = 0.8
+		end
 	else
 		warn("VFXController 警告: SuspensionText 内部没有找到名为 'Text' 的 TextLabel！")
 	end
@@ -379,6 +392,12 @@ function VFXController.PlayPlayerDamageVFX()
 	local shakeDuration = 0.25
 	local startTime = os.clock()
 	local camera = game.Workspace.CurrentCamera
+
+	-- 【核心修复】：在绑定新震动之前，先把旧的解绑清空
+	-- 加上 pcall 是为了防止第一次受击时，系统里本来就没有这个名字而报错
+	pcall(function()
+		RunService:UnbindFromRenderStep("PlayerScreenShake")
+	end)
 	
 	-- 【核心机制】：绑定在 Camera.Value + 1 优先级，确保在 PlayerController 锁死相机之后强行叠加偏移！
 	RunService:BindToRenderStep("PlayerScreenShake", Enum.RenderPriority.Camera.Value + 1, function()

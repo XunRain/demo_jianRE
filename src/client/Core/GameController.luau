@@ -127,8 +127,8 @@ function GameController.Start()
 					end
 				end
 				
-				-- 2. 延迟 5 秒后再进行清场
-				task.delay(5, function()
+				-- 2. 延迟 4 秒后再进行清场
+				task.delay(4, function()
 					-- 清理世界
 					Controllers.Map.ClearTracks()
 					Controllers.Encounter.ClearAll()
@@ -182,22 +182,30 @@ function GameController.ResetPlayerStats()
 	local Config = Controllers.Config
 	local startingStats = Controllers.Progression.CalculateStartingStats()
 
+	-- 【补充兜底】：彻底清空上一局吃门积累的百分比加成
+	player:SetAttribute("SPD_Bonus", 0)
+	player:SetAttribute("RNG_Bonus", 0)
+	player:SetAttribute("MaxHP_Bonus", 0)
+	player:SetAttribute("MultiShot", Config.BASE_MULTISHOT or 1)
 	player:SetAttribute("MaxHP", startingStats.MaxHP)
 	player:SetAttribute("HP", startingStats.MaxHP)
-	player:SetAttribute("ATK", startingStats.ATK)
-	player:SetAttribute("ASPD", startingStats.ASPD)
+	player:SetAttribute("ATK_Bonus", startingStats.ATK_Bonus)
+	player:SetAttribute("ASPD_Bonus", startingStats.ASPD_Bonus)
 	player:SetAttribute("Level", Config.BASE_LEVEL)
 	player:SetAttribute("EXP", Config.BASE_EXP)
 	player:SetAttribute("MagnetRadius", Config.MAGNET_RADIUS)
-	player:SetAttribute("SPD", Config.BASE_SPD)
-	player:SetAttribute("RNG", Config.BASE_RNG)
-	
-	-- 使用配置表计算开局升第 2 级所需的初始经验
 	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)
 	player:SetAttribute("IsLevelingUp", false)
-
-	-- 开局默认带入云端武器，如果没有则拿默认武器
 	player:SetAttribute("EquippedWeapon", player:GetAttribute("EquippedWeapon") or "DefaultWeapon")
+
+	-- 不仅改属性，同时强制同步给当前存在的肉身
+	if player.Character then
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+		if humanoid then
+			humanoid.MaxHealth = startingStats.MaxHP
+			humanoid.Health = startingStats.MaxHP
+		end
+	end
 end
 
 -- 触发单局跑酷战斗开局
@@ -221,11 +229,12 @@ function GameController.EnterCombat()
 		-- 3. 开局将单局局内属性刷新至健康的初始白模状态
 		GameController.ResetPlayerStats()
 		
-		-- 4. 强制同步原生 Humanoid 模型的血量上限与当前血量
+		-- 4. 同步真实的最大生命值，而不是写死的 BASE_HP
 		local humanoid = character:FindFirstChild("Humanoid")
 		if humanoid then
-			humanoid.MaxHealth = Config.BASE_HP
-			humanoid.Health = Config.BASE_HP
+			-- 读取刚刚在 ResetPlayerStats() 里算好的带有天赋加成的真实血量
+			humanoid.MaxHealth = player:GetAttribute("MaxHP")
+			humanoid.Health = player:GetAttribute("HP")
 		end
 	end
 	

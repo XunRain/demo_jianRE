@@ -126,7 +126,7 @@ function EncounterController.ResetPointers(startZ)
 end
 
 -- 生成单扇属性门 (随机决定是红门减益还是绿门增益)
-local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
+local function CreateGate(xOffset, gateWidth, zPos, trackStartX, trackStartY, isBuff)
 	local Config = Controllers.Config
 	-- 安全锁定当前正在跑的关卡配置，若处于开局未加载状态则拿第 1 关兜底
 	local currentStageConfig = stageConfig or Config.STAGES[1]
@@ -136,37 +136,25 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	
 	-- 根据不同属性，使用对应关卡的随机范围逻辑
 	local amount = 0
-	if attr == "HP" then
-		-- 从当前关卡配置读取
-		amount = math.random(currentStageConfig.GATE_HP_MIN, currentStageConfig.GATE_HP_MAX)
-	elseif attr == "ATK" then
-		-- 从当前关卡配置读取
-		amount = math.random(currentStageConfig.GATE_ATK_MIN, currentStageConfig.GATE_ATK_MAX)
-	elseif attr == "ASPD" then
-		-- 从当前关卡配置读取攻速范围，并保留原有的 1 位小数精度
-		local minAspd = currentStageConfig.GATE_ASPD_MIN
-		local maxAspd = currentStageConfig.GATE_ASPD_MAX
-		local rawVal = minAspd + math.random() * (maxAspd - minAspd)
-		amount = math.floor(rawVal * 10) / 10 
-		if amount == 0 then amount = minAspd end 
-	elseif attr == "SPD" then
-		-- 【新增】：弹速数值计算
-		local minSpd = currentStageConfig.GATE_SPD_MIN or 10
-		local maxSpd = currentStageConfig.GATE_SPD_MAX or 30
-		amount = math.random(minSpd, maxSpd)
-	elseif attr == "RNG" then
-		-- 【新增】：射程数值计算 (和攻速一样保留1位小数)
-		local minRng = currentStageConfig.GATE_RNG_MIN or 0.1
-		local maxRng = currentStageConfig.GATE_RNG_MAX or 0.4
-		local rawVal = minRng + math.random() * (maxRng - minRng)
-		amount = math.floor(rawVal * 10) / 10
-		if amount == 0 then amount = minRng end
+	if attr == "HP_Bonus" then
+		amount = math.random(currentStageConfig.GATE_HP_BONUS_MIN or 10, currentStageConfig.GATE_HP_BONUS_MAX or 30)
+	elseif attr == "MaxHP_Bonus" then
+		amount = math.random(currentStageConfig.GATE_MAXHP_BONUS_MIN or 5, currentStageConfig.GATE_MAXHP_BONUS_MAX or 15)
+	elseif attr == "ATK_Bonus" then
+		amount = math.random(currentStageConfig.GATE_ATK_BONUS_MIN or 5, currentStageConfig.GATE_ATK_BONUS_MAX or 15)
+	elseif attr == "ASPD_Bonus" then
+		amount = math.random(currentStageConfig.GATE_ASPD_BONUS_MIN or 5, currentStageConfig.GATE_ASPD_BONUS_MAX or 15)
+	elseif attr == "SPD_Bonus" then
+		amount = math.random(currentStageConfig.GATE_SPD_BONUS_MIN or 5, currentStageConfig.GATE_SPD_BONUS_MAX or 20)
+	elseif attr == "RNG_Bonus" then
+		amount = math.random(currentStageConfig.GATE_RNG_BONUS_MIN or 5, currentStageConfig.GATE_RNG_BONUS_MAX or 20)
 	end
 
 	if not isBuff then amount = -amount end
 
 	local gate = Instance.new("Part")
-	gate.Size = Vector3.new(Config.RUNWAY_LIMIT, 10, 2) 
+	-- 把原本的 Config.RUNWAY_LIMIT 替换为我们传进来的 gateWidth
+	gate.Size = Vector3.new(gateWidth, 10, 2) 
 	gate.Position = Vector3.new(trackStartX + xOffset, trackStartY + 5, zPos)
 	gate.Anchored = true
 	gate.CanCollide = false 
@@ -175,11 +163,19 @@ local function CreateGate(xOffset, zPos, trackStartX, trackStartY, isBuff)
 	gate.Color = isBuff and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0) 
 	
 	local sign = amount > 0 and "+" or ""
-	local displayName = Config.ATTRIBUTE_NAMES_CN[attr] or attr
-	local text = string.format("%s %s%s", displayName, sign, tostring(amount))
+	local displayName = (Config.ATTRIBUTE_NAMES_CN and Config.ATTRIBUTE_NAMES_CN[attr]) or attr
+	
+	-- =======================================================
+	-- 【核心修改】：动态百分号与换行排版
+	-- =======================================================
+	-- 如果底层的属性名包含 "Bonus" (如 ATK_Bonus)，就在数值末尾加个 "%"
+	local percentageSuffix = string.find(attr, "Bonus") and "%" or ""
+	
+	-- 使用 \n 进行强制换行。格式变更为：名字 \n 符号 数值 后缀
+	-- 最终效果例如: "攻击加成\n+13%" 或 "子弹弹速\n+15"
+	local text = string.format("%s\n%s%s%s", displayName, sign, tostring(amount), percentageSuffix)
 	
 	-- 呼叫 VFX 模块生成近大远小的 3D 文本
-	-- 传入负的半高 -(gate.Size.Y / 2) 抵消头顶偏移，使其绝对居中
 	Controllers.VFX.CreateBillboard(gate, text, Color3.new(1,1,1), -(gate.Size.Y / 2))
 
 	local folder = Workspace:FindFirstChild("LocalEncounters") or Instance.new("Folder", Workspace)
@@ -311,9 +307,17 @@ function EncounterController.SpawnEncountersInBlock(startZ, endZ, trackStartX, t
 				end
 			end
 			
-			-- 将判定好的状态传给生成函数
-			local leftGate = CreateGate(-Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY, leftIsBuff)
-			local rightGate = CreateGate(Config.RUNWAY_LIMIT/2, finalZ, trackStartX, trackStartY, rightIsBuff)
+			-- 计算门之间的缝隙与新的位置偏移
+			local gateGap = 2 -- 两个门中间留出的空隙宽度
+			local gateWidth = Config.RUNWAY_LIMIT - (gateGap / 2)
+			
+			-- 计算门的中心点偏移量：缝隙的一半 + 门自身宽度的一半
+			local leftOffset = -(gateGap / 2 + gateWidth / 2)
+			local rightOffset = (gateGap / 2 + gateWidth / 2)
+			
+			-- 将算好的位置偏移和宽度传给生成函数
+			local leftGate = CreateGate(leftOffset, gateWidth, finalZ, trackStartX, trackStartY, leftIsBuff)
+			local rightGate = CreateGate(rightOffset, gateWidth, finalZ, trackStartX, trackStartY, rightIsBuff)
 			
 			table.insert(EncounterController.ActiveGateGroups, { left = leftGate, right = rightGate, z = finalZ })
 		end
