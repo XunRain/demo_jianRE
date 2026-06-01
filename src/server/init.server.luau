@@ -2,8 +2,11 @@
 print("Initializing Server Architecture...")
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConfig"))
 
--- 1. 定义服务端服务映射表 (完美对齐客户端设计)
+-- 1. 定义服务端服务映射表 (对齐客户端设计)
 local Services = {
 	DataManager    = require(script.Core:WaitForChild("DataManager")),
 	NetworkManager = require(script.Network:WaitForChild("NetworkManager")),
@@ -27,9 +30,7 @@ for name, service in pairs(Services) do
 	end
 end
 
--- =========================================================
 -- 4. 统一收拢玩家生命周期分发（确保时序和绝对安全 带防抖锁，防止瞬间重复存档）
--- =========================================================
 
 -- 玩家加进服务器：呼叫数据中心读档
 Players.PlayerAdded:Connect(function(player)
@@ -38,8 +39,8 @@ Players.PlayerAdded:Connect(function(player)
 	-- 如果有局外初始血量等非永久存储同步，也可以在服务器的这里顺手做了
 	player.CharacterAdded:Connect(function(character)
 		local humanoid = character:WaitForChild("Humanoid")
-		humanoid.MaxHealth = player:GetAttribute("HP") or 100
-		humanoid.Health = player:GetAttribute("HP") or 100
+		humanoid.MaxHealth = player:GetAttribute("HP") or GameConfig.BASE_HP
+		humanoid.Health = player:GetAttribute("HP") or GameConfig.BASE_HP
 	end)
 end)
 

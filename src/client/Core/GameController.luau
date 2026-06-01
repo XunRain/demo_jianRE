@@ -34,6 +34,7 @@ function GameController.Start()
 			-- 交还相机控制权给 Roblox 默认的自由跟拍系统
 			camera.CameraType = Enum.CameraType.Custom
 			camera.CameraSubject = humanoid
+			camera.FieldOfView = 70
 			
 			-- 监听角色死亡事件，执行核心清场
 			humanoid.Died:Connect(function()
@@ -139,6 +140,7 @@ function GameController.Start()
 					if player.Character and player.Character:FindFirstChild("Humanoid") then
 						camera.CameraType = Enum.CameraType.Custom
 						camera.CameraSubject = player.Character:FindFirstChild("Humanoid")
+						camera.FieldOfView = 70
 					end
 					
 					print("画面定格结束，世界实体已彻底卸载清空。")

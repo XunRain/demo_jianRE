@@ -406,19 +406,13 @@ end
 
 -- 根据击杀怪物类型，决定爆多少数量、多少数值的战利品
 function EncounterController.TriggerDrops(enemyType, enemyPos)
-	local numDrops = 2
-	local totalExp = 10
-	local totalCoins = 10
-
-	if enemyType == "Elite" then
-		numDrops = 5
-		totalExp = 50
-		totalCoins = 50
-	elseif enemyType == "Boss" then
-		numDrops = 15
-		totalExp = 200
-		totalCoins = 100
-	end
+	local Config = Controllers.Config
+	
+	-- 直接从配置表读取掉落数据，找不到就拿 Basic 兜底
+	local dropConfig = Config.ENEMY_DROPS[enemyType] or Config.ENEMY_DROPS["Basic"]
+	local numDrops = dropConfig.NumDrops
+	local totalExp = dropConfig.Exp
+	local totalCoins = dropConfig.Coins
 
 	-- 平均分配到每个球上的数值
 	local expPerDrop = math.ceil(totalExp / numDrops)
@@ -454,17 +448,27 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 				if remotes and remotes:FindFirstChild("AddCoin") then
 					remotes.AddCoin:FireServer(drop.value)
 				end
+
+				-- 触发金币飘字特效
+				local coinIconId = "rbxassetid://127099213486402" -- 金币图片 ID
+				local cleanText = "+" .. tostring(drop.value)
+				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(255, 215, 0), coinIconId)
 			elseif drop.type == "Exp" then
 				-- 【核心修复】改为调用 ProgressionController 里的经验管理函数
 				Controllers.Progression.AddExp(drop.value)
+
+				-- 触发经验飘字特效
+				local expIconId = "rbxassetid://83939430689931" -- 经验图片 ID
+				local cleanText = "+" .. tostring(drop.value)
+				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(100, 255, 100), expIconId)
 			end
 			
 			drop.part:Destroy()
 			table.remove(EncounterController.ActiveDrops, i)
 			
 		else
-			-- 2. 磁吸牵引逻辑 (爆破散开的前 0.5 秒处于无敌飞行状态，不产生磁吸)
-			if (os.clock() - drop.spawnTime) > 0.5 then
+			-- 2. 磁吸牵引逻辑 (爆破散开的前置时间处于无敌飞行状态，不产生磁吸)
+			if (os.clock() - drop.spawnTime) > Config.DROP_MAGNET_DELAY then
 				if dist < currentMagnetRadius then
 					-- 计算从掉落物指向玩家的方向向量
 					local dir = (pPos - dPos).Unit 

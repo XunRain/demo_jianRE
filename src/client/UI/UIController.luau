@@ -56,11 +56,13 @@ function UIController.Start()
 		-- 1. 刷新屏幕 UI 控制
 		if mainUI then
 			-- 金币常驻常显
-			local coinsLabel = mainUI:FindFirstChild("CoinsLabel")
-			if coinsLabel and coinsLabel:IsA("TextLabel") then
-				coinsLabel.Text = "货币: " .. tostring(coins)
+			local coinContainer = mainUI:FindFirstChild("CoinContainer")
+			if coinContainer then
+				local coinText = coinContainer:FindFirstChild("CoinText")
+				if coinText and coinText:IsA("TextLabel") then
+					coinText.Text = tostring(coins) -- 只显示纯数字！
+				end
 			end
-
 			-- 退出按钮
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
@@ -214,9 +216,9 @@ function UIController.Start()
 
 					-- 应用玩家选择的增益
 					if attr == "ALL" then
-						player:SetAttribute("ATK_Bonus", (player:GetAttribute("ATK_Bonus") or 0) + 10)
-						player:SetAttribute("ASPD_Bonus", (player:GetAttribute("ASPD_Bonus") or 0) + 10)
-						applyMaxHpBonus(10) -- 全能增益：生命上限 + 10%
+						player:SetAttribute("ATK_Bonus", (player:GetAttribute("ATK_Bonus") or 0) + amount)
+						player:SetAttribute("ASPD_Bonus", (player:GetAttribute("ASPD_Bonus") or 0) + amount)
+						applyMaxHpBonus(amount) -- 全能增益：生命上限 + amount%
 					elseif attr == "MaxHP_Bonus" then
 						applyMaxHpBonus(amount)
 					else
@@ -288,8 +290,8 @@ function UIController.Start()
 						card:SetAttribute("BuffAmount", buff.Amount)
 						
 						-- 智能添加 % 符号
-						if buff.Attr == "ALL" then 
-							card.Text = "全能提升\n各项 +10%" 
+						if buff.Attr == "ALL" then
+							card.Text = "全能提升\n各项 +" .. tostring(buff.Amount) .. "%"
 						else
 							local suffix = string.find(buff.Attr, "Bonus") and "%" or ""
 							card.Text = buff.Name .. "\n+" .. tostring(buff.Amount) .. suffix
@@ -649,6 +651,20 @@ function UIController.Start()
 	-- 全局属性改变触发器
 	player.AttributeChanged:Connect(function(attributeName)
 		updateUI() -- 属性一变，只驱动轻量级的渲染，绝不重复绑定事件
+
+		-- 将 UI 动画表现移交给特效模块处理
+		if attributeName == "Coins" then
+			local playerGui = player:FindFirstChild("PlayerGui")
+			local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
+			
+			-- 寻找并弹跳整个 CoinContainer
+			local coinContainer = mainUI and mainUI:FindFirstChild("CoinContainer")
+			
+			if coinContainer then
+				-- 呼叫 VFX 模块，传入需要跳动的 UI 控件
+				Controllers.VFX.PlayUIBounce(coinContainer)
+			end
+		end
 	end)
 	
 	player.CharacterAdded:Connect(function(newCharacter)

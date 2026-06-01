@@ -116,8 +116,10 @@ function PlayerController.OnRenderStepped(dt)
 	humanoid.WalkSpeed = desiredVelocity.Magnitude
 	humanoid:Move(desiredVelocity.Unit, false)
 	
-	-- 相机接管：锁定到玩家背后的无人机跟拍位
+	-- 【核心修改】：相机接管，强制锁定 FOV 打造扁平化透视
 	camera.CameraType = Enum.CameraType.Scriptable
+	-- 强制应用配置表里的 FOV，屏蔽 Roblox 系统的默认 70
+	camera.FieldOfView = Config.CAMERA_FOV or 35 
 	local targetPos = rootPart.Position
 	local camPos = targetPos + Config.CAMERA_OFFSET
 	local lookAtPos = targetPos + Config.CAMERA_LOOK_OFFSET

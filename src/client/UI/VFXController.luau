@@ -418,5 +418,109 @@ function VFXController.PlayPlayerDamageVFX()
 	end)
 end
 
+-- 接口 12：播放带有图标的拾取漂浮文字 (2D 屏幕红框随机版)
+function VFXController.PlayLootText(character, amountText, color, iconId)
+	-- 获取本地玩家的 PlayerGui
+	local player = Players.LocalPlayer
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then return end
+	
+	-- 创建一个专门用于存放战利品飘字的独立图层
+	local lootGui = playerGui:FindFirstChild("LootTextGui")
+	if not lootGui then
+		lootGui = Instance.new("ScreenGui")
+		lootGui.Name = "LootTextGui"
+		lootGui.Parent = playerGui
+	end
+
+	-- 1. 创建一个透明的背景容器来容纳横向排版 (尺寸固定为 150x45 像素)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(0, 150, 0, 45)
+	container.BackgroundTransparency = 1
+	
+	-- =======================================================
+	-- 【核心修改】：在红框范围内计算随机生成坐标
+	-- 假设红框范围大约是：X轴 15%~85%，Y轴 10%~75%
+	-- =======================================================
+	local randomX = math.random(15, 85) / 100
+	local randomY = math.random(10, 75) / 100
+	
+	-- 将中心点对齐到随机出来的坐标点上
+	container.AnchorPoint = Vector2.new(0.5, 0.5)
+	container.Position = UDim2.new(randomX, 0, randomY, 0)
+	container.Parent = lootGui
+	
+	-- 2. 添加水平自动排版器
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 8) 
+	layout.Parent = container
+	
+	-- 3. 创建真实的图标组件 (ImageLabel)
+	local icon = Instance.new("ImageLabel")
+	icon.Size = UDim2.new(1, 0, 1, 0) 
+	icon.SizeConstraint = Enum.SizeConstraint.RelativeYY 
+	icon.BackgroundTransparency = 1
+	icon.Image = iconId
+	icon.Parent = container
+	
+	-- 4. 创建文字组件
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.6, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.FredokaOne
+	label.TextColor3 = color
+	label.Text = amountText 
+	label.Parent = container
+	
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(150, 80, 0)
+	stroke.Thickness = 2
+	stroke.Parent = label
+	
+	-- 5. 动画：向上漂浮一段距离 (Y 轴减去 10% 屏幕高度) + 图文渐渐透明
+	local floatInfo = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local fadeInfo = TweenInfo.new(0.4, Enum.EasingStyle.Linear, Enum.EasingDirection.In, 0, false, 0.2)
+	
+	local targetPos = UDim2.new(randomX, 0, randomY - 0.1, 0)
+	
+	TweenService:Create(container, floatInfo, {Position = targetPos}):Play()
+	TweenService:Create(label, fadeInfo, {TextTransparency = 1}):Play()
+	TweenService:Create(stroke, fadeInfo, {Transparency = 1}):Play()
+	TweenService:Create(icon, fadeInfo, {ImageTransparency = 1}):Play() 
+	
+	game.Debris:AddItem(container, 0.7)
+end
+
+-- 接口 13：2D UI 控件弹跳反馈特效
+function VFXController.PlayUIBounce(uiElement)
+	if not uiElement or uiElement:GetAttribute("IsBouncing") then return end
+	
+	-- 加上动画锁，防止极短时间多次调用导致动画鬼畜
+	uiElement:SetAttribute("IsBouncing", true)
+	
+	-- 智能注入 UIScale 控件，绝对不会破坏原有的相对排版 (UDim2)
+	local uiScale = uiElement:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Parent = uiElement
+	end
+	
+	-- 缓动序列：瞬间放大到 1.3 倍 -> Q弹地缩小回 1 倍
+	local bounceUp = TweenService:Create(uiScale, TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Scale = 1.3})
+	local bounceDown = TweenService:Create(uiScale, TweenInfo.new(0.25, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out), {Scale = 1})
+	
+	bounceUp:Play()
+	bounceUp.Completed:Connect(function()
+		bounceDown:Play()
+	end)
+	
+	bounceDown.Completed:Connect(function()
+		uiElement:SetAttribute("IsBouncing", false)
+	end)
+end
 
 return VFXController

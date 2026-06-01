@@ -8,18 +8,23 @@ local GameConfig = {
     RUN_SPEED_INCREMENT = 4,  -- 每过一关，移速增加 2 点
     LATERAL_SPEED = 25,       -- 左右移动速度
     RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
+    MAX_RUN_SPEED = 45,       -- 最大跑酷速度
 
     -- 2. 镜头配置
 	-- 正常镜头
     -- CAMERA_OFFSET = Vector3.new(0, 6, 15),
     -- CAMERA_LOOK_OFFSET = Vector3.new(0, 2, -15),
 
-	-- 高空无人机镜头
-    CAMERA_OFFSET = Vector3.new(0, 20, 10),
-    CAMERA_LOOK_OFFSET = Vector3.new(0, 4, -10),
+    -- 高空俯视镜头
+    -- FOV：降低 FOV (默认70)，数值越小，透视畸变越弱，越接近 2.5D 质感
+    CAMERA_FOV = 40,
+    -- 相机位置：因为 FOV 变小了，所以必须把相机往后、往上拉得非常远
+    CAMERA_OFFSET = Vector3.new(0, 28, 40), 
+    -- 相机视线：让相机视线看向玩家前方更远的地方，给上方留出足够的视野看清前方的门和怪
+    CAMERA_LOOK_OFFSET = Vector3.new(0, 7, -4),
 
     -- 3. 地图与跑道生成配置
-    TRACK_LENGTH = 120,       -- 单块跑道长度
+    TRACK_LENGTH = 360,       -- 单块跑道长度
     TRACK_THICKNESS = 2,      -- 跑道厚度
     SPAWN_AHEAD = 600,        -- 提前生成距离
     CLEANUP_BEHIND = 100,     -- 销毁距离
@@ -41,8 +46,8 @@ local GameConfig = {
     STAGES = {
         [1] = {
             Length = 1000,
-            GateInterval = 150,      
-            MobInterval = 100,       
+            GateInterval = 150,
+            MobInterval = 100,
             MobsPerGroup = {2, 3},
             EliteCount = 1,          
             HasBoss = true,          
@@ -81,7 +86,7 @@ local GameConfig = {
             GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
             
 
-            GateBuffChance = 0.6,
+            GateBuffChance = 0.7,
         },
         [3] = {
             Length = 1000,          
@@ -102,7 +107,7 @@ local GameConfig = {
             GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
             GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
 
-            GateBuffChance = 0.6,
+            GateBuffChance = 0.7,
         },
         [4] = {
             Length = 1000,          
@@ -123,7 +128,7 @@ local GameConfig = {
             GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
             GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
 
-            GateBuffChance = 0.6,
+            GateBuffChance = 0.7,
         },
         [5] = {
             Length = 1000,
@@ -153,7 +158,7 @@ local GameConfig = {
     ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
     ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 30%（乘区） 
 
-    -- 8. 属性门全局配置池 (可以随时在这里增删门里能刷出的属性)
+    -- 属性门全局配置池 (可以随时在这里增删门里能刷出的属性)
     GATE_ATTRIBUTE_POOL = {"ATK_Bonus", "ASPD_Bonus", "HP_Bonus", "MaxHP_Bonus", "SPD_Bonus", "RNG_Bonus"},
 
     -- 属性中文化映射表 (用于 3D 文字、UI 界面显示等)
@@ -169,9 +174,10 @@ local GameConfig = {
     -- 7. 掉落物与磁吸机制
     MAGNET_RADIUS = 15,       
     COLLECT_RADIUS = 5,       
-    MAGNET_SPEED = 75,        
+    MAGNET_SPEED = 75,
+    DROP_MAGNET_DELAY = 0.25, -- 掉落物刚爆出来时的“不可吸附延迟时间”(秒)
 
-    -- 8. 局外天赋商店配置 (清理测试数据，回归正式数值)
+    -- 8. 局外天赋商店配置
 	TALENTS = {
 		Talent_HP = {
 			Name = "血量强化",
@@ -279,10 +285,17 @@ local GameConfig = {
         { Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
         { Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
         { Name = "磁力范围", Attr = "MagnetRadius", Amount = 5, Color = Color3.fromRGB(180, 100, 255) }, -- 这个保留绝对值
-        { Name = "小幅全能", Attr = "ALL", Amount = 0, Color = Color3.fromRGB(255, 215, 0) },
+        { Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
 
         -- 将弹道增加的权重压低（只有基础属性的一半概率）
         { Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 }
+    },
+
+    -- 16. 怪物击杀掉落配置
+    ENEMY_DROPS = {
+        Basic = { NumDrops = 2, Exp = 20, Coins = 10 },
+        Elite = { NumDrops = 5, Exp = 50, Coins = 50 },
+        Boss  = { NumDrops = 15, Exp = 200, Coins = 100 }
     },
     
 }
@@ -301,10 +314,10 @@ function GameConfig.GetRunSpeed(stageNum)
 	-- 公式：基础速度 25 + (当前关卡数 - 1) * 每关增加的速度 2
 	local currentSpeed = GameConfig.RUN_SPEED + (stageNum - 1) * GameConfig.RUN_SPEED_INCREMENT
 	
-	-- 可选：加上一个绝对速度上限，防止玩家跑到 20 关时速度达到 60 直接瞬移穿墙
-	-- 如果不需要上限，直接 return currentSpeed 即可
-	local MAX_SPEED = 45 
-	if currentSpeed > MAX_SPEED then currentSpeed = MAX_SPEED end
+	-- 加上一个绝对速度上限，防止玩家跑到 20 关时速度达到 60 直接瞬移穿墙
+	if currentSpeed > GameConfig.MAX_RUN_SPEED then 
+		currentSpeed = GameConfig.MAX_RUN_SPEED 
+	end
 	
 	return currentSpeed
 end

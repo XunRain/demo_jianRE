@@ -56,8 +56,8 @@ function ProgressionController.CalculateStartingStats()
 	-- 从 Config 读取每级的成长加成系数
 	local extraHp = (player:GetAttribute("Talent_HP") or 0) * Config.TALENTS.Talent_HP.StatIncrease
 	-- 【修改】：局外的天赋也转化为加成百分比 (例如每级天赋加 5% 攻击)
-	local atkBonus = (player:GetAttribute("Talent_ATK") or 0) * 5 
-	local aspdBonus = (player:GetAttribute("Talent_ASPD") or 0) * 5
+	local atkBonus = (player:GetAttribute("Talent_ATK") or 0) * Config.TALENTS.Talent_ATK.StatIncrease 
+	local aspdBonus = (player:GetAttribute("Talent_ASPD") or 0) * Config.TALENTS.Talent_ASPD.StatIncrease
 	
 	-- 基础值 + 局外天赋加成 = 本局开局最终属性
 	return {
