@@ -72,6 +72,26 @@ function NetworkManager.Start()
     -- 宠物抽卡与装备宠物
     local HttpService = game:GetService("HttpService")
 
+	-- 安全解析玩家宠物背包；坏 JSON 或未知宠物会被过滤掉，避免服务端流程报错
+	local function decodeOwnedPets(player)
+		local success, decoded = pcall(function()
+			return HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+		end)
+
+		if not success or type(decoded) ~= "table" then
+			return {}
+		end
+
+		local owned = {}
+		for _, petId in ipairs(decoded) do
+			if type(petId) == "string" and GameConfig.PETS[petId] then
+				table.insert(owned, petId)
+			end
+		end
+
+		return owned
+	end
+
 	-- 1. 抽卡请求 (使用 RemoteFunction，因为需要向客户端返回抽到了什么)
 	local rollPetRF = remotes:FindFirstChild("RollPet") or Instance.new("RemoteFunction", remotes)
 	rollPetRF.Name = "RollPet"
@@ -82,12 +102,16 @@ function NetworkManager.Start()
 			-- 扣钱
 			player:SetAttribute("Coins", coins - GameConfig.PET_GACHA_COST)
 			
-			-- 随机出货
-			local pool = GameConfig.PET_POOL
-			local resultId = pool[math.random(1, #pool)]
+			-- 按宠物配置表权重随机出货
+			local resultId = GameConfig.RollPetId()
+			if not resultId or not GameConfig.PETS[resultId] then
+				warn("宠物抽卡失败：配置表没有可用宠物。")
+				player:SetAttribute("Coins", coins)
+				return nil
+			end
 			
 			-- 解析 JSON 背包 -> 塞入新宠物 -> 重新压成 JSON 存入玩家属性
-			local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+			local owned = decodeOwnedPets(player)
 			table.insert(owned, resultId)
 			player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
 			
@@ -108,7 +132,11 @@ function NetworkManager.Start()
 			return
 		end
 
-		local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+		if type(petId) ~= "string" or not GameConfig.PETS[petId] then
+			return
+		end
+
+		local owned = decodeOwnedPets(player)
 		-- 校验是否真的拥有该宠物
 		if table.find(owned, petId) then
 			player:SetAttribute("EquippedPet", petId)

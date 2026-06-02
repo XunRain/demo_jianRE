@@ -6,10 +6,131 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
 local Controllers
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local currentPetModel = nil
+
+-- 获取一个 Part 或 Model 内部第一个可用于定位/挂载物理组件的 BasePart
+local function getFirstBasePart(instance)
+	if not instance then return nil end
+	if instance:IsA("BasePart") then return instance end
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+-- 预处理宠物模型：补齐 PrimaryPart，并关闭碰撞/物理下落，保证跟随时稳定
+local function prepareMovableModel(instance)
+	if not instance then return nil end
+
+	local rootPart = getFirstBasePart(instance)
+	if instance:IsA("Model") and not instance.PrimaryPart and rootPart then
+		instance.PrimaryPart = rootPart
+	end
+
+	if instance:IsA("BasePart") then
+		instance.Anchored = true
+		instance.CanCollide = false
+	end
+
+	for _, part in ipairs(instance:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+		end
+	end
+
+	return rootPart
+end
+
+-- 统一设置子弹预制体的物理状态，避免 Studio 里的 Anchored/碰撞配置影响发射
+local function setProjectilePhysics(instance, anchored)
+	if not instance then return end
+
+	if instance:IsA("BasePart") then
+		instance.Anchored = anchored
+		instance.CanCollide = false
+	end
+
+	for _, part in ipairs(instance:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = anchored
+			part.CanCollide = false
+		end
+	end
+end
+
+-- 根据当前局内升级加成，计算风刃实际横向范围，并用配置上限兜住
+local function getWindBladeWidth(petConfig)
+	local baseWidth = petConfig.WindBladeBaseWidth or 20
+	local maxWidth = petConfig.WindBladeMaxWidth or 40
+	local rangeBonus = player:GetAttribute("WindBlade_Range_Bonus") or 0
+	return math.min(baseWidth * (1 + (rangeBonus / 100)), maxWidth)
+end
+
+-- 计算屏幕中心对应的世界坐标，让风刃从玩家视野中央出现而不是从宠物身上出现
+local function getScreenCenterSpawnPos(fallbackPos)
+	local currentCamera = Workspace.CurrentCamera or camera
+	if not currentCamera then
+		return fallbackPos
+	end
+
+	-- 用屏幕中心射线投到当前高度平面上，让风刃看起来从画面中央出现
+	local viewportSize = currentCamera.ViewportSize
+	local centerRay = currentCamera:ViewportPointToRay(viewportSize.X / 2, viewportSize.Y / 2)
+	local directionY = centerRay.Direction.Y
+	if math.abs(directionY) < 0.001 then
+		return fallbackPos
+	end
+
+	local t = (fallbackPos.Y - centerRay.Origin.Y) / directionY
+	if t <= 0 then
+		return fallbackPos
+	end
+
+	local spawnPos = centerRay.Origin + centerRay.Direction * t
+	return Vector3.new(spawnPos.X, fallbackPos.Y, spawnPos.Z)
+end
+
+-- 根据风刃范围调整子弹模型 X 尺寸，兼容 Part 和 Model 两种 Studio 预制体
+local function resizeWindBladeBullet(bullet, targetWidth, baseWidth)
+	local scaleX = targetWidth / math.max(baseWidth, 0.001)
+
+	-- Studio 里的风刃模型以 X=baseWidth 为初始尺寸；这里只按 X 轴等比拉宽
+	if bullet:IsA("BasePart") then
+		bullet.Size = Vector3.new(targetWidth, bullet.Size.Y, bullet.Size.Z)
+		return
+	end
+
+	for _, part in ipairs(bullet:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Size = Vector3.new(part.Size.X * scaleX, part.Size.Y, part.Size.Z)
+		end
+	end
+end
+
+-- 收集当前角色身上的宠物本体和分身，并返回稳定的开火顺序
+local function getPetFireOrder(character)
+	local activePets = {}
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child.Name == "ActivePet" or string.match(child.Name, "^ActivePet_Clone") then
+			table.insert(activePets, child)
+		end
+	end
+
+	-- 固定发射顺序：本体先出手，分身按编号依次出手，避免每轮视觉顺序跳来跳去
+	table.sort(activePets, function(a, b)
+		if a.Name == "ActivePet" then return true end
+		if b.Name == "ActivePet" then return false end
+
+		local aIndex = tonumber(string.match(a.Name, "ActivePet_Clone_(%d+)")) or math.huge
+		local bIndex = tonumber(string.match(b.Name, "ActivePet_Clone_(%d+)")) or math.huge
+		return aIndex < bIndex
+	end)
+
+	return activePets
+end
 
 function PetController.Init(deps)
 	Controllers = deps
@@ -62,13 +183,8 @@ function PetController.Start()
 				local character = player.Character
 				if not character then task.wait(1); continue end
 				
-				-- 【修改】：收集所有宠物 (本体 + 分身)
-				local activePets = {}
-				for _, child in ipairs(character:GetChildren()) do
-					if child.Name == "ActivePet" or string.match(child.Name, "^ActivePet_Clone") then
-						table.insert(activePets, child)
-					end
-				end
+				-- 收集所有宠物并按稳定顺序排列，后续用于错峰开火
+				local activePets = getPetFireOrder(character)
 				
 				if #activePets == 0 then task.wait(1); continue end
 
@@ -76,19 +192,29 @@ function PetController.Start()
 				local aspdBonus = player:GetAttribute("Pet_ASPD_Bonus") or 0
 				local baseCooldown = petConfig.Cooldown or 2
 				local actualCooldown = baseCooldown / (1 + (aspdBonus / 100))
-				
 				local castCount = petConfig.CastCount or 1
+				local petStaggerDelay = Controllers.Config.PET_FIRE_STAGGER_DELAY or 0.12
+				local castStaggerDelay = Controllers.Config.PET_CAST_STAGGER_DELAY or 0.15
 				
 				for i = 1, castCount do
 					if not Controllers.Game.IsCombatActive then break end
-					-- 让所有分身和本体同时开火！
-					for _, pModel in ipairs(activePets) do
+
+					-- 多宠物错峰开火：保留总伤害，但让玩家能清楚看到每只宠物依次产生子弹
+					for petIndex, pModel in ipairs(activePets) do
+						if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then break end
 						PetController.ShootProjectile(petConfig, pModel)
+						if petIndex < #activePets then
+							task.wait(petStaggerDelay)
+						end
 					end
-					if i < castCount then task.wait(0.15) end 
+
+					if i < castCount then task.wait(castStaggerDelay) end
 				end
 				
-				task.wait(actualCooldown) 
+				-- 从本轮开始到下一轮开始的间隔基本不变，错峰时间不会明显降低整体输出频率
+				local staggerTime = math.max(0, (#activePets - 1) * petStaggerDelay)
+				local remainingCooldown = math.max(0.05, actualCooldown - staggerTime)
+				task.wait(remainingCooldown)
 			else
 				task.wait(0.5) 
 			end
@@ -110,24 +236,20 @@ function PetController.RefreshPetModel()
 
 	-- 【核心修复】：去 ReplicatedStorage 寻找真实的宠物模型
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local petModels = ReplicatedStorage:FindFirstChild("Model"):FindFirstChild("Pets")
+	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+	local petModels = modelFolder and modelFolder:FindFirstChild("Pets")
 	local petTemplate = petModels and petModels:FindFirstChild(equipped)
 
 	if petTemplate then
 		currentPetModel = petTemplate:Clone()
 		-- 遍历模型里的所有零件，确保它们不会卡住玩家，且不会掉下虚空
-		for _, part in ipairs(currentPetModel:GetDescendants()) do
-			if part:IsA("BasePart") then
-				part.Anchored = true
-				part.CanCollide = false
-			end
-		end
+		prepareMovableModel(currentPetModel)
 		currentPetModel.Parent = Workspace
 	else
 		-- 兜底：如果策划配了表，但美术还没做模型，就继续用原来的方块
 		currentPetModel = Instance.new("Part")
 		currentPetModel.Size = Vector3.new(2, 2, 2)
-		currentPetModel.Color = petConfig.Color
+		currentPetModel.Color = petConfig.Color or Color3.fromRGB(255, 255, 255)
 		currentPetModel.Anchored = true
 		currentPetModel.CanCollide = false
 		currentPetModel.Material = Enum.Material.Neon
@@ -166,10 +288,19 @@ function PetController.ShootProjectile(petConfig, petModel)
 	local hitVfx = petConfig.HitVFX
 	local pierce = petConfig.PierceCount or 1
 	local aoe = petConfig.AOERadius
+	local windBladeBaseWidth = petConfig.WindBladeBaseWidth or 20
+	local windBladeWidth = getWindBladeWidth(petConfig)
+
+	if skillType == "WindBlade" then
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		local fallbackPos = rootPart and (rootPart.Position + Vector3.new(0, 2, -2)) or spawnPos
+		spawnPos = getScreenCenterSpawnPos(fallbackPos)
+		playerPos = spawnPos
+	end
 	
 	-- 【公用模块】：前场智能雷达 (寻找前方最近的活物)
 	local enemies = Controllers.Encounter.ActiveEnemies
-	local playerPos = petModel.PrimaryPart.Position
 	local targetEnemy = nil
 	local minDistance = math.huge
 	
@@ -198,14 +329,27 @@ function PetController.ShootProjectile(petConfig, petModel)
 	-- 生成与发射逻辑
 	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
 	local petsVfxFolder = vfxFolder and vfxFolder:FindFirstChild("Pets")
-	local bulletPrefab = petsVfxFolder and petsVfxFolder:FindFirstChild(bulletVfxName)
+	local bulletPrefab = (petsVfxFolder and bulletVfxName) and petsVfxFolder:FindFirstChild(bulletVfxName) or nil
 	
 	local bullet
 	
 	if bulletPrefab then
 		-- 情况 A：美术做好了子弹模型
 		bullet = bulletPrefab:Clone()
-		local mainPart = bullet:IsA("Model") and bullet.PrimaryPart or bullet
+		local mainPart = getFirstBasePart(bullet)
+		if bullet:IsA("Model") and not bullet.PrimaryPart and mainPart then
+			bullet.PrimaryPart = mainPart
+		end
+
+		if not mainPart then
+			bullet:Destroy()
+			return
+		end
+
+		setProjectilePhysics(bullet, skillType == "Smite" and smiteTargetPos ~= nil)
+		if skillType == "WindBlade" then
+			resizeWindBladeBullet(bullet, windBladeWidth, windBladeBaseWidth)
+		end
 		
 		if skillType == "Smite" and smiteTargetPos then
 			bullet:PivotTo(CFrame.new(smiteTargetPos))
@@ -241,7 +385,7 @@ function PetController.ShootProjectile(petConfig, petModel)
 		bullet.Anchored = false
 		bullet.CanCollide = false
 		bullet.Material = Enum.Material.Neon
-		bullet.Color = petConfig.Color
+		bullet.Color = petConfig.Color or Color3.fromRGB(255, 255, 255)
 		
 		if skillType == "Smite" and smiteTargetPos then
 			bullet.Size = Vector3.new(4, 40, 4) 
@@ -250,11 +394,14 @@ function PetController.ShootProjectile(petConfig, petModel)
 			bullet.Anchored = true 
 		else
 			if skillType == "WindBlade" then
-				bullet.Size = Vector3.new(12, 1, 3) 
+				bullet.Size = Vector3.new(windBladeWidth, 1, 3)
 				bullet.Shape = Enum.PartType.Block
 			elseif skillType == "Fireball" then
 				bullet.Size = Vector3.new(4, 4, 4) 
 				bullet.Shape = Enum.PartType.Ball
+			else
+				bullet.Size = Vector3.new(3, 1, 3)
+				bullet.Shape = Enum.PartType.Block
 			end
 			
 			bullet.CFrame = CFrame.new(spawnPos)
@@ -285,8 +432,14 @@ function PetController.ShootProjectile(petConfig, petModel)
 	bullet.Parent = localProjectiles
 	game.Debris:AddItem(bullet, actualLifetime) 
 
+	local bulletPart = getFirstBasePart(bullet)
+	if not bulletPart then
+		bullet:Destroy()
+		return
+	end
+
 	table.insert(Controllers.Combat.ActiveBullets, { 
-		part = bullet:IsA("Model") and bullet.PrimaryPart or bullet, 
+		part = bulletPart,
 		damage = petDmg, 
 		weaponId = "PetWeapon",
 		hitsLeft = pierce,           

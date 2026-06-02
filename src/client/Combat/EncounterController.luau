@@ -249,7 +249,7 @@ local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackStartY)
 	-- 呼叫 VFX 模块生成 3D 文本
 	-- 减去怪物的完整高度 (-enemy.Size.Y) 将其拉到脚底，
 	-- 并加上 1 Stud 的安全抬升 (+ 1)，防止血量文字穿透嵌进地板里
-	local hpLabel = Controllers.VFX.CreateBillboard(enemy, tostring(hp), Color3.new(1,1,1), -enemy.Size.Y + 1)
+	local hpLabel = Controllers.VFX.CreateBillboard(enemy, Controllers.Config.FormatNumber(hp), Color3.new(1,1,1), -enemy.Size.Y + 1)
 	
 	table.insert(EncounterController.ActiveEnemies, { 
 		part = enemy, 
@@ -451,7 +451,7 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 
 				-- 触发金币飘字特效
 				local coinIconId = "rbxassetid://127099213486402" -- 金币图片 ID
-				local cleanText = "+" .. tostring(drop.value)
+				local cleanText = "+" .. Config.FormatNumber(drop.value)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(255, 215, 0), coinIconId)
 			elseif drop.type == "Exp" then
 				-- 【核心修复】改为调用 ProgressionController 里的经验管理函数
@@ -459,7 +459,7 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 
 				-- 触发经验飘字特效
 				local expIconId = "rbxassetid://83939430689931" -- 经验图片 ID
-				local cleanText = "+" .. tostring(drop.value)
+				local cleanText = "+" .. Config.FormatNumber(drop.value)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(100, 255, 100), expIconId)
 			end
 			

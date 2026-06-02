@@ -52,6 +52,7 @@ function UIController.Start()
 		local requiredExp = player:GetAttribute("RequiredEXP") or (lvl * Controllers.Config.EXP_PER_LEVEL) 
 		local inCombat = player:GetAttribute("InCombat") == true
       	local currentStage = player:GetAttribute("CurrentStage") or 1
+		local formatNumber = Controllers.Config.FormatNumber
 
 		-- 1. 刷新屏幕 UI 控制
 		if mainUI then
@@ -60,7 +61,7 @@ function UIController.Start()
 			if coinContainer then
 				local coinText = coinContainer:FindFirstChild("CoinText")
 				if coinText and coinText:IsA("TextLabel") then
-					coinText.Text = tostring(coins) -- 只显示纯数字！
+					coinText.Text = formatNumber(coins)
 				end
 			end
 			-- 退出按钮
@@ -128,7 +129,7 @@ function UIController.Start()
 					
 					local healthText = combatHub:FindFirstChild("HealthText", true)
 					if healthText and healthText:IsA("TextLabel") then
-						healthText.Text = math.floor(hp) .. " / " .. math.floor(maxHp)
+						healthText.Text = formatNumber(hp) .. " / " .. formatNumber(maxHp)
 					end
 
 					-- 经验条比例并更新 Size
@@ -140,7 +141,7 @@ function UIController.Start()
 					
 					local expText = combatHub:FindFirstChild("ExpText", true)
 					if expText and expText:IsA("TextLabel") then
-						expText.Text = math.floor(exp) .. " / " .. math.floor(requiredExp)
+						expText.Text = formatNumber(exp) .. " / " .. formatNumber(requiredExp)
 					end
 				end
 			end
@@ -162,7 +163,7 @@ function UIController.Start()
 			-- 刷新 3D UI 内部的文本
 			local statsLabel = statsUI:FindFirstChild("StatsLabel")
 			if statsLabel and statsLabel:IsA("TextLabel") then
-				statsLabel.Text = string.format("Lv.%d | ATK: %d", lvl, displayAtk)
+				statsLabel.Text = string.format("Lv.%d | ATK: %s", lvl, formatNumber(displayAtk))
 			end
 		end
 
@@ -177,11 +178,109 @@ function UIController.Start()
 		
 		if not levelUpPanel then return end
 
-		local cards = {
-			levelUpPanel:FindFirstChild("Card1"),
-			levelUpPanel:FindFirstChild("Card2"),
-			levelUpPanel:FindFirstChild("Card3")
-		}
+		-- 收集 Studio 里已经设计好的升级卡；不要直接构造含 nil 的数组，否则 ipairs 会在缺失卡片处提前停止
+		local cards = {}
+		for i = 1, 3 do
+			local card = levelUpPanel:FindFirstChild("Card" .. tostring(i))
+			if card and card:IsA("GuiButton") then
+				table.insert(cards, card)
+			else
+				warn("升级卡 UI 缺失或类型不正确: Card" .. tostring(i))
+			end
+		end
+
+		local cardBaseRotations = {}
+		for _, card in ipairs(cards) do
+			if card and card:IsA("GuiButton") then
+				cardBaseRotations[card] = card.Rotation
+			end
+		end
+
+		-- 获取升级卡稳定 ID，用于记录“这张卡已经选过几次”
+		local function getBuffId(buff)
+			return buff.BuffId or buff.Attr or buff.Name
+		end
+
+		-- 获取升级卡等级 Attribute 名；每局开始会由 GameController 统一清零
+		local function getBuffLevelKey(buffOrId)
+			local buffId = type(buffOrId) == "table" and getBuffId(buffOrId) or buffOrId
+			return "BuffLevel_" .. tostring(buffId)
+		end
+
+		-- 读取玩家当前局内某张升级卡的选择次数
+		local function getBuffLevel(buff)
+			return player:GetAttribute(getBuffLevelKey(buff)) or 0
+		end
+
+		-- 根据当前武器/宠物配置计算升级卡最大等级；没有上限时返回 nil
+		local function getBuffMaxLevel(buff)
+			if buff.MaxLevel then
+				return buff.MaxLevel
+			end
+
+			if buff.Attr == "MultiShot" then
+				local equippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon"
+				local weaponConfig = Controllers.Config.WEAPONS[equippedWeapon] or Controllers.Config.WEAPONS["DefaultWeapon"]
+				local baseMultiShot = Controllers.Config.BASE_MULTISHOT or 1
+				return math.max(0, (weaponConfig.MaxMultiShot or baseMultiShot) - baseMultiShot)
+			elseif buff.Attr == "Pet_Count" then
+				local petConf = Controllers.Config.PETS[player:GetAttribute("EquippedPet")]
+				return math.max(0, ((petConf and petConf.MaxCount) or 1) - 1)
+			elseif buff.Attr == "WindBlade_Range_Bonus" then
+				local petConf = Controllers.Config.PETS[player:GetAttribute("EquippedPet")]
+				local baseWidth = (petConf and petConf.WindBladeBaseWidth) or 20
+				local maxWidth = (petConf and petConf.WindBladeMaxWidth) or 40
+				local maxBonus = math.max(0, ((maxWidth / baseWidth) - 1) * 100)
+				return math.max(0, math.ceil(maxBonus / math.max(buff.Amount or 1, 1)))
+			end
+
+			return nil
+		end
+
+		-- 判断升级卡是否已经达到上限，用于发牌前过滤
+		local function isBuffAtMax(buff)
+			local maxLevel = getBuffMaxLevel(buff)
+			return maxLevel ~= nil and getBuffLevel(buff) >= maxLevel
+		end
+
+		-- 点击卡片后记录选择次数；有上限的卡片不会超过最大等级
+		local function increaseBuffLevel(buffId, maxLevel)
+			local levelKey = getBuffLevelKey(buffId)
+			local currentLevel = player:GetAttribute(levelKey) or 0
+			local nextLevel = currentLevel + 1
+			if maxLevel then
+				nextLevel = math.min(nextLevel, maxLevel)
+			end
+			player:SetAttribute(levelKey, nextLevel)
+		end
+
+		-- 生成升级卡显示文本：增益数值 + 当前等级 -> 选择后等级 + 可选最大等级
+		local function buildBuffCardText(buff)
+			local currentLevel = getBuffLevel(buff)
+			local maxLevel = getBuffMaxLevel(buff)
+			local nextLevel = maxLevel and math.min(currentLevel + 1, maxLevel) or (currentLevel + 1)
+			-- 智能识别百分比与加减号符号
+			-- 判断是否需要加 % 符号 (带有 Bonus 或 Reduction 都算是百分比加成)
+			local isPercent = (buff.Attr == "ALL") or string.find(buff.Attr or "", "Bonus") or string.find(buff.Attr or "", "Reduction")
+			local suffix = isPercent and "%" or ""
+			
+			local amountText
+			if buff.Attr == "ALL" then
+				amountText = "各项 +" .. tostring(buff.Amount) .. "%"
+			elseif string.find(buff.Attr or "", "Reduction") then
+				-- 如果是“缩减”类属性（如 CD 缩减），前面显示减号 "-"
+				amountText = "-" .. tostring(buff.Amount) .. suffix
+			else
+				-- 其他常规增益显示加号 "+"
+				amountText = "+" .. tostring(buff.Amount) .. suffix
+			end
+			local levelText = string.format("Lv.%d -> Lv.%d", currentLevel, nextLevel)
+			if maxLevel then
+				levelText = levelText .. " / Max Lv." .. tostring(maxLevel)
+			end
+
+			return string.format("%s\n%s\n%s", buff.Name, amountText, levelText)
+		end
 
 		-- 事件绑定剥离，全局只绑定一次
 		for _, card in ipairs(cards) do
@@ -191,6 +290,8 @@ function UIController.Start()
 					
 					local attr = card:GetAttribute("BuffAttr")
 					local amount = card:GetAttribute("BuffAmount")
+					local buffId = card:GetAttribute("BuffId") or attr
+					local buffMaxLevel = card:GetAttribute("BuffMaxLevel")
 					if not attr then return end
 
 					-- 【核心逻辑】：专门处理最大生命值百分比提升的辅助函数
@@ -234,6 +335,14 @@ function UIController.Start()
 						if Controllers.Pet and Controllers.Pet.UpdatePetClones then
 							Controllers.Pet.UpdatePetClones()
 						end
+					elseif attr == "WindBlade_Range_Bonus" then
+						-- 风刃范围按百分比成长，但最终宽度不能超过宠物配置里的 WindBladeMaxWidth
+						local petConf = Controllers.Config.PETS[player:GetAttribute("EquippedPet")]
+						local baseWidth = (petConf and petConf.WindBladeBaseWidth) or 20
+						local maxWidth = (petConf and petConf.WindBladeMaxWidth) or 40
+						local currentBonus = player:GetAttribute("WindBlade_Range_Bonus") or 0
+						local maxBonus = math.max(0, math.floor(((maxWidth / baseWidth) - 1) * 100))
+						player:SetAttribute("WindBlade_Range_Bonus", math.min(currentBonus + amount, maxBonus))
 					else
 						-- 其他所有属性（包括攻速、攻击、宠物攻速、宠物攻击等）自动在这里叠加
 						player:SetAttribute(attr, (player:GetAttribute(attr) or 0) + amount)
@@ -245,6 +354,8 @@ function UIController.Start()
 						humanoid.MaxHealth = player:GetAttribute("MaxHP")
 						humanoid.Health = player:GetAttribute("HP")
 					end
+
+					increaseBuffLevel(buffId, buffMaxLevel)
 
 					-- 关闭面板，解除暂停
 					levelUpPanel.Visible = false
@@ -278,8 +389,29 @@ function UIController.Start()
 				for _, buff in ipairs(Controllers.Config.LEVEL_UP_BUFF_POOL) do
 					-- 如果卡片需要宠物，但玩家没带，则跳过
 					if buff.RequiresPet and not hasPet then continue end
+					-- 如果卡片绑定特定宠物技能，只有当前装备宠物技能匹配时才进入卡池
+					if buff.RequiresPetSkill then
+						if not petConfig or petConfig.SkillType ~= buff.RequiresPetSkill then
+							continue
+						end
+
+						-- 风刃范围已经达到上限后，不再继续发“增加范围”卡
+						if buff.Attr == "WindBlade_Range_Bonus" then
+							local baseWidth = petConfig.WindBladeBaseWidth or 20
+							local maxWidth = petConfig.WindBladeMaxWidth or 40
+							local currentBonus = player:GetAttribute("WindBlade_Range_Bonus") or 0
+							local currentWidth = baseWidth * (1 + (currentBonus / 100))
+							if currentWidth >= maxWidth then
+								continue
+							end
+						end
+					end
 					-- 如果是增加宠物数量，且场上已经有 3 只了 (1本体+2分身)，就不再发这张卡
 					if buff.Attr == "Pet_Count" and currentPetCount >= maxPetLimit then continue end
+					-- 前置条件过滤 (如果卡片配置了 Prereq，但玩家没有该前置属性，则跳过)
+					if buff.Prereq and (player:GetAttribute(buff.Prereq) or 0) <= 0 then continue end
+					-- 已经达到上限的卡片不再进入卡池，同时 UI 上会在未满时显示 Max Lv
+					if isBuffAtMax(buff) then continue end
 					table.insert(availablePool, buff)
 				end
 
@@ -300,6 +432,13 @@ function UIController.Start()
 					totalWeight = totalWeight + (buff.Weight or 100) -- 没配权重兜底为 100
 				end
 
+				if totalWeight <= 0 then
+					warn("升级卡池为空：没有可用的升级选项。")
+					levelUpPanel.Visible = false
+					player:SetAttribute("IsLevelingUp", false)
+					return
+				end
+
 				for i, card in ipairs(cards) do
 					if card and card:IsA("GuiButton") then
 						-- 按照权重随机抽取卡片
@@ -317,24 +456,17 @@ function UIController.Start()
 						
 						card:SetAttribute("BuffAttr", buff.Attr)
 						card:SetAttribute("BuffAmount", buff.Amount)
-						
-						-- 这里只负责纯粹的 UI 文本显示，不执行任何加成逻辑
-						if buff.Attr == "ALL" then
-							card.Text = "全能提升\n各项 +" .. tostring(buff.Amount) .. "%"
-						else
-							local suffix = string.find(buff.Attr, "Bonus") and "%" or ""
-							card.Text = buff.Name .. "\n+" .. tostring(buff.Amount) .. suffix
-						end
-						
+						card:SetAttribute("BuffId", getBuffId(buff))
+						card:SetAttribute("BuffMaxLevel", getBuffMaxLevel(buff))
+						card.Text = buildBuffCardText(buff)
 						card.BackgroundColor3 = buff.Color
 						
-						card.Rotation = -180
-						card.Size = UDim2.new(0, 0, 0, 0) 
+						local targetRotation = cardBaseRotations[card] or 0
+						card.Rotation = targetRotation - 180
 						
 						local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 						local tween = TweenService:Create(card, tweenInfo, {
-							Rotation = 0,
-							Size = UDim2.new(0.25, 0, 0.5, 0) 
+							Rotation = targetRotation
 						})
 						
 						task.delay((i - 1) * 0.15, function()
@@ -386,7 +518,7 @@ function UIController.Start()
 				
 				-- 刷新价格与等级文本 (兼容模板内部有 TextLabel 或直接使用 Button 的 Text)
 				local textLabel = btn:FindFirstChild("TextLabel")
-				local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. cost
+				local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. Config.FormatNumber(cost)
 				
 				if textLabel and textLabel:IsA("TextLabel") then
 					textLabel.Text = displayText
@@ -443,6 +575,80 @@ function UIController.Start()
 
 		local MAX_EQUIP_SLOTS = 1 -- 目前只开放1个槽位，以后如果要拓展改这里就行
 
+		-- 安全解析宠物背包；存档字段异常时返回空表，避免 UI 打不开
+		local function decodeOwnedPets()
+			local success, decoded = pcall(function()
+				return HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+			end)
+
+			if not success or type(decoded) ~= "table" then
+				return {}
+			end
+
+			local owned = {}
+			for _, petId in ipairs(decoded) do
+				if type(petId) == "string" and Controllers.Config.PETS[petId] then
+					table.insert(owned, petId)
+				end
+			end
+
+			return owned
+		end
+
+		-- 将宠物 ID 按配置里的 SortOrder/名称排序，保证背包每次刷新顺序稳定
+		local function getSortedPetIds(petCounts)
+			local petIds = {}
+			for petId, count in pairs(petCounts) do
+				if count > 0 and Controllers.Config.PETS[petId] then
+					table.insert(petIds, petId)
+				end
+			end
+
+			table.sort(petIds, function(a, b)
+				local sortA = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(a) or math.huge
+				local sortB = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(b) or math.huge
+				if sortA ~= sortB then
+					return sortA < sortB
+				end
+
+				local nameA = Controllers.Config.PETS[a].Name or a
+				local nameB = Controllers.Config.PETS[b].Name or b
+				return nameA < nameB
+			end)
+
+			return petIds
+		end
+
+		-- 生成宠物按钮上的展示文本，集中处理名称、数量、稀有度、状态和描述
+		local function getPetButtonText(petId, count, statusText)
+			local petConfig = Controllers.Config.PETS[petId]
+			if not petConfig then return petId end
+
+			local countText = (count and count > 1) and (" x" .. count) or ""
+			local rarityText = petConfig.Rarity or "Unknown"
+			local description = petConfig.Description or "暂无描述"
+			local statusLine = statusText and ("\n" .. statusText) or ""
+
+			return string.format(
+				"%s%s [%s]%s\nATK:%s\n%s",
+				petConfig.Name or petId,
+				countText,
+				rarityText,
+				statusLine,
+				Controllers.Config.FormatNumber(petConfig.ATK or 0),
+				description
+			)
+		end
+
+		-- 给宠物按钮应用文本，并开启自动缩放/换行，适配多行描述
+		local function applyPetButtonText(btn, text)
+			btn.Text = text
+			if btn:IsA("TextButton") then
+				btn.TextWrapped = true
+				btn.TextScaled = true
+			end
+		end
+
 		local function refreshBag()
 			-- 安全清理两个容器内的旧 UI (千万别把 UIGridLayout 删了)
 			for _, child in ipairs(equippedContainer:GetChildren()) do
@@ -452,7 +658,7 @@ function UIController.Start()
 				if not child:IsA("UIGridLayout") then child:Destroy() end
 			end
 			
-			local owned = HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+			local owned = decodeOwnedPets()
 			local equipped = player:GetAttribute("EquippedPet") or ""
 
 			-- 统计同种宠物
@@ -474,7 +680,7 @@ function UIController.Start()
 				btn.Visible = true 
 				btn.Parent = equippedContainer
 				
-				btn.Text = petConfig.Name .. "\n(出战中)"
+				applyPetButtonText(btn, getPetButtonText(equipped, 1, "出战中"))
 				btn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
 				
 				-- 点击出战区的宠物：向服务器发送空字符串进行【卸下】
@@ -494,7 +700,8 @@ function UIController.Start()
 			-- ==========================================
 			-- 2. 渲染【待机区】
 			-- ==========================================
-			for petId, count in pairs(petCounts) do
+			for _, petId in ipairs(getSortedPetIds(petCounts)) do
+				local count = petCounts[petId]
 				if count > 0 then -- 如果还有剩余宠物在待机
 					local petConfig = Controllers.Config.PETS[petId]
 					if petConfig then
@@ -502,8 +709,7 @@ function UIController.Start()
 						btn.Visible = true 
 						btn.Parent = standbyContainer
 						
-						local countText = (count > 1) and (" x" .. count) or "" 
-						btn.Text = petConfig.Name .. countText .. "\nATK:" .. petConfig.ATK
+						applyPetButtonText(btn, getPetButtonText(petId, count))
 						btn.BackgroundColor3 = petTemplate.BackgroundColor3
 						
 						-- 点击待机区的宠物：向服务器发送 petId 进行【替换出战】
@@ -539,7 +745,7 @@ function UIController.Start()
 		local eggPart = Workspace:WaitForChild("paodao"):WaitForChild("PetEgg", 10)
 		if not eggPart then return end
 		local prompt = eggPart:FindFirstChildOfClass("ProximityPrompt") or Instance.new("ProximityPrompt", eggPart)
-    	prompt.ActionText = "花费 " .. tostring(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
+		prompt.ActionText = "花费 " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
 		
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")

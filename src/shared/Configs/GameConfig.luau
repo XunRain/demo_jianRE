@@ -206,21 +206,29 @@ local GameConfig = {
 		["Slime"] = { 
 			Name = "Slime", 
 			Rarity = "Common", 
+			Weight = 45,
+			SortOrder = 100,
+			Description = "高穿透风刃，适合清理直线小怪。",
 			ATK = 10,      
-			Cooldown = 6,     -- 技能冷却间隔 (1.5秒一次)
+			Cooldown = 4,     -- 技能冷却间隔 (1.5秒一次)
 			CastCount = 1,      -- 每次施法连续释放 1 次
 			SkillType = "WindBlade", -- 技能形态：穿透风刃
             BulletVFX = "SlimeBullet", -- 独立的子弹特效 (填在 Studio 里做的预制体名)
 			HitVFX = "SlimeHit",   -- 独立的命中特效 (填在 Studio 里做的预制体名)
 			PierceCount = 99,   -- 风刃可以无限穿透
+			WindBladeBaseWidth = 20, -- 风刃初始横向范围；Studio 子弹模型的初始 X 尺寸也按 20 做
+			WindBladeMaxWidth = 40, -- 风刃横向范围上限；升级卡片最多把范围推到这里
 			MaxCount = 5, -- 宠物最大数量
 			Color = Color3.fromRGB(150, 255, 150) 
 		},
 		["Dragon"] = { 
 			Name = "Dragon", 
 			Rarity = "Rare", 
+			Weight = 22,
+			SortOrder = 200,
+			Description = "追踪火球爆炸，适合处理密集怪群。",
 			ATK = 25, 
-			Cooldown = 6, 
+			Cooldown = 4,
 			CastCount = 1,      -- 蓄力吐出一发大火球
 			SkillType = "Fireball",  -- 技能形态：触碰爆炸 AOE
 			BulletVFX = "DragonBullet",
@@ -233,6 +241,9 @@ local GameConfig = {
 		["Angel"] = { 
 			Name = "Angel", 
 			Rarity = "Epic", 
+			Weight = 8,
+			SortOrder = 300,
+			Description = "锁定神罚，高伤大范围打击关键目标。",
 			ATK = 60, 
 			Cooldown = 6, 
 			CastCount = 1,      
@@ -246,12 +257,15 @@ local GameConfig = {
 		}
 	},
 	
-	-- 简易抽卡权重池 (普通概率高，史诗概率低)
+	-- 兼容旧逻辑的简易抽卡权重池；正式抽卡请使用 GameConfig.RollPetId()
 	PET_POOL = {
 		"Slime", "Slime", "Slime", "Slime", "Slime",
 		"Dragon", "Dragon", "Dragon",
 		"Angel"
 	},
+
+	PET_FIRE_STAGGER_DELAY = 0.12, -- 多个宠物/分身开火时的错峰间隔，让玩家能看清每只宠物的贡献
+	PET_CAST_STAGGER_DELAY = 0.15, -- 单只宠物连续施法时的间隔，保留技能连发的节奏感
 
     -- 10. 武器与特效配置表
     WEAPONS = {
@@ -297,21 +311,41 @@ local GameConfig = {
         Boss = "BossDeath"    -- Boss 死亡特效名称
     },
 
+    -- 12. 飞剑系统 (御剑流) 初始配置
+    SWORD_SKILL = {
+        BaseDamage = 20,          -- 飞剑初始伤害
+        BaseAttackInterval = 3,   -- 飞剑初始攻击间隔(CD)
+        MinAttackInterval = 0.35, -- 最低攻击间隔
+        OrbitRadius = 5,          -- 环绕半径
+        TargetRange = 90,         -- 索敌范围
+        FlySpeed = 140,           -- 飞剑出鞘飞行速度
+        MaxCount = 6,             -- 飞剑最大数量
+        MaxCooldownReduction = 60,-- 最大冷却缩减 (%)
+    },
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
-        { Name = "攻击加成", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 100, 100) },
-        { Name = "攻速加成", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 100) },
-        { Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 255) },
-        { Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
-        { Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
-        { Name = "磁力范围", Attr = "MagnetRadius", Amount = 5, Color = Color3.fromRGB(180, 100, 255) }, -- 这个保留绝对值
-        { Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
-        -- 将弹道增加的权重压低（只有基础属性的一半概率）
-        { Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 },
+        -- 角色属性增益
+        { BuffId = "ATK_Bonus", Name = "攻击加成", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 100, 100) },
+        { BuffId = "ASPD_Bonus", Name = "攻速加成", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 100) },
+        { BuffId = "MaxHP_Bonus", Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 255) },
+        { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
+        { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
+        { BuffId = "MagnetRadius", Name = "磁力范围", Attr = "MagnetRadius", Amount = 5, Color = Color3.fromRGB(180, 100, 255) }, -- 这个保留绝对值
+        { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
+        -- 将弹道增加的权重压低（只有基础属性的20%概率）
+        { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 },
+
         -- 宠物增益
-        { Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_Count", Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_ASPD_Bonus", Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_ATK_Bonus", Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "WindBlade_Range_Bonus", Name = "风刃范围", Attr = "WindBlade_Range_Bonus", Amount = 20, Color = Color3.fromRGB(120, 220, 255), RequiresPetSkill = "WindBlade" },
+
+        -- 御剑流技能树 (利用 MaxLevel 控制上限，利用 Prereq 控制前置)
+        { BuffId = "Sword_Unlocked", Name = "御剑启动", Attr = "Sword_Unlocked", Amount = 1, Color = Color3.fromRGB(0, 255, 255), MaxLevel = 1, Weight = 40 },
+        { BuffId = "Sword_Count", Name = "飞剑数量", Attr = "Sword_Count", Amount = 1, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 5 }, -- 最多升5级，加上初始1把共6把
+        { BuffId = "Sword_ATK_Bonus", Name = "飞剑伤害", Attr = "Sword_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked" }, -- 每次提升 20%
+        { BuffId = "Sword_CD_Reduction", Name = "飞剑冷却", Attr = "Sword_CD_Reduction", Amount = 15, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 4 }, -- 最多升4级，4*15=60%上限
     },
 
     -- 16. 怪物击杀掉落配置
@@ -343,6 +377,103 @@ function GameConfig.GetRunSpeed(stageNum)
 	end
 	
 	return currentSpeed
+end
+
+-- 统一格式化大数字展示；例如 1000 -> 1K，1500000 -> 1.5M
+function GameConfig.FormatNumber(value)
+	local number = tonumber(value) or 0
+	local sign = number < 0 and "-" or ""
+	local absNumber = math.abs(number)
+
+	if absNumber < 1000 then
+		return sign .. tostring(math.floor(absNumber + 0.5))
+	end
+
+	local suffixes = {
+		{ Value = 1000000000000, Suffix = "T" },
+		{ Value = 1000000000, Suffix = "B" },
+		{ Value = 1000000, Suffix = "M" },
+		{ Value = 1000, Suffix = "K" },
+	}
+
+	for i, unit in ipairs(suffixes) do
+		if absNumber >= unit.Value then
+			local scaled = absNumber / unit.Value
+			local decimals = scaled < 10 and 1 or 0
+			local multiplier = 10 ^ decimals
+			local rounded = math.floor(scaled * multiplier + 0.5) / multiplier
+
+			-- 999.9K 四舍五入到 1000K 时，自动进位成 1M，避免显示别扭
+			if rounded >= 1000 and i > 1 then
+				unit = suffixes[i - 1]
+				scaled = absNumber / unit.Value
+				decimals = scaled < 10 and 1 or 0
+				multiplier = 10 ^ decimals
+				rounded = math.floor(scaled * multiplier + 0.5) / multiplier
+			end
+
+			local text
+			if decimals > 0 then
+				text = string.gsub(string.format("%.1f", rounded), "%.0$", "")
+			else
+				text = tostring(math.floor(rounded))
+			end
+
+			return sign .. text .. unit.Suffix
+		end
+	end
+
+	return sign .. tostring(math.floor(absNumber + 0.5))
+end
+
+-- 按宠物配置表里的 Weight 权重抽取一个宠物 ID，供服务端抽卡使用
+function GameConfig.RollPetId()
+	local totalWeight = 0
+	for _, petConfig in pairs(GameConfig.PETS) do
+		local weight = petConfig.Weight or 1
+		if weight > 0 then
+			totalWeight += weight
+		end
+	end
+
+	if totalWeight <= 0 then
+		for petId in pairs(GameConfig.PETS) do
+			return petId
+		end
+	end
+
+	local roll = math.random(1, totalWeight)
+	local cursor = 0
+	for petId, petConfig in pairs(GameConfig.PETS) do
+		local weight = petConfig.Weight or 1
+		if weight > 0 then
+			cursor += weight
+			if roll <= cursor then
+				return petId
+			end
+		end
+	end
+
+	for petId in pairs(GameConfig.PETS) do
+		return petId
+	end
+	return nil
+end
+
+-- 获取宠物背包排序值；优先使用 SortOrder，未配置时按稀有度兜底
+function GameConfig.GetPetSortValue(petId)
+	local petConfig = GameConfig.PETS[petId]
+	if not petConfig then return math.huge end
+	if petConfig.SortOrder then return petConfig.SortOrder end
+
+	local rarityOrder = {
+		Common = 100,
+		Rare = 200,
+		Epic = 300,
+		Legendary = 400,
+	}
+
+	return rarityOrder[petConfig.Rarity] or 999
 end
 
 return GameConfig

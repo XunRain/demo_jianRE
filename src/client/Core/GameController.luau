@@ -203,6 +203,19 @@ function GameController.ResetPlayerStats()
 	player:SetAttribute("Pet_Count", 1)
 	player:SetAttribute("Pet_ATK_Bonus", 0)
 	player:SetAttribute("Pet_ASPD_Bonus", 0)
+	player:SetAttribute("WindBlade_Range_Bonus", 0)
+	-- 清理上一局累积的御剑 Buff
+	player:SetAttribute("Sword_Unlocked", 0)
+	player:SetAttribute("Sword_Count", 0)
+	player:SetAttribute("Sword_ATK_Bonus", 0)
+	player:SetAttribute("Sword_CD_Reduction", 0)
+	-- 清理所有升级卡的局内选择等级，保证每局都从 Lv.0 开始显示
+	for _, buff in ipairs(Config.LEVEL_UP_BUFF_POOL) do
+		local buffId = buff.BuffId or buff.Attr or buff.Name
+		if buffId then
+			player:SetAttribute("BuffLevel_" .. tostring(buffId), 0)
+		end
+	end
 
 	-- 不仅改属性，同时强制同步给当前存在的肉身
 	if player.Character then
