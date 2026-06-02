@@ -304,39 +304,68 @@ function VFXController.PlayHitJitterVFX(target, baseSize)
 	end)
 end
 
--- ==========================================
 -- 接口 9：播放子弹命中爆炸特效 (完全数据驱动)
--- ==========================================
-function VFXController.PlayBulletExplosion(hitVfxName, position)
-	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
-	local weaponsFolder = vfxFolder and vfxFolder:FindFirstChild("Weapons")
-	local vfxPrefab = weaponsFolder and weaponsFolder:FindFirstChild(hitVfxName)
+-- function VFXController.PlayBulletExplosion(hitVfxName, position)
+-- 	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
+-- 	local weaponsFolder = vfxFolder and vfxFolder:FindFirstChild("Weapons") 
+-- 	local vfxPrefab = weaponsFolder and weaponsFolder:FindFirstChild(hitVfxName)
 	
-	if vfxPrefab then
-		local vfx = vfxPrefab:Clone()
+-- 	if vfxPrefab then
+-- 		local vfx = vfxPrefab:Clone()
 		
-		-- 自动适配你放的是 Part 还是 Model
-		if vfx:IsA("BasePart") then
-			-- CFrame = 新位置 * 预制体原本的旋转角度
-			vfx.CFrame = CFrame.new(position) * vfxPrefab.CFrame.Rotation
-		elseif vfx:IsA("Model") then
-			-- 保留 Model 在 Studio 中打包时的初始朝向
-			vfx:PivotTo(CFrame.new(position) * vfxPrefab:GetPivot().Rotation)
-		end
+-- 		-- 自动适配你放的是 Part 还是 Model
+-- 		if vfx:IsA("BasePart") then
+-- 			-- CFrame = 新位置 * 预制体原本的旋转角度
+-- 			vfx.CFrame = CFrame.new(position) * vfxPrefab.CFrame.Rotation
+-- 		elseif vfx:IsA("Model") then
+-- 			-- 保留 Model 在 Studio 中打包时的初始朝向
+-- 			vfx:PivotTo(CFrame.new(position) * vfxPrefab:GetPivot().Rotation)
+-- 		end
 		
-		vfx.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+-- 		vfx.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
 		
-		-- 自动遍历寻找粒子特效并瞬间爆发
-		for _, emitter in ipairs(vfx:GetDescendants()) do
-			if emitter:IsA("ParticleEmitter") then
-				emitter.Enabled = false -- 关闭持续喷发
-				-- 读取你在 Studio 里配置的爆发数量，默认 15 个粒子
-				emitter:Emit(emitter:GetAttribute("EmitCount") or 10) 
-			end
-		end
+-- 		-- 自动遍历寻找粒子特效并瞬间爆发
+-- 		for _, emitter in ipairs(vfx:GetDescendants()) do
+-- 			if emitter:IsA("ParticleEmitter") then
+				
+				
+-- 				emitter:Emit(emitter:GetAttribute("EmitCount") or 10) 
+-- 			end
+-- 		end
 		
-		Debris:AddItem(vfx, 0.25) -- 特效 1 秒后自动销毁，防内存泄漏
+-- 		Debris:AddItem(vfx, 0.25) 
+-- 	end
+-- end
+
+function VFXController.PlayBulletExplosion(vfxName, position)
+	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
+	if not vfxFolder then return end
+
+	local prefab = nil
+	-- 1. 先找武器库
+	if vfxFolder:FindFirstChild("Weapons") and vfxFolder.Weapons:FindFirstChild(vfxName) then
+		prefab = vfxFolder.Weapons[vfxName]
+	-- 2. 再找宠物库
+	elseif vfxFolder:FindFirstChild("Pets") and vfxFolder.Pets:FindFirstChild(vfxName) then
+		prefab = vfxFolder.Pets[vfxName]
 	end
+
+	if not prefab then return end
+
+	-- 克隆和播放粒子逻辑
+	local explosion = prefab:Clone()
+	explosion.Position = position
+	explosion.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+	
+	for _, child in ipairs(explosion:GetDescendants()) do
+		if child:IsA("ParticleEmitter") then
+			-- child.Enabled = false -- 关闭持续喷发
+			-- 读取你在 Studio 里配置的爆发数量，默认 10 个粒子
+			child:Emit(child:GetAttribute("EmitCount") or 10)
+		end
+	end
+	
+	game.Debris:AddItem(explosion, 0.25) -- 特效 0.25 秒后自动销毁，防内存泄漏
 end
 
 -- 接口 10：播放怪物死亡爆浆/爆炸特效

@@ -199,49 +199,99 @@ function CombatController.CheckCollisions(rootPart)
 		end
 		
 		local bPos = b.part.Position
+		
+		-- 判定体积自适应 (大天使的光柱倒下来了，Z轴判定极大幅度增强)
+		local hitBoxX = b.part.Size.X / 2 + 1
+		local hitBoxZ = b.part.Size.Z / 2 + 2
+		if b.isPet and b.part.Shape == Enum.PartType.Cylinder then
+			hitBoxX, hitBoxZ = 8, 8 
+		end
+		
 		for j = #activeEnemies, 1, -1 do
 			local e = activeEnemies[j]
-			if not e.part or not e.part.Parent then continue end
-			
-			-- 【新增】：如果这颗穿透子弹已经打过这个怪了，直接无视，防止被激光瞬间烫死
+			-- 自动清理死亡的怪物，防止内存泄漏和报错
+			if not e.part or not e.part.Parent then 
+				table.remove(activeEnemies, j)
+				continue 
+			end
 			if b.hitTargets[e.part] then continue end
 			
 			local ePos = e.part.Position
 			local eSize = e.part.Size
 			
-			if math.abs(bPos.X - ePos.X) < (eSize.X/2 + 1) and 
-			   math.abs(bPos.Z - ePos.Z) < (eSize.Z/2 + 2) then 
+			-- 发生触碰！
+			if math.abs(bPos.X - ePos.X) < (hitBoxX + eSize.X/2) and 
+			   math.abs(bPos.Z - ePos.Z) < (hitBoxZ + eSize.Z/2) then 
 				
-				-- 标记这颗子弹已经碰过这个怪
 				b.hitTargets[e.part] = true
-				
 				local dmg = b.damage or (player:GetAttribute("ATK") or Controllers.Config.BASE_ATK)
-				e.hp = e.hp - dmg
-				e.label.Text = tostring(e.hp)
+				
+				-- 【修改 1】：优先读取子弹独立特效，没有再去找武器的特效
+				local finalHitVFX = b.hitVFX or (Controllers.Config.WEAPONS[b.weaponId] and Controllers.Config.WEAPONS[b.weaponId].HitVFX) or "DefaultHit"
+				Controllers.VFX.PlayBulletExplosion(finalHitVFX, bPos)
+				
+				-- 【修改 2】：AOE 爆炸结算 vs 单体结算
+				if b.aoeRadius then
+					-- [火球/神罚] 范围爆炸逻辑
+					-- 搜集爆炸范围内所有怪物
+					local targetsToDamage = {}
+					for _, otherE in ipairs(activeEnemies) do
+						if otherE.part and (otherE.part.Position - bPos).Magnitude <= b.aoeRadius then
+							table.insert(targetsToDamage, otherE)
+						end
+					end
+					
+					-- 对范围内全体造成伤害
+					for _, targetE in ipairs(targetsToDamage) do
+						targetE.hp = targetE.hp - dmg
+						targetE.label.Text = tostring(targetE.hp)
+						Controllers.VFX.PlayHitJitterVFX(targetE.part, targetE.baseSize)
 
-				Controllers.VFX.PlayHitJitterVFX(e.part, e.baseSize)
+						if targetE.hp <= 0 then
+							local deathVfxName = Controllers.Config.ENEMY_VFX[targetE.type] or "BasicDeath"
+							Controllers.VFX.PlayDeathVFX(deathVfxName, targetE.part.Position)
+							
+							-- 处理死亡与掉落
+							Controllers.Encounter.TriggerDrops(targetE.type, targetE.part.Position)
+							targetE.part:Destroy()
+							
+							-- -- 安全清理数组
+							-- local deadIdx = table.find(activeEnemies, targetE)
+							-- if deadIdx then
+							-- 	table.remove(activeEnemies, deadIdx)
+							-- 	if deadIdx <= j then j = j - 1 end
+							-- end
+						end
+					end
+					
+					-- 炸完之后，无论穿透次数剩多少，强制销毁弹体
+					b.hitsLeft = 0
+				else
+					-- [风刃/玩家子弹] 单体穿透伤害结算 
+					e.hp = e.hp - dmg
+					e.label.Text = tostring(e.hp)
+					Controllers.VFX.PlayHitJitterVFX(e.part, e.baseSize)
+					
+					if e.hp <= 0 then
+						local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
+						Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
+
+						e.part:Destroy()
+						table.remove(activeEnemies, j)
+						Controllers.Encounter.TriggerDrops(e.type, ePos)
+					end
+					
+					b.hitsLeft = b.hitsLeft - 1
+				end
 				
-				local weaponConfig = Controllers.Config.WEAPONS[b.weaponId] or Controllers.Config.WEAPONS["DefaultWeapon"]
-				Controllers.VFX.PlayBulletExplosion(weaponConfig.HitVFX, bPos)
-				
-				-- 【修改】：穿透次数判断
-				b.hitsLeft = b.hitsLeft - 1
+				-- 如果子弹销毁，跳出对当前怪物的遍历
 				if b.hitsLeft <= 0 then
-					b.part:Destroy()
+					-- 免死标记
+					if not b.persistAfterHit then
+						if b.part then b.part:Destroy() end
+					end
+					
 					table.remove(CombatController.ActiveBullets, i)
-				end
-				
-				if e.hp <= 0 then
-					local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
-					Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
-
-					e.part:Destroy()
-					table.remove(activeEnemies, j)
-					Controllers.Encounter.TriggerDrops(e.type, ePos)
-				end
-				
-				-- 如果子弹销毁了（非穿透子弹，或者穿透次数耗尽），跳出当前怪物判断循环
-				if b.hitsLeft <= 0 then
 					break 
 				end
 			end

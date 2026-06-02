@@ -214,15 +214,28 @@ function UIController.Start()
 						end
 					end
 
-					-- 应用玩家选择的增益
+					-- 玩家真正点击卡片后，给予属性
 					if attr == "ALL" then
 						player:SetAttribute("ATK_Bonus", (player:GetAttribute("ATK_Bonus") or 0) + amount)
 						player:SetAttribute("ASPD_Bonus", (player:GetAttribute("ASPD_Bonus") or 0) + amount)
-						applyMaxHpBonus(amount) -- 全能增益：生命上限 + amount%
+						applyMaxHpBonus(amount) 
 					elseif attr == "MaxHP_Bonus" then
 						applyMaxHpBonus(amount)
+					elseif attr == "Pet_Count" then
+						-- 【核心修改】：处理增加宠物数量，确保不超过当前宠物的最大上限
+						local currentCount = player:GetAttribute("Pet_Count") or 1
+						local petConf = Controllers.Config.PETS[player:GetAttribute("EquippedPet")]
+						local maxLimit = (petConf and petConf.MaxCount) or 3
+						
+						-- 取 (当前数量+增量) 与 (最大上限) 中的最小值
+						local finalCount = math.min(currentCount + amount, maxLimit)
+						player:SetAttribute("Pet_Count", finalCount)
+						
+						if Controllers.Pet and Controllers.Pet.UpdatePetClones then
+							Controllers.Pet.UpdatePetClones()
+						end
 					else
-						-- 其他属性 (ATK_Bonus, SPD_Bonus, MultiShot 等直接数值相加)
+						-- 其他所有属性（包括攻速、攻击、宠物攻速、宠物攻击等）自动在这里叠加
 						player:SetAttribute(attr, (player:GetAttribute(attr) or 0) + amount)
 					end
 					
@@ -250,18 +263,34 @@ function UIController.Start()
 				-- =======================================================
 				-- 【核心修改】：引入权重与弹道上限的卡池过滤机制
 				-- =======================================================
-				local originalPool = Controllers.Config.LEVEL_UP_BUFF_POOL
+				local availablePool = {}
+				local equippedPet = player:GetAttribute("EquippedPet")
+				local hasPet = (equippedPet and equippedPet ~= "")
+				local currentPetCount = player:GetAttribute("Pet_Count") or 1
 				local validPool = {}
 				local totalWeight = 0
+
+				-- 获取当前佩戴宠物的专属上限 (如果没有配，兜底为 3)
+				local petConfig = hasPet and Controllers.Config.PETS[equippedPet]
+				local maxPetLimit = (petConfig and petConfig.MaxCount) or 3
 				
+				-- 智能过滤卡池
+				for _, buff in ipairs(Controllers.Config.LEVEL_UP_BUFF_POOL) do
+					-- 如果卡片需要宠物，但玩家没带，则跳过
+					if buff.RequiresPet and not hasPet then continue end
+					-- 如果是增加宠物数量，且场上已经有 3 只了 (1本体+2分身)，就不再发这张卡
+					if buff.Attr == "Pet_Count" and currentPetCount >= maxPetLimit then continue end
+					table.insert(availablePool, buff)
+				end
+
 				-- 获取玩家当前的弹道数量和当前武器的上限
 				local currentMultiShot = player:GetAttribute("MultiShot") or 1
 				local equippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon"
 				local weaponConfig = Controllers.Config.WEAPONS[equippedWeapon] or Controllers.Config.WEAPONS["DefaultWeapon"]
 				local maxMultiShot = weaponConfig.MaxMultiShot or 3
 				
-				-- 遍历原始池子，生成合法的抽卡池
-				for _, buff in ipairs(originalPool) do
+				-- 遍历智能过滤后的池子，生成合法的抽卡池
+				for _, buff in ipairs(availablePool) do
 					-- 如果弹道数已经达到了当前武器的上限，这辈子都不会再把它放入抽卡池！
 					if buff.Attr == "MultiShot" and currentMultiShot >= maxMultiShot then
 						continue
@@ -289,7 +318,7 @@ function UIController.Start()
 						card:SetAttribute("BuffAttr", buff.Attr)
 						card:SetAttribute("BuffAmount", buff.Amount)
 						
-						-- 智能添加 % 符号
+						-- 这里只负责纯粹的 UI 文本显示，不执行任何加成逻辑
 						if buff.Attr == "ALL" then
 							card.Text = "全能提升\n各项 +" .. tostring(buff.Amount) .. "%"
 						else
@@ -507,10 +536,10 @@ function UIController.Start()
 	-- 【重构版】：3D ViewportFrame 宠物蛋破壳动画 (对接 Studio)
 	-- =======================================================
 	local function setupPetHatching()
-		local eggPart = Workspace:WaitForChild("PetEgg", 10)
+		local eggPart = Workspace:WaitForChild("paodao"):WaitForChild("PetEgg", 10)
 		if not eggPart then return end
 		local prompt = eggPart:FindFirstChildOfClass("ProximityPrompt") or Instance.new("ProximityPrompt", eggPart)
-      prompt.ActionText = "花费 " .. tostring(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
+    	prompt.ActionText = "花费 " .. tostring(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
 		
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
@@ -524,7 +553,7 @@ function UIController.Start()
 		local tipText = hatchScreen:WaitForChild("TipText")
 		
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
-		local petModels = ReplicatedStorage:WaitForChild("Pets") 
+		local petModels = ReplicatedStorage:WaitForChild("Model"):WaitForChild("Pets")
 		
 		-- ViewportFrame 的摄像机必须用代码动态创建并绑定，不然容易出 Bug
 		local camera = Instance.new("Camera")
@@ -594,7 +623,7 @@ function UIController.Start()
 							current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
 							current3DModel.Parent = viewport
 							
-							tipText.Text = string.format("恭喜获得 %s (%s)\nATK: %d | ASPD: %s", petData.Name, petData.Rarity, petData.ATK, tostring(petData.ASPD))
+							tipText.Text = string.format("恭喜获得 %s (%s)", petData.Name, petData.Rarity)
 							tipText.TextColor3 = petData.Color
 							
 							-- 3. 呼叫 VFX 模块接管匀速自转动画，并把循环指针存起来以便清理

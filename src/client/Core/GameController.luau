@@ -157,10 +157,10 @@ function GameController.Start()
 				
 				-- 智能引导算法：有钱抽卡就指引去抽宠物，没钱就指引去商店点小天赋
 				if coins >= Controllers.Config.PET_GACHA_COST then
-					target = Workspace:FindFirstChild("PetEgg")
+					target = Workspace:FindFirstChild("paodao"):FindFirstChild("PetEgg")
 					text = "去抽取宠物增强火力！"
 				else
-					local npc = Workspace:FindFirstChild("ShopNPC")
+					local npc = Workspace:FindFirstChild("paodao"):FindFirstChild("ShopNPC")
 					target = npc and (npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart"))
 					text = "去商店升级天赋！"
 				end
@@ -199,6 +199,10 @@ function GameController.ResetPlayerStats()
 	player:SetAttribute("RequiredEXP", Config.BASE_LEVEL * Config.EXP_PER_LEVEL)
 	player:SetAttribute("IsLevelingUp", false)
 	player:SetAttribute("EquippedWeapon", player:GetAttribute("EquippedWeapon") or "DefaultWeapon")
+	-- 清理上一局累积的宠物 Buff
+	player:SetAttribute("Pet_Count", 1)
+	player:SetAttribute("Pet_ATK_Bonus", 0)
+	player:SetAttribute("Pet_ASPD_Bonus", 0)
 
 	-- 不仅改属性，同时强制同步给当前存在的肉身
 	if player.Character then
@@ -218,7 +222,7 @@ function GameController.EnterCombat()
 	Controllers.VFX.ClearGuide()
 	
 	local character = player.Character
-	local startPart = Workspace:FindFirstChild("StartButton")
+	local startPart = Workspace:WaitForChild("paodao"):WaitForChild("StartButton", 10)
 	local Config = Controllers.Config
 	
 	if character and startPart then
@@ -253,7 +257,7 @@ end
 -- 挂载大厅触发器的交互事件
 function GameController.SetupStartButton()
 	task.spawn(function()
-		local startPart = Workspace:WaitForChild("StartButton", 10)
+		local startPart = Workspace:WaitForChild("paodao"):WaitForChild("StartButton", 10)
 		if not startPart then 
 			warn("GameController 警告: 未能在世界中找到名为 'StartButton' 的大厅出生 Part！")
 			return 
@@ -282,7 +286,7 @@ end
 -- NPC 绑定逻辑
 function GameController.SetupNPC()
 	task.spawn(function()
-		local npc = Workspace:WaitForChild("ShopNPC", 10)
+		local npc = Workspace:WaitForChild("paodao"):WaitForChild("ShopNPC", 10)
 		if npc then
 			local prompt = npc:FindFirstChildOfClass("ProximityPrompt")
 			if prompt then

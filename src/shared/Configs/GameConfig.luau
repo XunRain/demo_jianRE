@@ -204,25 +204,45 @@ local GameConfig = {
 	
 	PETS = {
 		["Slime"] = { 
-			Name = "风精灵", 
-			Rarity = "普通", 
-			ATK = 10,      -- 增强普通宠物，让玩家抽到就能质变度过前期
-			ASPD = 1.2,   
+			Name = "Slime", 
+			Rarity = "Common", 
+			ATK = 10,      
+			Cooldown = 6,     -- 技能冷却间隔 (1.5秒一次)
+			CastCount = 1,      -- 每次施法连续释放 1 次
+			SkillType = "WindBlade", -- 技能形态：穿透风刃
+            BulletVFX = "SlimeBullet", -- 独立的子弹特效 (填在 Studio 里做的预制体名)
+			HitVFX = "SlimeHit",   -- 独立的命中特效 (填在 Studio 里做的预制体名)
+			PierceCount = 99,   -- 风刃可以无限穿透
+			MaxCount = 5, -- 宠物最大数量
 			Color = Color3.fromRGB(150, 255, 150) 
 		},
 		["Dragon"] = { 
-			Name = "小火龙", 
-			Rarity = "稀有", 
+			Name = "Dragon", 
+			Rarity = "Rare", 
 			ATK = 25, 
-			ASPD = 1.5, 
-			Color = Color3.fromRGB(255, 100, 100) 
+			Cooldown = 6, 
+			CastCount = 1,      -- 蓄力吐出一发大火球
+			SkillType = "Fireball",  -- 技能形态：触碰爆炸 AOE
+			BulletVFX = "DragonBullet",
+			HitVFX = "DragonHit",
+			PierceCount = 1,    -- 碰到第一只怪就爆炸
+			AOERadius = 12,     -- 【新增】：爆炸波及半径 12 
+            MaxCount = 3,
+			Color = Color3.fromRGB(45, 101, 223) 
 		},
 		["Angel"] = { 
-			Name = "大天使", 
-			Rarity = "史诗", 
+			Name = "Angel", 
+			Rarity = "Epic", 
 			ATK = 60, 
-			ASPD = 2.5, 
-			Color = Color3.fromRGB(255, 215, 0) 
+			Cooldown = 6, 
+			CastCount = 1,      
+			SkillType = "Smite",     -- 技能形态：锁定目标，天降神罚
+            BulletVFX = "AngelSmite",
+			HitVFX = "AngelHit",
+			PierceCount = 1,    
+			AOERadius = 22,     -- 神罚拥有超大范围的毁灭打击
+            MaxCount = 2,
+			Color = Color3.fromRGB(240, 245, 40) 
 		}
 	},
 	
@@ -286,9 +306,12 @@ local GameConfig = {
         { Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
         { Name = "磁力范围", Attr = "MagnetRadius", Amount = 5, Color = Color3.fromRGB(180, 100, 255) }, -- 这个保留绝对值
         { Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
-
         -- 将弹道增加的权重压低（只有基础属性的一半概率）
-        { Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 }
+        { Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 },
+        -- 宠物增益
+        { Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
     },
 
     -- 16. 怪物击杀掉落配置
