@@ -148,6 +148,9 @@ local function CreateGate(xOffset, gateWidth, zPos, trackStartX, trackStartY, is
 		amount = math.random(currentStageConfig.GATE_SPD_BONUS_MIN or 5, currentStageConfig.GATE_SPD_BONUS_MAX or 20)
 	elseif attr == "RNG_Bonus" then
 		amount = math.random(currentStageConfig.GATE_RNG_BONUS_MIN or 5, currentStageConfig.GATE_RNG_BONUS_MAX or 20)
+	elseif attr == "LateralSpeed_Bonus" then
+		-- 横向移动速度门使用全局固定范围，方便统一控制手感上限。
+		amount = math.random(Config.GATE_LATERAL_SPEED_BONUS_MIN or 12, Config.GATE_LATERAL_SPEED_BONUS_MAX or 12)
 	end
 
 	if not isBuff then amount = -amount end
@@ -428,7 +431,9 @@ end
 function EncounterController.UpdateMagnetism(dt, rootPart)
 	local pPos = rootPart.Position
 	local Config = Controllers.Config
-	local currentMagnetRadius = player:GetAttribute("MagnetRadius") or Config.MAGNET_RADIUS
+	-- 磁力范围改为百分比成长，并用最大磁力半径封顶。
+	local magnetBonus = player:GetAttribute("MagnetRadius_Bonus") or 0
+	local currentMagnetRadius = math.min(Config.MAGNET_RADIUS * (1 + (magnetBonus / 100)), Config.MAX_MAGNET_RADIUS or math.huge)
 
 	for i = #EncounterController.ActiveDrops, 1, -1 do
 		local drop = EncounterController.ActiveDrops[i]
@@ -455,11 +460,11 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(255, 215, 0), coinIconId)
 			elseif drop.type == "Exp" then
 				-- 【核心修复】改为调用 ProgressionController 里的经验管理函数
-				Controllers.Progression.AddExp(drop.value)
+				local actualExp = Controllers.Progression.AddExp(drop.value) or drop.value
 
 				-- 触发经验飘字特效
 				local expIconId = "rbxassetid://83939430689931" -- 经验图片 ID
-				local cleanText = "+" .. Config.FormatNumber(drop.value)
+				local cleanText = "+" .. Config.FormatNumber(actualExp)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(100, 255, 100), expIconId)
 			end
 			

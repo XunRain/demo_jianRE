@@ -102,27 +102,48 @@ function CombatController.ShootProjectile()
 	local localProjectiles = Workspace:FindFirstChild("LocalProjectiles") or Instance.new("Folder", Workspace)
 	localProjectiles.Name = "LocalProjectiles"
 
+	-- 计算多弹道的最终横向位置；第 1 发固定为主弹道，新增弹道按右、左、右、左交替展开。
+	local function getMultiShotLaneOffset(projectileIndex, spacing)
+		if projectileIndex <= 1 then return 0 end
+
+		local extraIndex = projectileIndex - 1
+		local side = (extraIndex % 2 == 1) and 1 or -1
+		local laneStep = math.ceil(extraIndex / 2)
+		return side * laneStep * spacing
+	end
+
+	-- 计算当前弹道伤害；主弹道为满伤，额外弹道按配置里的伤害系数衰减。
+	local function getMultiShotDamage(projectileIndex, baseDamage)
+		if projectileIndex <= 1 then
+			return baseDamage
+		end
+
+		local extraDamageRatio = Controllers.Config.MULTISHOT_EXTRA_DAMAGE_RATIO or 0.7
+		return math.max(1, math.floor(baseDamage * extraDamageRatio))
+	end
+
 	for i = 1, multiShot do
 		-- 默认飞行方向 (正前方) 与坐标偏移
 		local dirX, dirZ = 0, -1
 		local angleRad = 0
 		local spawnOffset = Vector3.new(0, 0, 0)
 
-		-- 当前这根弹道的相对索引 (例如 3发子弹时，索引分别是 -1, 0, 1)
-		local offsetIndex = i - (multiShot + 1) / 2
+		-- 当前弹道的横向位置；第 1 发在中线，额外弹道左右交替排布。
+		local spacing = Controllers.Config.MULTISHOT_SPREAD_DISTANCE or 3.5
+		local laneOffsetX = getMultiShotLaneOffset(i, spacing)
+		local laneIndex = spacing > 0 and (laneOffsetX / spacing) or 0
 
 		-- 【弹道模式分支接口】
 		if firePattern == "Spread" then
 			-- 1. 扇形散射
 			local spreadAngle = 15
-			angleRad = math.rad(offsetIndex * spreadAngle)
+			angleRad = math.rad(laneIndex * spreadAngle)
 			dirX = math.sin(angleRad)
 			dirZ = -math.cos(angleRad)
 
 		elseif firePattern == "Parallel" or firePattern == "Pierce" then
-			-- 2. 并排射击 (穿透也默认使用并排弹道)
-			local spacing = 3.5 -- 子弹之间的左右间距
-			spawnOffset = Vector3.new(offsetIndex * spacing, 0, 0)
+			-- 2. 并排射击 (穿透也默认使用并排弹道)，生成时直接按最终弹道间距排好。
+			spawnOffset = Vector3.new(laneOffsetX, 0, 0)
 		end
 
 		-- 计算这颗子弹最终的生成坐标
@@ -172,7 +193,7 @@ function CombatController.ShootProjectile()
 		local maxHits = (firePattern == "Pierce") and 3 or 1 -- 激光默认穿透3个怪，其他1个
 		table.insert(CombatController.ActiveBullets, {
 			part = bullet,
-			damage = finalDmg,
+			damage = getMultiShotDamage(i, finalDmg),
 			weaponId = equippedWeapon,
 			hitsLeft = maxHits,   -- 剩余命中次数
 			hitTargets = {}       -- 已命中目标的黑名单，防止一帧内穿透时重复扣血
@@ -353,7 +374,15 @@ function CombatController.CheckCollisions(rootPart)
 			else
 				-- 其他 Bonus 属性直接在池子里相加 (如 ATK_Bonus, SPD_Bonus)
 				local currentVal = player:GetAttribute(chosenGate.attr) or 0
-				player:SetAttribute(chosenGate.attr, currentVal + chosenGate.amount)
+				local nextVal = currentVal + chosenGate.amount
+				if chosenGate.attr == "LateralSpeed_Bonus" then
+					-- 横移速度门按百分比叠加，但最终横移速度不能超过配置表上限。
+					local baseSpeed = Controllers.Config.LATERAL_SPEED
+					local maxSpeed = Controllers.Config.MAX_LATERAL_SPEED or baseSpeed
+					local maxBonus = math.max(0, ((maxSpeed / baseSpeed) - 1) * 100)
+					nextVal = math.clamp(nextVal, -maxBonus, maxBonus)
+				end
+				player:SetAttribute(chosenGate.attr, nextVal)
 			end
 
 			-- 门碎裂销毁

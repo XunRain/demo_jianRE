@@ -18,7 +18,10 @@ end
 -- 局内经验增加核心逻辑 (由 EncounterController 吃经验球时调用)
 function ProgressionController.AddExp(gainedExp)
 	local Config = Controllers.Config
-	local currentExp = (player:GetAttribute("EXP") or Config.BASE_EXP) + gainedExp
+	-- 经验倍率卡按百分比提高本次获得的经验，最终加到局内经验池。
+	local expGainBonus = player:GetAttribute("EXP_Gain_Bonus") or 0
+	local actualGainedExp = math.floor(gainedExp * (1 + (expGainBonus / 100)))
+	local currentExp = (player:GetAttribute("EXP") or Config.BASE_EXP) + actualGainedExp
 	local currentLevel = player:GetAttribute("Level") or Config.BASE_LEVEL
 	
 	-- 【修改 1】：从配置表读取经验公式
@@ -43,6 +46,8 @@ function ProgressionController.AddExp(gainedExp)
 		Controllers.Player.SetMoveDirection(0) 
 		print("玩家升级！当前等级: " .. tostring(currentLevel))
 	end
+
+	return actualGainedExp
 end
 
 

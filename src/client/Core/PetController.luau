@@ -298,6 +298,16 @@ function PetController.ShootProjectile(petConfig, petModel)
 		spawnPos = getScreenCenterSpawnPos(fallbackPos)
 		playerPos = spawnPos
 	end
+
+	-- 天使神罚的索敌必须以玩家位置为基准，避免宠物在身后时锁定到玩家后方怪物。
+	local targetReferencePos = playerPos
+	if skillType == "Smite" then
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			targetReferencePos = rootPart.Position
+		end
+	end
 	
 	-- 【公用模块】：前场智能雷达 (寻找前方最近的活物)
 	local enemies = Controllers.Encounter.ActiveEnemies
@@ -308,8 +318,8 @@ function PetController.ShootProjectile(petConfig, petModel)
 		if e and e.part and e.part.Parent and e.hp > 0 then
 			local ePos = e.part.Position
 			-- 只扫描前方的怪物
-			if ePos.Z < playerPos.Z then
-				local dist = (ePos - playerPos).Magnitude
+			if ePos.Z < targetReferencePos.Z then
+				local dist = (ePos - targetReferencePos).Magnitude
 				if dist < minDistance then
 					minDistance = dist
 					targetEnemy = e

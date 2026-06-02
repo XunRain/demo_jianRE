@@ -5,10 +5,11 @@
 local GameConfig = {
     -- 1. 物理与移动控制
     RUN_SPEED = 30,           -- 跑酷基础速度
-    RUN_SPEED_INCREMENT = 4,  -- 每过一关，移速增加 2 点
-    LATERAL_SPEED = 25,       -- 左右移动速度
-    RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
+    RUN_SPEED_INCREMENT = 4,  -- 每过一关，移速增加 4 点
     MAX_RUN_SPEED = 45,       -- 最大跑酷速度
+    LATERAL_SPEED = 25,       -- 左右移动速度
+    MAX_LATERAL_SPEED = 43,   -- 最大横向移动速度；约等于基础横移速度 +72%
+    RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
 
     -- 2. 镜头配置
 	-- 正常镜头
@@ -41,6 +42,8 @@ local GameConfig = {
     BASE_SPD = 80,           -- 初始子弹飞行速度
     BASE_RNG = 100,           -- 初始子弹射程(存活时间)
     BASE_MULTISHOT = 1,       -- 初始弹道数量 (默认1发)
+    MULTISHOT_EXTRA_DAMAGE_RATIO = 0.7, -- 增加弹道的额外子弹伤害系数；主弹道仍然是100%伤害
+    MULTISHOT_SPREAD_DISTANCE = 3.5, -- 增加弹道最终横向分散间距
 
     -- 5. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
     STAGES = {
@@ -156,10 +159,12 @@ local GameConfig = {
 
     -- 6. 无尽模式难度动态成长配置
     ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
-    ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 30%（乘区） 
+    ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 50%（乘区）
 
     -- 属性门全局配置池 (可以随时在这里增删门里能刷出的属性)
-    GATE_ATTRIBUTE_POOL = {"ATK_Bonus", "ASPD_Bonus", "HP_Bonus", "MaxHP_Bonus", "SPD_Bonus", "RNG_Bonus"},
+    GATE_ATTRIBUTE_POOL = {"ATK_Bonus", "ASPD_Bonus", "HP_Bonus", "MaxHP_Bonus", "SPD_Bonus", "RNG_Bonus", "LateralSpeed_Bonus"},
+    GATE_LATERAL_SPEED_BONUS_MIN = 12, -- 横向移动速度属性门最小加成
+    GATE_LATERAL_SPEED_BONUS_MAX = 12, -- 横向移动速度属性门最大加成
 
     -- 属性中文化映射表 (用于 3D 文字、UI 界面显示等)
     ATTRIBUTE_NAMES_CN = {
@@ -169,11 +174,13 @@ local GameConfig = {
         ASPD_Bonus = "攻速加成",
         SPD_Bonus = "弹速加成",
         RNG_Bonus = "射程加成",
+        LateralSpeed_Bonus = "横移速度",
     },
 
     -- 7. 掉落物与磁吸机制
-    MAGNET_RADIUS = 15,       
-    COLLECT_RADIUS = 5,       
+    MAGNET_RADIUS = 15,
+    MAX_MAGNET_RADIUS = 75,
+    COLLECT_RADIUS = 5,
     MAGNET_SPEED = 75,
     DROP_MAGNET_DELAY = 0.25, -- 掉落物刚爆出来时的“不可吸附延迟时间”(秒)
 
@@ -200,7 +207,7 @@ local GameConfig = {
 	},
 
     -- 9. 宠物与抽卡系统配置
-	PET_GACHA_COST = 200, 
+	PET_GACHA_COST = 200,
 	
 	PETS = {
 		["Slime"] = { 
@@ -330,10 +337,11 @@ local GameConfig = {
         { BuffId = "MaxHP_Bonus", Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 255) },
         { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
         { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
-        { BuffId = "MagnetRadius", Name = "磁力范围", Attr = "MagnetRadius", Amount = 5, Color = Color3.fromRGB(180, 100, 255) }, -- 这个保留绝对值
+        { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(180, 100, 255) },
+        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 100 },
         { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
-        -- 将弹道增加的权重压低（只有基础属性的20%概率）
-        { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20 },
+        -- 将弹道增加的权重压低（只有基础属性的40%概率）
+        { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "额外弹道 70%伤害" },
 
         -- 宠物增益
         { BuffId = "Pet_Count", Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },

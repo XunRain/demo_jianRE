@@ -232,6 +232,12 @@ function UIController.Start()
 				local maxWidth = (petConf and petConf.WindBladeMaxWidth) or 40
 				local maxBonus = math.max(0, ((maxWidth / baseWidth) - 1) * 100)
 				return math.max(0, math.ceil(maxBonus / math.max(buff.Amount or 1, 1)))
+			elseif buff.Attr == "MagnetRadius_Bonus" then
+				-- 磁力范围按百分比成长，最大等级由基础半径和最大半径自动推导。
+				local baseRadius = Controllers.Config.MAGNET_RADIUS or 15
+				local maxRadius = Controllers.Config.MAX_MAGNET_RADIUS or baseRadius
+				local maxBonus = math.max(0, ((maxRadius / baseRadius) - 1) * 100)
+				return math.max(0, math.ceil(maxBonus / math.max(buff.Amount or 1, 1)))
 			end
 
 			return nil
@@ -274,6 +280,11 @@ function UIController.Start()
 				-- 其他常规增益显示加号 "+"
 				amountText = "+" .. tostring(buff.Amount) .. suffix
 			end
+
+			if buff.CardNote then
+				amountText = amountText .. "\n" .. buff.CardNote
+			end
+
 			local levelText = string.format("Lv.%d -> Lv.%d", currentLevel, nextLevel)
 			if maxLevel then
 				levelText = levelText .. " / Max Lv." .. tostring(maxLevel)
@@ -343,6 +354,13 @@ function UIController.Start()
 						local currentBonus = player:GetAttribute("WindBlade_Range_Bonus") or 0
 						local maxBonus = math.max(0, math.floor(((maxWidth / baseWidth) - 1) * 100))
 						player:SetAttribute("WindBlade_Range_Bonus", math.min(currentBonus + amount, maxBonus))
+					elseif attr == "MagnetRadius_Bonus" then
+						-- 磁力范围按百分比成长，但最终吸附半径不能超过配置表里的 MAX_MAGNET_RADIUS。
+						local baseRadius = Controllers.Config.MAGNET_RADIUS or 15
+						local maxRadius = Controllers.Config.MAX_MAGNET_RADIUS or baseRadius
+						local currentBonus = player:GetAttribute("MagnetRadius_Bonus") or 0
+						local maxBonus = math.max(0, math.floor(((maxRadius / baseRadius) - 1) * 100))
+						player:SetAttribute("MagnetRadius_Bonus", math.min(currentBonus + amount, maxBonus))
 					else
 						-- 其他所有属性（包括攻速、攻击、宠物攻速、宠物攻击等）自动在这里叠加
 						player:SetAttribute(attr, (player:GetAttribute(attr) or 0) + amount)

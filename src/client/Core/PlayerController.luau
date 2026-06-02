@@ -110,9 +110,12 @@ function PlayerController.OnRenderStepped(dt)
 	-- 【核心优化】：实时获取并应用当前游戏进程的配置速度
 	local currentStage = player:GetAttribute("CurrentStage") or 1
 	local currentRunSpeed = Config.GetRunSpeed(currentStage)
+	-- 横向移动速度支持局内属性门百分比加成，并用配置表的最大横移速度封顶。
+	local lateralSpeedBonus = player:GetAttribute("LateralSpeed_Bonus") or 0
+	local currentLateralSpeed = math.min(Config.LATERAL_SPEED * (1 + (lateralSpeedBonus / 100)), Config.MAX_LATERAL_SPEED or Config.LATERAL_SPEED)
 	
 	-- 计算最终想要移动的速度向量 (侧向移动 + 动态向前奔跑速度)
-	local desiredVelocity = Vector3.new(effectiveMoveDirection * Config.LATERAL_SPEED, 0, -currentRunSpeed)
+	local desiredVelocity = Vector3.new(effectiveMoveDirection * currentLateralSpeed, 0, -currentRunSpeed)
 	humanoid.WalkSpeed = desiredVelocity.Magnitude
 	humanoid:Move(desiredVelocity.Unit, false)
 	
