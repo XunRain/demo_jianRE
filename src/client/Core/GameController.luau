@@ -4,6 +4,7 @@ local GameController = {}
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera 
 
@@ -256,6 +257,14 @@ function GameController.EnterCombat()
 			-- 读取刚刚在 ResetPlayerStats() 里算好的带有天赋加成的真实血量
 			humanoid.MaxHealth = player:GetAttribute("MaxHP")
 			humanoid.Health = player:GetAttribute("HP")
+		end
+
+		-- 通知服务端开始记录本局跑酷距离；排行榜只需要起点 Z，后续由服务端按角色位置更新。
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local runStartedEvent = remotes and remotes:WaitForChild("RunStarted", 5)
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
+		if runStartedEvent and rootPart then
+			runStartedEvent:FireServer(rootPart.Position.Z)
 		end
 	end
 	

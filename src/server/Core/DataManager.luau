@@ -21,6 +21,9 @@ local DEFAULT_STATS = {
 
     -- 默认装备的武器 ID
 	EquippedWeapon = "DefaultWeapon",
+
+	-- 排行榜相关数据：保存玩家个人历史最高米数，不做全服排行榜。
+	BestDistance = 0,
 }
 
 function DataManager.Init(deps)
@@ -41,9 +44,14 @@ function DataManager.LoadPlayerData(player)
 		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
 	end)
 
-	local playerData = DEFAULT_STATS
+	local playerData = {}
+	for statName, statValue in pairs(DEFAULT_STATS) do
+		playerData[statName] = statValue
+	end
 	if success and data then
-		playerData = data
+		for statName, statValue in pairs(data) do
+			playerData[statName] = statValue
+		end
 		print("✅ " .. player.Name .. " 的云端数据读取成功！")
 	else
 		print("⚠️ " .. player.Name .. " 读取失败或属首次游玩，使用默认 0 资产。")
@@ -70,6 +78,7 @@ function DataManager.SavePlayerData(player)
         -- 将第二关引导标记一起存入云端
 		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,
 		EquippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon",
+		BestDistance = player:GetAttribute("BestDistance") or 0,
 	}
 
 	local success, err = pcall(function()

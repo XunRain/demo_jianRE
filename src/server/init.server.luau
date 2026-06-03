@@ -9,6 +9,7 @@ local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConf
 -- 1. 定义服务端服务映射表 (对齐客户端设计)
 local Services = {
 	DataManager    = require(script.Core:WaitForChild("DataManager")),
+	LeaderboardManager = require(script.Core:WaitForChild("LeaderboardManager")),
 	NetworkManager = require(script.Network:WaitForChild("NetworkManager")),
 }
 

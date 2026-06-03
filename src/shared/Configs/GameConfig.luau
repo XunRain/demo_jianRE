@@ -45,6 +45,15 @@ local GameConfig = {
     MULTISHOT_EXTRA_DAMAGE_RATIO = 0.7, -- 增加弹道的额外子弹伤害系数；主弹道仍然是100%伤害
     MULTISHOT_SPREAD_DISTANCE = 3.5, -- 增加弹道最终横向分散间距
 
+    -- 服务器内排行榜配置；展示板在 Studio 中命名为 LeaderboardBoard 即可被客户端自动绑定。
+    LEADERBOARD = {
+        BoardName = "LeaderboardBoard",
+        TopCount = 10,
+        RefreshInterval = 2,
+        ServerUpdateInterval = 0.5,
+        MissingWarnDelay = 10,
+    },
+
     -- 5. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
     STAGES = {
         [1] = {
@@ -338,7 +347,7 @@ local GameConfig = {
         { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
         { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
         { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(180, 100, 255) },
-        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 100 },
+        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 40 },
         { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
         { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "额外弹道 70%伤害" },

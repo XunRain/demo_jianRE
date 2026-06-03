@@ -23,6 +23,7 @@ local Controllers = {
     
     -- UI与视觉表现层
     UI          = require(script.UI:WaitForChild("UIController")),
+    Leaderboard = require(script.UI:WaitForChild("LeaderboardController")),
     VFX         = require(script.UI:WaitForChild("VFXController")),
 }
 
