@@ -481,8 +481,9 @@ local currentStageConfig = stageConfig
 				end
 			end
 
-			local gateGap = 2
-			local gateWidth = Config.RUNWAY_LIMIT - (gateGap / 2)
+			local totalGateWidth = Config.RUNWAY_LIMIT * 2
+			local gateGap = math.clamp(Config.GATE_CENTER_GAP or 8, 2, totalGateWidth - 2)
+			local gateWidth = (totalGateWidth - gateGap) / 2
 
 			local leftOffset = -(gateGap / 2 + gateWidth / 2)
 			local rightOffset = (gateGap / 2 + gateWidth / 2)

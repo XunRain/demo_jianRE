@@ -210,7 +210,7 @@ function CombatController.CheckCollisions(rootPart)
 
 		local hitBoxX = b.part.Size.X / 2 + 1
 		local hitBoxZ = b.part.Size.Z / 2 + 2
-		if b.isPet and b.part.Shape == Enum.PartType.Cylinder then
+		if b.isPet and b.part:IsA("Part") and b.part.Shape == Enum.PartType.Cylinder then
 			hitBoxX, hitBoxZ = 8, 8
 		end
 
@@ -232,7 +232,8 @@ function CombatController.CheckCollisions(rootPart)
 				local dmg = b.damage or playerAtk
 
 				local finalHitVFX = b.hitVFX or (Controllers.Config.WEAPONS[b.weaponId] and Controllers.Config.WEAPONS[b.weaponId].HitVFX) or "DefaultHit"
-				Controllers.VFX.PlayBulletExplosion(finalHitVFX, bPos)
+				local hitVFXPosition = b.hitVFXPosition or bPos
+				Controllers.VFX.PlayBulletExplosion(finalHitVFX, hitVFXPosition)
 
 				if b.aoeRadius then
 					local targetsToDamage = {}
@@ -288,9 +289,27 @@ function CombatController.CheckCollisions(rootPart)
 
 	for i = #activeGateGroups, 1, -1 do
 		local group = activeGateGroups[i]
-		if pPos.Z <= group.z + 1 then
-			local chosenGate = (pPos.X < Controllers.Map.TrackStartX) and group.left or group.right
+		local function isTouchingGate(gate)
+			local gatePart = gate and gate.part
+			if not gatePart then return false end
 
+			local gatePos = gatePart.Position
+			local gateSize = gatePart.Size
+			local playerHalfWidth = 1
+			local playerHalfDepth = 1
+
+			return math.abs(pPos.X - gatePos.X) < (gateSize.X / 2 + playerHalfWidth)
+				and math.abs(pPos.Z - gatePos.Z) < (gateSize.Z / 2 + playerHalfDepth)
+		end
+
+		local chosenGate = nil
+		if isTouchingGate(group.left) then
+			chosenGate = group.left
+		elseif isTouchingGate(group.right) then
+			chosenGate = group.right
+		end
+
+		if chosenGate then
 			if sourceVFX and rootPart then Controllers.VFX.PlayGateVFX(rootPart) end
 
 			if chosenGate.attr == "HP_Bonus" then
@@ -340,6 +359,10 @@ function CombatController.CheckCollisions(rootPart)
 				player:SetAttribute(chosenGate.attr, nextVal)
 			end
 
+			if group.left.part then group.left.part:Destroy() end
+			if group.right.part then group.right.part:Destroy() end
+			table.remove(activeGateGroups, i)
+		elseif pPos.Z < group.z - 3 then
 			if group.left.part then group.left.part:Destroy() end
 			if group.right.part then group.right.part:Destroy() end
 			table.remove(activeGateGroups, i)

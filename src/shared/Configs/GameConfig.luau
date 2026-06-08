@@ -174,6 +174,7 @@ local GameConfig = {
     ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
     ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 50%（乘区）
     GATE_SAFE_GAP = 14, -- 属性门前后安全区；普通怪和精英怪会避开，防止门扎堆或被遮挡
+    GATE_CENTER_GAP = 8, -- 左右属性门中间的可通行空隙，玩家可选择不吃门直接通过
     BOSS_GATE_BLOCK_GAP = 60, -- Boss 前后门禁区；门撞到 Boss 安全区时直接跳过
     MOB_GATE_BUFFER = 8, -- 怪物避让属性门时额外保留的操作缓冲距离
     ENCOUNTER_MAX_REPOSITION_TRIES = 6, -- 怪物寻找门间空位的最大尝试次数，失败则跳过该波
@@ -295,8 +296,10 @@ local GameConfig = {
 		"Angel"
 	},
 
-	PET_FIRE_STAGGER_DELAY = 0.12, -- 多个宠物/分身开火时的错峰间隔，让玩家能看清每只宠物的贡献
+	PET_FIRE_STAGGER_DELAY = 0.8, -- 多个宠物/分身开火时的错峰间隔，让玩家能看清每只宠物的贡献
 	PET_CAST_STAGGER_DELAY = 0.15, -- 单只宠物连续施法时的间隔，保留技能连发的节奏感
+	SMITE_WARNING_TIME = 0.5, -- 天使圣光预警持续时间：先展示光柱和法阵，再结算伤害
+	SMITE_HIT_WINDOW = 0.08, -- 圣光预警结束后的短命中窗口，给碰撞检测保留一两帧时间
 
     -- 10. 武器与特效配置表
     WEAPONS = {

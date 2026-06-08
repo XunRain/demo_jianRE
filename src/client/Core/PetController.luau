@@ -1,4 +1,4 @@
-﻿-- src/client/Core/PetController.luau
+-- src/client/Core/PetController.luau
 -- 宠物控制模块：负责宠物跟随、分身刷新，以及宠物技能/子弹的发射。
 local PetController = {}
 
@@ -58,6 +58,61 @@ local function setProjectilePhysics(instance, anchored)
 			part.Anchored = anchored
 			part.CanCollide = false
 		end
+	end
+end
+
+-- 获取圣光预警的贴地锚点；优先使用美术放置的 AnchorPart，再兼容 GroundAnchor/Attachment1。
+local function getSmiteGroundAnchor(instance)
+	if not instance then return nil end
+
+	local anchorPart = instance:FindFirstChild("AnchorPart", true)
+	if anchorPart and anchorPart:IsA("BasePart") then
+		return anchorPart
+	end
+
+	local anchor = instance:FindFirstChild("GroundAnchor", true) or instance:FindFirstChild("Attachment1", true)
+	if anchor and anchor:IsA("Attachment") then
+		return anchor
+	end
+
+	return nil
+end
+
+-- 平移一个特效实例；Model 用 PivotTo，Part 容器则逐个移动所有 BasePart 子孙。
+local function translateVFXInstance(instance, delta)
+	if not instance or not delta then return end
+
+	if instance:IsA("Model") then
+		instance:PivotTo(instance:GetPivot() + delta)
+		return
+	end
+
+	if instance:IsA("BasePart") then
+		instance.CFrame = instance.CFrame + delta
+	end
+
+	for _, child in ipairs(instance:GetDescendants()) do
+		if child:IsA("BasePart") then
+			child.CFrame = child.CFrame + delta
+		end
+	end
+end
+
+-- 将圣光特效放到目标位置；如果存在 AnchorPart/贴地 Attachment，就让它精准贴到怪物脚底。
+local function placeSmiteVFX(instance, groundPos)
+	if not instance or not groundPos then return end
+
+	local anchor = getSmiteGroundAnchor(instance)
+	if anchor then
+		local anchorPos = anchor:IsA("Attachment") and anchor.WorldPosition or anchor.Position
+		translateVFXInstance(instance, groundPos - anchorPos)
+		return
+	end
+
+	if instance:IsA("Model") then
+		instance:PivotTo(CFrame.new(groundPos) * instance:GetPivot().Rotation)
+	elseif instance:IsA("BasePart") then
+		instance.CFrame = CFrame.new(groundPos) * instance.CFrame.Rotation
 	end
 end
 
@@ -133,6 +188,34 @@ local function getPetFireOrder(character)
 	return activePets
 end
 
+-- 根据宠物编号和总数量计算跟随阵型位置，避免 4、5 只宠物时互相重叠。
+local function getPetFormationCFrame(rootPart, petIndex, totalCount, inCombat)
+	local height = inCombat and 2.2 or 2.5
+	local baseRadius = inCombat and 5 or 4
+	local minAngle = math.rad(-65)
+	local maxAngle = math.rad(65)
+
+	if totalCount <= 1 then
+		if inCombat then
+			return rootPart.CFrame * CFrame.new(5, height, -2)
+		end
+
+		return rootPart.CFrame * CFrame.new(-4, height, 4)
+	end
+
+	local t = (petIndex - 1) / math.max(totalCount - 1, 1)
+	local angle = minAngle + (maxAngle - minAngle) * t
+	local radius = baseRadius + math.floor((petIndex - 1) / 5) * 1.5
+	local xOffset = math.sin(angle) * radius
+	local zOffset = math.cos(angle) * radius
+
+	if inCombat then
+		zOffset = zOffset - 1
+	end
+
+	return rootPart.CFrame * CFrame.new(xOffset, height, zOffset)
+end
+
 function PetController.Init(deps)
 	Controllers = deps
 end
@@ -153,12 +236,8 @@ function PetController.Start()
 		local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
 		if not rootPart then return end
 
-		local targetCFrame
-		if Controllers.Game.IsCombatActive then
-			targetCFrame = rootPart.CFrame * CFrame.new(6, 2, -2)
-		else
-			targetCFrame = rootPart.CFrame * CFrame.new(-4, 2.5, 4)
-		end
+		local petCount = player:GetAttribute("Pet_Count") or 1
+		local targetCFrame = getPetFormationCFrame(rootPart, 1, petCount, Controllers.Game.IsCombatActive)
 
 		local currentPivot = currentPetModel:GetPivot()
 		currentPetModel:PivotTo(currentPivot:Lerp(targetCFrame, dt * 5))
@@ -270,6 +349,8 @@ function PetController.ShootProjectile(petConfig, petModel)
 	local aoe = petConfig.AOERadius
 	local windBladeBaseWidth = petConfig.WindBladeBaseWidth or 20
 	local windBladeWidth = getWindBladeWidth(petConfig)
+	local smiteWarningTime = Controllers.Config.SMITE_WARNING_TIME or 0.5
+	local smiteHitWindow = Controllers.Config.SMITE_HIT_WINDOW or 0.08
 
 	if skillType == "WindBlade" then
 		local character = player.Character
@@ -309,9 +390,9 @@ function PetController.ShootProjectile(petConfig, petModel)
 	local smiteTargetPos = nil
 	if skillType == "Smite" then
 		if not targetEnemy then return end
-		-- 神罚命中点恢复到怪物碰撞体中心，回到最初版稳定表现。
-		smiteTargetPos = targetEnemy.part.Position
-		actualLifetime = 0.5
+		-- 圣光预警以怪物脚底为落点，便于美术法阵贴地显示。
+		smiteTargetPos = targetEnemy.part.Position - Vector3.new(0, targetEnemy.part.Size.Y / 2, 0)
+		actualLifetime = smiteWarningTime + smiteHitWindow
 	end
 
 	local vfxFolder = ReplicatedStorage:FindFirstChild("VFX")
@@ -338,12 +419,8 @@ function PetController.ShootProjectile(petConfig, petModel)
 		end
 
 		if skillType == "Smite" and smiteTargetPos then
-			-- 天使神罚恢复成老版本：直接把技能预制体落在目标位置。
-			if bullet:IsA("Model") then
-				bullet:PivotTo(CFrame.new(smiteTargetPos) * bullet:GetPivot().Rotation)
-			else
-				bullet.CFrame = CFrame.new(smiteTargetPos) * bullet.CFrame.Rotation
-			end
+			-- 天使圣光优先使用 AnchorPart 贴地，避免 Pivot 不准导致法阵看不到。
+			placeSmiteVFX(bullet, smiteTargetPos)
 			mainPart.Anchored = true
 		else
 			bullet:PivotTo(CFrame.new(spawnPos))
@@ -423,22 +500,49 @@ function PetController.ShootProjectile(petConfig, petModel)
 	game.Debris:AddItem(bullet, actualLifetime)
 
 	local bulletPart = getFirstBasePart(bullet)
+	if skillType == "Smite" and smiteTargetPos then
+		-- 圣光伤害使用独立透明命中盒，避免美术特效层级/Pivot/AnchorPart 影响实际判定。
+		local smiteHitbox = Instance.new("Part")
+		local smiteHitboxRadius = math.max(4, aoe or 8)
+		smiteHitbox.Name = "SmiteHitbox"
+		smiteHitbox.Size = Vector3.new(smiteHitboxRadius * 2, 1, smiteHitboxRadius * 2)
+		smiteHitbox.CFrame = CFrame.new(smiteTargetPos)
+		smiteHitbox.Anchored = true
+		smiteHitbox.CanCollide = false
+		smiteHitbox.Transparency = 1
+		smiteHitbox.Parent = bullet
+		bulletPart = smiteHitbox
+	end
+
 	if not bulletPart then
 		bullet:Destroy()
 		return
 	end
 
-	table.insert(Controllers.Combat.ActiveBullets, {
-		part = bulletPart,
-		damage = petDmg,
-		weaponId = "PetWeapon",
-		hitsLeft = pierce,
-		hitTargets = {},
-		hitVFX = hitVfx,
-		aoeRadius = aoe,
-		isPet = true,
-		persistAfterHit = (skillType == "Smite"),
-	})
+	local function registerPetBulletHit()
+		if not Controllers.Game.IsCombatActive then return end
+		if not bulletPart or not bulletPart.Parent then return end
+
+		table.insert(Controllers.Combat.ActiveBullets, {
+			part = bulletPart,
+			damage = petDmg,
+			weaponId = "PetWeapon",
+			hitsLeft = pierce,
+			hitTargets = {},
+			hitVFX = hitVfx,
+			hitVFXPosition = (skillType == "Smite") and smiteTargetPos or nil,
+			aoeRadius = aoe,
+			isPet = true,
+			persistAfterHit = (skillType == "Smite"),
+		})
+	end
+
+	if skillType == "Smite" then
+		-- 天使圣光先作为预警出现，0.5 秒后才注册命中，避免光柱刚出现就立刻扣血。
+		task.delay(smiteWarningTime, registerPetBulletHit)
+	else
+		registerPetBulletHit()
+	end
 end
 
 -- 根据当前宠物数量刷新分身，并让分身以固定偏移跟随玩家。
@@ -471,8 +575,8 @@ function PetController.UpdatePetClones()
 					return
 				end
 
-				local xOffset = (i % 2 == 0) and -3.5 or 3.5
-				local targetCFrame = character.PrimaryPart.CFrame * CFrame.new(xOffset, 2.5, 3)
+				local targetCountNow = player:GetAttribute("Pet_Count") or targetCount
+				local targetCFrame = getPetFormationCFrame(character.PrimaryPart, i, targetCountNow, Controllers.Game.IsCombatActive)
 
 				clone:PivotTo(clone:GetPivot():Lerp(targetCFrame, 8 * dt))
 			end)
