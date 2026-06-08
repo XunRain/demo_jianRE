@@ -9,12 +9,69 @@ local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera 
+local keyboardMoveDirection = 0 -- Keyboard input direction
+local touchMoveDirection = 0 -- Mobile touch input direction
+local activeTouchInput = nil -- 当前正在控制横移的触控输入对象
+local touchStartX = 0 -- 本次滑动的起点 X 坐标
 
 local Controllers -- 全局依赖指针
 local moveDirection = 0 -- 玩家当前的键盘输入方向 (-1左, 0不动, 1右)
 
 function PlayerController.Init(deps)
 	Controllers = deps
+end
+
+-- 合并键盘和触控方向；触控有输入时优先使用触控，避免手机滑动和键盘状态互相干扰。
+local function refreshMoveDirection()
+	if touchMoveDirection ~= 0 then
+		moveDirection = touchMoveDirection
+	else
+		moveDirection = keyboardMoveDirection
+	end
+end
+
+-- 清理手机端触控输入状态；用于松手、升级暂停、非战斗等场景。
+local function clearTouchInput()
+	activeTouchInput = nil
+	touchStartX = 0
+	touchMoveDirection = 0
+	refreshMoveDirection()
+end
+
+-- 清理全部横向输入；外部强制暂停或退出战斗时调用。
+local function clearAllMoveInput()
+	keyboardMoveDirection = 0
+	clearTouchInput()
+end
+
+-- 判断当前是否允许战斗输入；升级选卡和非战斗状态下不响应键盘/触控。
+local function canUseCombatInput()
+	return Controllers and Controllers.Game and Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp")
+end
+
+-- 判断触控点是否位于屏幕下半区，避免点击升级卡、背包、商店等 UI 时误触横移。
+local function isTouchInActiveArea(input)
+	local currentCamera = Workspace.CurrentCamera or camera
+	if not currentCamera then return false end
+
+	local activeRatio = Controllers.Config.MOBILE_TOUCH_ACTIVE_Y_RATIO or 0.5
+	return input.Position.Y >= currentCamera.ViewportSize.Y * activeRatio
+end
+
+-- 根据手指相对起点的横向偏移刷新移动方向，死区内保持停止。
+local function updateTouchDirection(input)
+	local deadzone = Controllers.Config.MOBILE_TOUCH_DEADZONE or 20
+	local deltaX = input.Position.X - touchStartX
+
+	if math.abs(deltaX) < deadzone then
+		touchMoveDirection = 0
+	elseif deltaX < 0 then
+		touchMoveDirection = -1
+	else
+		touchMoveDirection = 1
+	end
+
+	refreshMoveDirection()
 end
 
 -- 启动输入监听与渲染主循环
@@ -28,27 +85,65 @@ end
 
 -- 供外部模块调用的接口 (例如：升级暂停、重置开局时，强制重置移动状态)
 function PlayerController.SetMoveDirection(dir)
-	moveDirection = dir
+	keyboardMoveDirection = dir
+	if dir == 0 then
+		clearTouchInput()
+	else
+		refreshMoveDirection()
+	end
 end
 
 -- 绑定玩家的键盘按键输入
 function PlayerController.SetupInput()
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		-- 如果在打字、非战斗状态、或者正在升级选卡时，剥夺玩家输入权
-		if gameProcessed or not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then return end
+		if gameProcessed or not canUseCombatInput() then return end
 		
 		if input.KeyCode == Enum.KeyCode.A or input.KeyCode == Enum.KeyCode.Left then
-			moveDirection = -1
+			keyboardMoveDirection = -1
+			refreshMoveDirection()
 		elseif input.KeyCode == Enum.KeyCode.D or input.KeyCode == Enum.KeyCode.Right then
-			moveDirection = 1
+			keyboardMoveDirection = 1
+			refreshMoveDirection()
 		end
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
 		if input.KeyCode == Enum.KeyCode.A or input.KeyCode == Enum.KeyCode.Left then
-			if moveDirection == -1 then moveDirection = 0 end
+			if keyboardMoveDirection == -1 then
+				keyboardMoveDirection = 0
+				refreshMoveDirection()
+			end
 		elseif input.KeyCode == Enum.KeyCode.D or input.KeyCode == Enum.KeyCode.Right then
-			if moveDirection == 1 then moveDirection = 0 end
+			if keyboardMoveDirection == 1 then
+				keyboardMoveDirection = 0
+				refreshMoveDirection()
+			end
+		end
+	end)
+
+	UserInputService.TouchStarted:Connect(function(input, gameProcessed)
+		if gameProcessed or activeTouchInput or not canUseCombatInput() or not isTouchInActiveArea(input) then return end
+
+		activeTouchInput = input
+		touchStartX = input.Position.X
+		touchMoveDirection = 0
+		refreshMoveDirection()
+	end)
+
+	UserInputService.TouchMoved:Connect(function(input, gameProcessed)
+		if input ~= activeTouchInput then return end
+		if gameProcessed or not canUseCombatInput() then
+			clearTouchInput()
+			return
+		end
+
+		updateTouchDirection(input)
+	end)
+
+	UserInputService.TouchEnded:Connect(function(input, gameProcessed)
+		if input == activeTouchInput then
+			clearTouchInput()
 		end
 	end)
 end
@@ -61,10 +156,14 @@ function PlayerController.OnRenderStepped(dt)
 	local humanoid = character:FindFirstChild("Humanoid")
 	
 	-- 没加载好或者死人不需要进行任何跑酷计算
-	if not rootPart or not humanoid or humanoid.Health <= 0 then return end
+	if not rootPart or not humanoid or humanoid.Health <= 0 then
+		clearAllMoveInput()
+		return
+	end
 
 	-- ─── 阶段 A: 大厅状态 ───
 	if not Controllers.Game.IsCombatActive then
+		clearAllMoveInput()
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		humanoid.AutoRotate = true
 		return 
@@ -72,6 +171,7 @@ function PlayerController.OnRenderStepped(dt)
 
 	-- ─── 阶段 B: 升级暂停状态 ───
 	if player:GetAttribute("IsLevelingUp") then
+		clearAllMoveInput()
 		humanoid.WalkSpeed = 0 -- 刹车停住
 		return
 	end

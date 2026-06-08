@@ -9,12 +9,32 @@ local Controllers -- 全局依赖指针
 local roadTemplate = ReplicatedStorage:WaitForChild("Model", 10):WaitForChild("Road", 10)
 -- 跑道坐标系状态
 MapController.TrackStartX = 0          -- 跑道中心线的 X 坐标 (暴漏给其它模块用于限制玩家移动范围)
-local trackStartY = 0                  -- 跑道地面的 Y 坐标
+local trackStartY = 0                  -- 跑道模型 Pivot 的 Y 坐标；真实路面高度会用标记或配置偏移单独计算
 local nextTrackZ = 0                   -- 下一块跑道需要拼接的 Z 坐标
 local activeTracks = {}                -- 存储当前地图上存活的跑道板块 (包含地面和两侧墙壁的 Model/Part)
 
 function MapController.Init(deps)
 	Controllers = deps
+end
+
+-- 计算当前跑道块的真实路面高度；优先读取 Studio 标记，找不到时使用配置偏移兜底。
+local function getTrackSurfaceY(block)
+	local Config = Controllers.Config
+	local yOffset = Config.RUNWAY_SURFACE_Y_OFFSET or 0
+	local surfaceMarker = block:FindFirstChild("RunwaySurface", true) or block:FindFirstChild("RunwayBounds", true)
+
+	if surfaceMarker then
+		if surfaceMarker:IsA("Attachment") then
+			return surfaceMarker.WorldPosition.Y + yOffset
+		end
+
+		if surfaceMarker:IsA("BasePart") then
+			-- 如果标记是薄片 Part，就用上表面当作可站立路面高度。
+			return surfaceMarker.Position.Y + (surfaceMarker.Size.Y / 2) + yOffset
+		end
+	end
+
+	return trackStartY + yOffset
 end
 
 -- 【核心重构】：生成单块完整跑道 (直接使用美术模型)
@@ -48,7 +68,8 @@ function MapController.SpawnTrackBlock()
 	-- 4. 联动生成：通知 EncounterController 在上面撒怪和门
 	local blockStartZ = nextTrackZ
 	local blockEndZ = nextTrackZ - Config.TRACK_LENGTH
-	Controllers.Encounter.SpawnEncountersInBlock(blockStartZ, blockEndZ, MapController.TrackStartX, trackStartY)
+	local trackSurfaceY = getTrackSurfaceY(block)
+	Controllers.Encounter.SpawnEncountersInBlock(blockStartZ, blockEndZ, MapController.TrackStartX, trackSurfaceY)
 	
 	-- 5. 推进指针，为下一块地板做准备
 	nextTrackZ = blockEndZ

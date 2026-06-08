@@ -3,10 +3,10 @@
 local UIController = {}
 
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 
@@ -14,6 +14,152 @@ local Controllers -- 全局依赖指针
 
 -- 3D 属性 UI 常驻玩家头顶上方 3.5 格（所有人可见）
 local HEAD_OFFSET = Vector3.new(0, 3.5, 0)   
+
+-- 判断当前设备是否按纯手机端处理；PC 上接了触屏时仍保留桌面 UI 尺寸。
+local function isMobileOnlyDevice()
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+-- 查找 Studio 模板里可能存在的文字节点，兼容不同命名，避免代码强制重建 UI。
+local function findTextNode(root, names)
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and (node:IsA("TextLabel") or node:IsA("TextButton")) then
+			return node
+		end
+	end
+	return nil
+end
+
+-- 查找 Studio 模板里可能存在的图标节点；只负责绑定图片，不修改图标位置和样式。
+local function findImageNode(root, names)
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and (node:IsA("ImageLabel") or node:IsA("ImageButton")) then
+			return node
+		end
+	end
+
+	local iconBadge = root:FindFirstChild("IconBadge", true)
+	if iconBadge then
+		local imageNode = iconBadge:FindFirstChildWhichIsA("ImageLabel", true) or iconBadge:FindFirstChildWhichIsA("ImageButton", true)
+		if imageNode then
+			return imageNode
+		end
+	end
+
+	return nil
+end
+
+-- 从数字、纯数字字符串或 rbxassetid:// 写法中提取资源数字 ID；用于缩略图模式。
+local function extractAssetIdNumber(assetId)
+	if type(assetId) == "number" then
+		return tostring(assetId)
+	end
+
+	if type(assetId) ~= "string" then
+		return nil
+	end
+
+	if string.find(assetId, "^%d+$") then
+		return assetId
+	end
+
+	return string.match(assetId, "^rbxassetid://(%d+)$")
+end
+
+-- 统一整理 Roblox 图片资源 ID；缩略图模式可兼容 Creator Store/Decal/Asset 页面 ID。
+local function normalizeImageAssetId(assetId, useThumbnail)
+	if type(assetId) ~= "number" and (type(assetId) ~= "string" or assetId == "") then
+		return nil
+	end
+
+	local assetNumber = extractAssetIdNumber(assetId)
+	if useThumbnail and assetNumber then
+		return "rbxthumb://type=Asset&id=" .. assetNumber .. "&w=420&h=420"
+	end
+
+	if assetNumber then
+		return "rbxassetid://" .. assetNumber
+	end
+
+	return assetId
+end
+
+-- 创建或复用 UI 装饰节点；用于给指定控件补充美术层，不重建 Studio 里的 UI。
+local function getOrCreateUiChild(parent, className, name)
+	local child = parent:FindFirstChild(name)
+	if child and child.ClassName == className then
+		return child
+	end
+
+	child = Instance.new(className)
+	child.Name = name
+	child.Parent = parent
+	return child
+end
+
+-- 给退出按钮补充立体层次：渐变、高光、暗边和投影；不改按钮的位置、尺寸和点击逻辑。
+local function applyExitButtonDepthStyle(exitButton)
+	if not exitButton or not exitButton:IsA("GuiButton") then return end
+
+	exitButton.ClipsDescendants = false
+
+	local corner = getOrCreateUiChild(exitButton, "UICorner", "ExitDepthCorner")
+	corner.CornerRadius = UDim.new(0, 8)
+
+	local stroke = getOrCreateUiChild(exitButton, "UIStroke", "ExitDepthStroke")
+	stroke.Color = Color3.fromRGB(58, 14, 18)
+	stroke.Thickness = 2
+	stroke.Transparency = 0
+
+	local gradient = getOrCreateUiChild(exitButton, "UIGradient", "ExitDepthGradient")
+	gradient.Rotation = 90
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 91, 91)),
+		ColorSequenceKeypoint.new(0.45, Color3.fromRGB(197, 48, 54)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(123, 25, 34)),
+	})
+
+	local shadow = getOrCreateUiChild(exitButton, "Frame", "ExitDepthShadow")
+	shadow.AnchorPoint = Vector2.new(0.5, 0)
+	shadow.Position = UDim2.new(0.5, 0, 0, 5)
+	shadow.Size = UDim2.new(1, 0, 1, 0)
+	shadow.BackgroundColor3 = Color3.fromRGB(45, 10, 14)
+	shadow.BackgroundTransparency = 0.45
+	shadow.BorderSizePixel = 0
+	shadow.ZIndex = math.max(0, exitButton.ZIndex - 1)
+
+	local shadowCorner = getOrCreateUiChild(shadow, "UICorner", "ExitDepthShadowCorner")
+	shadowCorner.CornerRadius = UDim.new(0, 8)
+
+	local highlight = getOrCreateUiChild(exitButton, "Frame", "ExitDepthHighlight")
+	highlight.AnchorPoint = Vector2.new(0.5, 0)
+	highlight.Position = UDim2.new(0.5, 0, 0, 2)
+	highlight.Size = UDim2.new(0.86, 0, 0.22, 0)
+	highlight.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	highlight.BackgroundTransparency = 0.72
+	highlight.BorderSizePixel = 0
+	highlight.ZIndex = exitButton.ZIndex + 1
+
+	local highlightCorner = getOrCreateUiChild(highlight, "UICorner", "ExitDepthHighlightCorner")
+	highlightCorner.CornerRadius = UDim.new(1, 0)
+
+	local bottomShade = getOrCreateUiChild(exitButton, "Frame", "ExitDepthBottomShade")
+	bottomShade.AnchorPoint = Vector2.new(0.5, 1)
+	bottomShade.Position = UDim2.new(0.5, 0, 1, 0)
+	bottomShade.Size = UDim2.new(1, 0, 0.34, 0)
+	bottomShade.BackgroundColor3 = Color3.fromRGB(64, 11, 18)
+	bottomShade.BackgroundTransparency = 0.62
+	bottomShade.BorderSizePixel = 0
+	bottomShade.ZIndex = exitButton.ZIndex + 1
+
+	if exitButton:IsA("TextButton") then
+		exitButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+		exitButton.TextStrokeColor3 = Color3.fromRGB(24, 6, 9)
+		exitButton.TextStrokeTransparency = 0.15
+	end
+end
 
 function UIController.Init(deps)
 	Controllers = deps
@@ -67,7 +213,14 @@ function UIController.Start()
 			-- 退出按钮
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
+				applyExitButtonDepthStyle(exitButton)
 				exitButton.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
+			end
+
+			-- 手机端滑动控制提示层：UI 由 Studio 设计，代码只负责按设备和战斗状态控制显隐。
+			local mobileControls = mainUI:FindFirstChild("MobileControls", true)
+			if mobileControls and mobileControls:IsA("GuiObject") then
+				mobileControls.Visible = isMobileOnlyDevice() and inCombat and not player:GetAttribute("IsLevelingUp")
 			end
 
          -- 大厅专属 UI 的战斗隔离控制
@@ -110,7 +263,7 @@ function UIController.Start()
 			if stageLabel then
 				-- 只有进入战斗（跑酷状态下）且不在升级选卡面板阻挡时才显示关卡数；回到大厅自动隐藏
 				stageLabel.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
-				stageLabel.Text = "第 " .. tostring(currentStage) .. " 关"
+				stageLabel.Text = "STAGE: " .. tostring(currentStage)
 			end
 
 			-- Minecraft 风格底部血条/经验条群组控制
@@ -260,8 +413,8 @@ function UIController.Start()
 			player:SetAttribute(levelKey, nextLevel)
 		end
 
-		-- 生成升级卡显示文本：增益数值 + 当前等级 -> 选择后等级 + 可选最大等级
-		local function buildBuffCardText(buff)
+		-- 生成升级卡显示数据：标题、数值、补充说明、等级分开返回，方便 Studio 拆分多个 TextLabel。
+		local function buildBuffCardDisplay(buff)
 			local currentLevel = getBuffLevel(buff)
 			local maxLevel = getBuffMaxLevel(buff)
 			local nextLevel = maxLevel and math.min(currentLevel + 1, maxLevel) or (currentLevel + 1)
@@ -281,16 +434,155 @@ function UIController.Start()
 				amountText = "+" .. tostring(buff.Amount) .. suffix
 			end
 
-			if buff.CardNote then
-				amountText = amountText .. "\n" .. buff.CardNote
-			end
-
 			local levelText = string.format("Lv.%d -> Lv.%d", currentLevel, nextLevel)
 			if maxLevel then
 				levelText = levelText .. " / Max Lv." .. tostring(maxLevel)
 			end
 
-			return string.format("%s\n%s\n%s", buff.Name, amountText, levelText)
+			local fullText = string.format("%s\n%s\n%s", buff.Name, amountText, levelText)
+			if buff.CardNote then
+				fullText = string.format("%s\n%s\n%s\n%s", buff.Name, amountText, buff.CardNote, levelText)
+			end
+
+			return {
+				Title = buff.Name,
+				Amount = amountText,
+				Note = buff.CardNote,
+				Level = levelText,
+				FullText = fullText,
+			}
+		end
+
+		-- 获取升级卡图标资源；优先使用单张卡配置，其次按 BuffId/Attr 查共享图标表。
+		local function getBuffIconAssetId(buff)
+			local iconMap = Controllers.Config.LEVEL_UP_BUFF_ICONS or {}
+			local buffId = getBuffId(buff)
+			local iconAssetId = buff.Icon or iconMap[buffId] or iconMap[buff.Attr]
+			return normalizeImageAssetId(iconAssetId, Controllers.Config.LEVEL_UP_BUFF_ICON_USE_THUMBNAIL == true)
+		end
+
+		-- 获取升级卡美术分类；分类用于切换 Studio 预制层和填右上角角标。
+		local function getBuffCardArt(buff)
+			local artMap = Controllers.Config.LEVEL_UP_CARD_ART or {}
+			local buffId = getBuffId(buff)
+			return artMap[buffId] or artMap[buff.Attr] or {
+				Category = "PlayerStats",
+				CategoryName = "玩家属性",
+				Badge = buff.Name or buffId,
+			}
+		end
+
+		-- 按分类切换美术预制层；美术可使用 CategoryLayer_PlayerStats 或给层设置 CardArtCategory 属性。
+		local function applyCardCategoryLayers(card, activeCategory)
+			local categoryKeys = {"PlayerStats", "WeaponProjectile", "Pet", "Sword", "Rare"}
+			for _, node in ipairs(card:GetDescendants()) do
+				if node:IsA("GuiObject") then
+					local attrCategory = node:GetAttribute("CardArtCategory")
+					if attrCategory then
+						node.Visible = attrCategory == activeCategory
+					end
+
+					for _, category in ipairs(categoryKeys) do
+						if node.Name == "CategoryLayer_" .. category or node.Name == "CardArt_" .. category then
+							node.Visible = category == activeCategory
+						end
+					end
+				end
+			end
+		end
+
+		-- 填充升级卡美术元信息；只写可选文本和属性，不修改颜色、尺寸、边框等美术样式。
+		local function applyBuffCardArt(card, buff)
+			local art = getBuffCardArt(buff)
+			local category = art.Category or "PlayerStats"
+			local categoryName = art.CategoryName or category
+			local badge = art.Badge or buff.Name or getBuffId(buff)
+
+			card:SetAttribute("CardArtCategory", category)
+			card:SetAttribute("CardArtCategoryName", categoryName)
+			card:SetAttribute("CardArtBadge", badge)
+			applyCardCategoryLayers(card, category)
+
+			local badgeText = findTextNode(card, {"BadgeText", "CornerBadgeText", "TypeBadgeText"})
+			if badgeText then
+				badgeText.Text = badge
+				badgeText.Visible = true
+			end
+
+			local categoryText = findTextNode(card, {"CategoryText", "CategoryNameText", "CardTypeText"})
+			if categoryText then
+				categoryText.Text = categoryName
+				categoryText.Visible = true
+			end
+		end
+
+		-- 填充升级卡图标；Studio 没有放图标节点时自动跳过，资源为空时隐藏图标。
+		local function applyBuffCardIcon(card, buff)
+			local buffId = getBuffId(buff)
+			local iconAssetId = getBuffIconAssetId(buff)
+			card:SetAttribute("IconBuffDebug", buffId)
+			card:SetAttribute("IconAssetDebug", iconAssetId or "")
+
+			local iconNode = findImageNode(card, {"IconImage", "CardIcon", "Icon"})
+			local iconBadge = card:FindFirstChild("IconBadge", true)
+			if iconBadge then
+				iconBadge:SetAttribute("IconBuffDebug", buffId)
+				iconBadge:SetAttribute("IconAssetDebug", iconAssetId or "")
+			end
+
+			if not iconNode then
+				card:SetAttribute("IconNodeFound", false)
+				if iconBadge then
+					iconBadge:SetAttribute("IconNodeFound", false)
+				end
+				return
+			end
+
+			card:SetAttribute("IconNodeFound", true)
+			card:SetAttribute("IconNodeNameDebug", iconNode.Name)
+			if iconBadge then
+				iconBadge:SetAttribute("IconNodeFound", true)
+				iconBadge:SetAttribute("IconNodeNameDebug", iconNode.Name)
+			end
+
+			if iconAssetId then
+				iconNode.Image = iconAssetId
+				iconNode:SetAttribute("IconBuffDebug", buffId)
+				iconNode:SetAttribute("IconAssetDebug", iconAssetId)
+				iconNode:SetAttribute("IconNodeFound", true)
+				iconNode.Visible = true
+			else
+				iconNode.Image = ""
+				iconNode:SetAttribute("IconBuffDebug", buffId)
+				iconNode:SetAttribute("IconAssetDebug", "")
+				iconNode:SetAttribute("IconNodeFound", true)
+				iconNode.Visible = false
+			end
+		end
+
+		-- 填充升级卡显示内容；优先写入 Studio 子标签，没有子标签时回退到 TextButton.Text。
+		local function applyBuffCardDisplay(card, buff)
+			local display = buildBuffCardDisplay(buff)
+			local titleText = findTextNode(card, {"TitleText", "NameText", "BuffName"})
+			local amountText = findTextNode(card, {"AmountText", "EffectText", "ValueText"})
+			local noteText = findTextNode(card, {"NoteText", "DescText", "DescriptionText"})
+			local levelText = findTextNode(card, {"LevelText", "LevelLabel"})
+			local hasSplitLabels = titleText or amountText or noteText or levelText
+
+			if titleText then titleText.Text = display.Title end
+			if amountText then amountText.Text = display.Amount end
+			if levelText then levelText.Text = display.Level end
+			if noteText then
+				noteText.Text = display.Note or ""
+				noteText.Visible = display.Note ~= nil and display.Note ~= ""
+			end
+
+			if card:IsA("TextButton") then
+				card.Text = hasSplitLabels and "" or display.FullText
+			end
+
+			applyBuffCardIcon(card, buff)
+			applyBuffCardArt(card, buff)
 		end
 
 		-- 事件绑定剥离，全局只绑定一次
@@ -476,8 +768,7 @@ function UIController.Start()
 						card:SetAttribute("BuffAmount", buff.Amount)
 						card:SetAttribute("BuffId", getBuffId(buff))
 						card:SetAttribute("BuffMaxLevel", getBuffMaxLevel(buff))
-						card.Text = buildBuffCardText(buff)
-						card.BackgroundColor3 = buff.Color
+						applyBuffCardDisplay(card, buff)
 						
 						local targetRotation = cardBaseRotations[card] or 0
 						card.Rotation = targetRotation - 180
@@ -510,6 +801,38 @@ function UIController.Start()
 		-- 等待美术做好的滑动列表和模板
 		local shopList = shopPanel:WaitForChild("ShopList")
 		local itemTemplate = shopPanel:WaitForChild("ShopItemTemplate")
+		if shopList:IsA("ScrollingFrame") then
+			shopList.ScrollingDirection = Enum.ScrollingDirection.X
+		end
+
+		-- 填充商店天赋卡；优先写入美术拆好的 TextLabel，没有拆分时回退到模板原文本。
+		local function applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
+			local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. Config.FormatNumber(cost)
+			local effectText = "效果: +" .. tostring(talentData.StatIncrease or 0)
+			local titleText = findTextNode(btn, {"TitleText", "NameText", "TalentNameText"})
+			local levelText = findTextNode(btn, {"LevelText", "LevelLabel"})
+			local priceText = findTextNode(btn, {"PriceText", "CostText", "CoinText"})
+			local effectLabel = findTextNode(btn, {"EffectText", "DescText", "DescriptionText"})
+			local hasSplitLabels = titleText or levelText or priceText or effectLabel
+
+			btn:SetAttribute("TalentId", talentId)
+			btn:SetAttribute("TalentLevel", currentLevel)
+			btn:SetAttribute("TalentCost", cost)
+
+			if titleText then titleText.Text = talentData.Name end
+			if levelText then levelText.Text = "Lv." .. tostring(currentLevel) end
+			if priceText then priceText.Text = Config.FormatNumber(cost) end
+			if effectLabel then effectLabel.Text = effectText end
+
+			if btn:IsA("TextButton") then
+				btn.Text = hasSplitLabels and "" or displayText
+			else
+				local textLabel = btn:FindFirstChild("TextLabel")
+				if textLabel and textLabel:IsA("TextLabel") and not hasSplitLabels then
+					textLabel.Text = displayText
+				end
+			end
+		end
 
 		-- 刷新商店文本显示 (支持滑动列表的智能增量更新)
 		local function refreshShopUI()
@@ -534,15 +857,7 @@ function UIController.Start()
 					end)
 				end
 				
-				-- 刷新价格与等级文本 (兼容模板内部有 TextLabel 或直接使用 Button 的 Text)
-				local textLabel = btn:FindFirstChild("TextLabel")
-				local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. Config.FormatNumber(cost)
-				
-				if textLabel and textLabel:IsA("TextLabel") then
-					textLabel.Text = displayText
-				else
-					btn.Text = displayText
-				end
+				applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
 			end
 		end
 
@@ -637,33 +952,84 @@ function UIController.Start()
 			return petIds
 		end
 
-		-- 生成宠物按钮上的展示文本，集中处理名称、数量、稀有度、状态和描述
-		local function getPetButtonText(petId, count, statusText)
+		-- 生成宠物卡展示数据，便于美术把宠物名称、数量、稀有度等拆成独立 TextLabel。
+		local function getPetDisplayData(petId, count, statusText)
 			local petConfig = Controllers.Config.PETS[petId]
-			if not petConfig then return petId end
+			if not petConfig then
+				return {
+					Name = petId,
+					Count = count or 1,
+					CountText = "",
+					Rarity = "Unknown",
+					Status = statusText or "",
+					Attack = "0",
+					Description = "",
+					FullText = petId,
+				}
+			end
 
 			local countText = (count and count > 1) and (" x" .. count) or ""
 			local rarityText = petConfig.Rarity or "Unknown"
 			local description = petConfig.Description or "暂无描述"
 			local statusLine = statusText and ("\n" .. statusText) or ""
-
-			return string.format(
+			local attackText = Controllers.Config.FormatNumber(petConfig.ATK or 0)
+			local fullText = string.format(
 				"%s%s [%s]%s\nATK:%s\n%s",
 				petConfig.Name or petId,
 				countText,
 				rarityText,
 				statusLine,
-				Controllers.Config.FormatNumber(petConfig.ATK or 0),
+				attackText,
 				description
 			)
+
+			return {
+				Name = petConfig.Name or petId,
+				Count = count or 1,
+				CountText = countText,
+				Rarity = rarityText,
+				Status = statusText or "",
+				Attack = attackText,
+				Description = description,
+				FullText = fullText,
+			}
 		end
 
-		-- 给宠物按钮应用文本，并开启自动缩放/换行，适配多行描述
-		local function applyPetButtonText(btn, text)
-			btn.Text = text
+		-- 给宠物卡填充显示内容；优先写入美术拆好的标签，没有拆分时回退到按钮文本。
+		local function applyPetButtonDisplay(btn, petId, count, statusText)
+			local display = getPetDisplayData(petId, count, statusText)
+			local nameText = findTextNode(btn, {"PetNameText", "NameText", "TitleText"})
+			local countLabel = findTextNode(btn, {"CountText", "CountLabel"})
+			local rarityText = findTextNode(btn, {"RarityText", "RarityLabel"})
+			local statusLabel = findTextNode(btn, {"StatusText", "StateText", "EquippedText"})
+			local attackText = findTextNode(btn, {"AttackText", "ATKText", "AtkText"})
+			local descText = findTextNode(btn, {"DescriptionText", "DescText", "NoteText"})
+			local hasSplitLabels = nameText or countLabel or rarityText or statusLabel or attackText or descText
+
+			btn:SetAttribute("PetId", petId)
+			btn:SetAttribute("PetCount", display.Count)
+			btn:SetAttribute("PetRarity", display.Rarity)
+			btn:SetAttribute("PetState", statusText and "Equipped" or "Standby")
+
+			if nameText then nameText.Text = display.Name end
+			if countLabel then
+				countLabel.Text = display.CountText
+				countLabel.Visible = display.CountText ~= ""
+			end
+			if rarityText then rarityText.Text = display.Rarity end
+			if statusLabel then
+				statusLabel.Text = display.Status
+				statusLabel.Visible = display.Status ~= ""
+			end
+			if attackText then attackText.Text = "ATK:" .. display.Attack end
+			if descText then descText.Text = display.Description end
+
 			if btn:IsA("TextButton") then
-				btn.TextWrapped = true
-				btn.TextScaled = true
+				btn.Text = hasSplitLabels and "" or display.FullText
+				if not hasSplitLabels then
+					btn.TextWrapped = true
+					btn.TextScaled = true
+				end
 			end
 		end
 
@@ -693,13 +1059,11 @@ function UIController.Start()
 				equippedCount = 1
 				petCounts[equipped] = petCounts[equipped] - 1 -- 从待机区扣除1个
 				
-				local petConfig = Controllers.Config.PETS[equipped]
 				local btn = petTemplate:Clone()
 				btn.Visible = true 
 				btn.Parent = equippedContainer
 				
-				applyPetButtonText(btn, getPetButtonText(equipped, 1, "出战中"))
-				btn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+				applyPetButtonDisplay(btn, equipped, 1, "出战中")
 				
 				-- 点击出战区的宠物：向服务器发送空字符串进行【卸下】
 				btn.Activated:Connect(function()
@@ -727,8 +1091,7 @@ function UIController.Start()
 						btn.Visible = true 
 						btn.Parent = standbyContainer
 						
-						applyPetButtonText(btn, getPetButtonText(petId, count))
-						btn.BackgroundColor3 = petTemplate.BackgroundColor3
+						applyPetButtonDisplay(btn, petId, count)
 						
 						-- 点击待机区的宠物：向服务器发送 petId 进行【替换出战】
 						btn.Activated:Connect(function()
@@ -760,11 +1123,6 @@ function UIController.Start()
 	-- 【重构版】：3D ViewportFrame 宠物蛋破壳动画 (对接 Studio)
 	-- =======================================================
 	local function setupPetHatching()
-		local eggPart = Workspace:WaitForChild("paodao"):WaitForChild("PetEgg", 10)
-		if not eggPart then return end
-		local prompt = eggPart:FindFirstChildOfClass("ProximityPrompt") or Instance.new("ProximityPrompt", eggPart)
-		prompt.ActionText = "花费 " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
-		
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
 		
@@ -793,8 +1151,17 @@ function UIController.Start()
 			if current3DModel then current3DModel:Destroy() end
 			if spinConnection then spinConnection:Disconnect() end
 		end
-		
-		prompt.Triggered:Connect(function(triggeringPlayer)
+
+		-- 获取可以承载 ProximityPrompt 的部件；宠物蛋如果是 Model，就挂到其中一个 BasePart 上。
+		local function getPromptParent(target)
+			if target:IsA("BasePart") then
+				return target
+			end
+			return target:FindFirstChildWhichIsA("BasePart", true)
+		end
+
+		-- 宠物蛋交互逻辑；Prompt 可能因 Streaming/重生时序重新出现，所以绑定函数要可重复安全调用。
+		local function handlePetEggTriggered(triggeringPlayer)
 			if triggeringPlayer ~= player or isHatching then return end
 
          -- 玩家响应了引导点击抽卡，清除光束！
@@ -861,6 +1228,46 @@ function UIController.Start()
 					clearViewport()
 				end
 			end)
+		end
+
+		-- 持续补绑宠物蛋 Prompt；目标重新加载或 Prompt 被清掉时会自动恢复。
+		local function bindPetEggPrompt(target)
+			if not target then return end
+			local promptParent = getPromptParent(target)
+			if not promptParent then return end
+
+			local prompt = promptParent:FindFirstChildOfClass("ProximityPrompt")
+			if not prompt then
+				prompt = Instance.new("ProximityPrompt")
+				prompt.Parent = promptParent
+			end
+
+			prompt.ObjectText = "宠物蛋"
+			prompt.ActionText = "花费 " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
+			prompt.HoldDuration = 0.2
+			prompt.RequiresLineOfSight = false
+			prompt.MaxActivationDistance = 12
+			prompt.Enabled = true
+
+			if prompt:GetAttribute("ClientPetEggPromptBound") then return end
+			prompt:SetAttribute("ClientPetEggPromptBound", true)
+			prompt.Triggered:Connect(handlePetEggTriggered)
+		end
+
+		Workspace.DescendantAdded:Connect(function(descendant)
+			if descendant.Name == "PetEgg" then
+				task.defer(bindPetEggPrompt, descendant)
+			end
+		end)
+
+		task.spawn(function()
+			while true do
+				local eggTarget = Workspace:FindFirstChild("PetEgg", true)
+				if eggTarget then
+					bindPetEggPrompt(eggTarget)
+				end
+				task.wait(2)
+			end
 		end)
 	end
 
@@ -872,6 +1279,7 @@ function UIController.Start()
 		
 		local exitButton = mainUI:FindFirstChild("ExitButton")
 		if exitButton and exitButton:IsA("GuiButton") then
+			applyExitButtonDepthStyle(exitButton)
 			if not exitButton:GetAttribute("IsBound") then
 				exitButton:SetAttribute("IsBound", true)
 				

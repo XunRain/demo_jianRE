@@ -5,7 +5,7 @@ local DataStoreService = game:GetService("DataStoreService")
 -- 申请云端存储空间
 local PlayerDataStore = DataStoreService:GetDataStore("GameData_V1")
 
-local Services -- 全局服务引用指针
+local _Services -- 全局服务引用指针，当前模块暂不直接使用
 local DEFAULT_STATS = {
 	Coins = 0, -- 局外永久金币底模
     Talent_HP = 0,   -- 血量强化等级
@@ -27,7 +27,7 @@ local DEFAULT_STATS = {
 }
 
 function DataManager.Init(deps)
-	Services = deps
+	_Services = deps
 end
 
 function DataManager.Start()

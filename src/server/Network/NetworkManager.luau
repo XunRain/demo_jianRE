@@ -2,14 +2,14 @@
 local NetworkManager = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Services -- 全局服务引用指针
+local _Services -- 全局服务引用指针，当前模块暂不直接使用
 
 -- 引入公共配置
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConfig"))
 
 function NetworkManager.Init(deps)
-	Services = deps
+	_Services = deps
 end
 
 function NetworkManager.Start()

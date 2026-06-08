@@ -9,7 +9,8 @@ local GameConfig = {
     MAX_RUN_SPEED = 45,       -- 最大跑酷速度
     LATERAL_SPEED = 25,       -- 左右移动速度
     MAX_LATERAL_SPEED = 43,   -- 最大横向移动速度；约等于基础横移速度 +72%
-    RUNWAY_LIMIT = 20,        -- 跑道左右边界宽度限制
+    RUNWAY_LIMIT = 13,        -- 跑道左右边界宽度限制
+    RUNWAY_SURFACE_Y_OFFSET = -1.5, -- 跑道真实表面高度微调；门、怪物、掉落物生成过高时填负数
 
     -- 2. 镜头配置
 	-- 正常镜头
@@ -20,7 +21,7 @@ local GameConfig = {
     -- FOV：降低 FOV (默认70)，数值越小，透视畸变越弱，越接近 2.5D 质感
     CAMERA_FOV = 40,
     -- 相机位置：因为 FOV 变小了，所以必须把相机往后、往上拉得非常远
-    CAMERA_OFFSET = Vector3.new(0, 28, 40), 
+    CAMERA_OFFSET = Vector3.new(0, 28, 40),
     -- 相机视线：让相机视线看向玩家前方更远的地方，给上方留出足够的视野看清前方的门和怪
     CAMERA_LOOK_OFFSET = Vector3.new(0, 7, -4),
 
@@ -44,6 +45,9 @@ local GameConfig = {
     BASE_MULTISHOT = 1,       -- 初始弹道数量 (默认1发)
     MULTISHOT_EXTRA_DAMAGE_RATIO = 0.7, -- 增加弹道的额外子弹伤害系数；主弹道仍然是100%伤害
     MULTISHOT_SPREAD_DISTANCE = 3.5, -- 增加弹道最终横向分散间距
+    MOBILE_TOUCH_DEADZONE = 20, -- 手机端滑动控制死区，避免轻微抖动触发横移
+    MOBILE_TOUCH_ACTIVE_Y_RATIO = 0.5, -- 手机端只响应屏幕下半区触控，避免误点 UI
+    MOBILE_TOUCH_SMOOTHING = 0, -- 预留触控平滑参数；当前使用即时方向切换
 
     -- 服务器内排行榜配置；展示板在 Studio 中命名为 LeaderboardBoard 即可被客户端自动绑定。
     LEADERBOARD = {
@@ -61,9 +65,9 @@ local GameConfig = {
             GateInterval = 150,
             MobInterval = 100,
             MobsPerGroup = {2, 3},
-            EliteCount = 1,          
-            HasBoss = true,          
-            
+            EliteCount = 1,
+            HasBoss = true,
+
             BasicHP = 20,
             EliteHP = 40,
             BossHP = 80,
@@ -79,16 +83,16 @@ local GameConfig = {
             GateBuffChance = 0.9,
         },
         [2] = {
-            Length = 1000,          
-            GateInterval = 120,     
-            MobInterval = 80,       
-            MobsPerGroup = {3, 4},  
-            EliteCount = 2,         
-            HasBoss = true,          
-            
-            BasicHP = 40,            
-            EliteHP = 120,          
-            BossHP = 240,          
+            Length = 1000,
+            GateInterval = 120,
+            MobInterval = 80,
+            MobsPerGroup = {3, 4},
+            EliteCount = 2,
+            HasBoss = true,
+
+            BasicHP = 40,
+            EliteHP = 120,
+            BossHP = 240,
 
             GATE_ATK_BONUS_MIN = 5,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 5, GATE_ASPD_BONUS_MAX = 15,
@@ -96,21 +100,21 @@ local GameConfig = {
             GATE_MAXHP_BONUS_MIN = 5, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
             GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
             GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
-            
+
 
             GateBuffChance = 0.7,
         },
         [3] = {
-            Length = 1000,          
-            GateInterval = 100,     
-            MobInterval = 70,       
-            MobsPerGroup = {4, 5},  
-            EliteCount = 2,         
-            HasBoss = true,          
-            
-            BasicHP = 50,          
-            EliteHP = 100,          
-            BossHP = 200,          
+            Length = 1000,
+            GateInterval = 100,
+            MobInterval = 70,
+            MobsPerGroup = {4, 5},
+            EliteCount = 2,
+            HasBoss = true,
+
+            BasicHP = 50,
+            EliteHP = 100,
+            BossHP = 200,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -122,16 +126,16 @@ local GameConfig = {
             GateBuffChance = 0.7,
         },
         [4] = {
-            Length = 1000,          
-            GateInterval = 100,     
-            MobInterval = 60,       
-            MobsPerGroup = {4, 6},  
-            EliteCount = 3,         
-            HasBoss = true,          
-            
-            BasicHP = 60,          
-            EliteHP = 120,          
-            BossHP = 240,          
+            Length = 1000,
+            GateInterval = 100,
+            MobInterval = 60,
+            MobsPerGroup = {4, 5},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 60,
+            EliteHP = 120,
+            BossHP = 240,
 
            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -144,16 +148,16 @@ local GameConfig = {
         },
         [5] = {
             Length = 1000,
-            GateInterval = 90,     
-            MobInterval = 50,       
-            MobsPerGroup = {5, 7},  
-            EliteCount = 3,         
-            HasBoss = true,          
-            
+            GateInterval = 90,
+            MobInterval = 50,
+            MobsPerGroup = {4, 5},
+            EliteCount = 3,
+            HasBoss = true,
+
             -- 第 5 关作为无尽模式的基底，怪群非常密集
-            BasicHP = 70,          
-            EliteHP = 140,          
-            BossHP = 280,          
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 280,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -169,6 +173,10 @@ local GameConfig = {
     -- 6. 无尽模式难度动态成长配置
     ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
     ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 50%（乘区）
+    GATE_SAFE_GAP = 14, -- 属性门前后安全区；普通怪和精英怪会避开，防止门扎堆或被遮挡
+    BOSS_GATE_BLOCK_GAP = 60, -- Boss 前后门禁区；门撞到 Boss 安全区时直接跳过
+    MOB_GATE_BUFFER = 8, -- 怪物避让属性门时额外保留的操作缓冲距离
+    ENCOUNTER_MAX_REPOSITION_TRIES = 6, -- 怪物寻找门间空位的最大尝试次数，失败则跳过该波
 
     -- 属性门全局配置池 (可以随时在这里增删门里能刷出的属性)
     GATE_ATTRIBUTE_POOL = {"ATK_Bonus", "ASPD_Bonus", "HP_Bonus", "MaxHP_Bonus", "SPD_Bonus", "RNG_Bonus", "LateralSpeed_Bonus"},
@@ -191,88 +199,95 @@ local GameConfig = {
     MAX_MAGNET_RADIUS = 75,
     COLLECT_RADIUS = 5,
     MAGNET_SPEED = 75,
-    DROP_MAGNET_DELAY = 0.25, -- 掉落物刚爆出来时的“不可吸附延迟时间”(秒)
+    -- 掉落物爆散配置：生成时先抛散一段时间，再开始磁吸
+    DROP_MAGNET_DELAY = 0.6, -- 掉落物烟花抛散期间不立刻磁吸，避免动画被拉断
+    DROP_BURST_DURATION = 0.6,
+    DROP_BURST_MIN_RADIUS = 4,
+    DROP_BURST_MAX_RADIUS = 11,
+    DROP_BURST_MIN_HEIGHT = 7,
+    DROP_BURST_MAX_HEIGHT = 14,
+    DROP_TRAIL_LIFETIME = 0.28,
 
     -- 8. 局外天赋商店配置
 	TALENTS = {
 		Talent_HP = {
 			Name = "血量强化",
-			BaseCost = 50,       
-			CostMulti = 1.5,     
-			StatIncrease = 20,   
+			BaseCost = 50,
+			CostMulti = 1.5,
+			StatIncrease = 20,
 		},
 		Talent_ATK = {
 			Name = "攻击强化",
 			BaseCost = 100,
 			CostMulti = 2.0,
-			StatIncrease = 5,    
+			StatIncrease = 5,
 		},
 		Talent_ASPD = {
 			Name = "攻速强化",
 			BaseCost = 150,
 			CostMulti = 2.5,
-			StatIncrease = 0.15, 
+			StatIncrease = 0.15,
 		}
 	},
 
     -- 9. 宠物与抽卡系统配置
 	PET_GACHA_COST = 200,
-	
+
 	PETS = {
-		["Slime"] = { 
-			Name = "Slime", 
-			Rarity = "Common", 
+		["Slime"] = {
+			Name = "Slime",
+			Rarity = "Common",
 			Weight = 45,
 			SortOrder = 100,
-			Description = "高穿透风刃，适合清理直线小怪。",
-			ATK = 10,      
+			Description = "WindBlade",
+			ATK = 10,
 			Cooldown = 4,     -- 技能冷却间隔 (1.5秒一次)
 			CastCount = 1,      -- 每次施法连续释放 1 次
 			SkillType = "WindBlade", -- 技能形态：穿透风刃
             BulletVFX = "SlimeBullet", -- 独立的子弹特效 (填在 Studio 里做的预制体名)
 			HitVFX = "SlimeHit",   -- 独立的命中特效 (填在 Studio 里做的预制体名)
 			PierceCount = 99,   -- 风刃可以无限穿透
-			WindBladeBaseWidth = 20, -- 风刃初始横向范围；Studio 子弹模型的初始 X 尺寸也按 20 做
-			WindBladeMaxWidth = 40, -- 风刃横向范围上限；升级卡片最多把范围推到这里
+			WindBladeBaseWidth = 13, -- 风刃初始横向范围；Studio 子弹模型的初始 X 尺寸也按 20 做
+			WindBladeMaxWidth = 26, -- 风刃横向范围上限；升级卡片最多把范围推到这里
 			MaxCount = 5, -- 宠物最大数量
-			Color = Color3.fromRGB(150, 255, 150) 
+			Color = Color3.fromRGB(150, 255, 150)
 		},
-		["Dragon"] = { 
-			Name = "Dragon", 
-			Rarity = "Rare", 
+		["Dragon"] = {
+			Name = "Dragon",
+			Rarity = "Rare",
 			Weight = 22,
 			SortOrder = 200,
-			Description = "追踪火球爆炸，适合处理密集怪群。",
-			ATK = 25, 
+			Description = "Fireball",
+			ATK = 25,
 			Cooldown = 4,
 			CastCount = 1,      -- 蓄力吐出一发大火球
 			SkillType = "Fireball",  -- 技能形态：触碰爆炸 AOE
 			BulletVFX = "DragonBullet",
 			HitVFX = "DragonHit",
 			PierceCount = 1,    -- 碰到第一只怪就爆炸
-			AOERadius = 12,     -- 【新增】：爆炸波及半径 12 
+			AOERadius = 12,     -- 【新增】：爆炸波及半径 12
             MaxCount = 3,
-			Color = Color3.fromRGB(45, 101, 223) 
+			Color = Color3.fromRGB(45, 101, 223)
 		},
-		["Angel"] = { 
-			Name = "Angel", 
-			Rarity = "Epic", 
+		["Angel"] = {
+			Name = "Angel",
+			Rarity = "Epic",
 			Weight = 8,
 			SortOrder = 300,
-			Description = "锁定神罚，高伤大范围打击关键目标。",
-			ATK = 60, 
-			Cooldown = 6, 
-			CastCount = 1,      
+			Description = "AngelSmite",
+			ATK = 60,
+			Cooldown = 6,
+			CastCount = 1,
 			SkillType = "Smite",     -- 技能形态：锁定目标，天降神罚
             BulletVFX = "AngelSmite",
 			HitVFX = "AngelHit",
-			PierceCount = 1,    
+			PierceCount = 1,
 			AOERadius = 22,     -- 神罚拥有超大范围的毁灭打击
-            MaxCount = 2,
-			Color = Color3.fromRGB(240, 245, 40) 
+            MaxCount = 1,
+			Color = Color3.fromRGB(240, 245, 40)
 		}
 	},
-	
+
 	-- 兼容旧逻辑的简易抽卡权重池；正式抽卡请使用 GameConfig.RollPetId()
 	PET_POOL = {
 		"Slime", "Slime", "Slime", "Slime", "Slime",
@@ -287,11 +302,11 @@ local GameConfig = {
     WEAPONS = {
         ["DefaultWeapon"] = {
             Name = "新手短剑",
-            BulletVFX = "DefaultBullet", 
-            HitVFX = "DefaultHit",       
-            FirePattern = "Parallel",    
+            BulletVFX = "DefaultBullet",
+            HitVFX = "DefaultHit",
+            FirePattern = "Parallel",
             MaxMultiShot = 5,
-            
+
             -- 【新增限制】：短剑射程短，但后期攻速可以叠得比较快
             MaxASPD = 5,    -- 极速上限：每秒 5 发 (即间隔 0.2秒)
             MaxRNG = 120,   -- 射程上限：最多飞出 120 Studs
@@ -300,20 +315,20 @@ local GameConfig = {
             Name = "火焰法杖",
             BulletVFX = "Fireball",
             HitVFX = "FireExplosion",
-            FirePattern = "Spread",      
+            FirePattern = "Spread",
             MaxMultiShot = 7,
-            
+
             -- 【新增限制】：法杖范围中等，但施法速度较慢
             MaxASPD = 3,    -- 极速上限：每秒 3 发
             MaxRNG = 180,   -- 射程上限：最多飞出 180 Studs
         },
-        ["LaserGun"] = {                 
+        ["LaserGun"] = {
             Name = "激光枪",
             BulletVFX = "Laser",
             HitVFX = "LaserHit",
-            FirePattern = "Pierce",      
+            FirePattern = "Pierce",
             MaxMultiShot = 3,
-            
+
             -- 【新增限制】：激光射程极远，射速极快
             MaxASPD = 10,   -- 极速上限：每秒 10 发
             MaxRNG = 400,   -- 射程上限：最多飞出 400 Studs (几乎满屏)
@@ -325,6 +340,11 @@ local GameConfig = {
         Basic = "BasicDeath", -- 普通怪死亡特效名称
         Elite = "EliteDeath", -- 精英怪死亡特效名称
         Boss = "BossDeath"    -- Boss 死亡特效名称
+    },
+    ENEMY_MODELS = {
+        Basic = "Basic", -- 普通怪模型：ReplicatedStorage/Model/Enemies/Basic
+        Elite = "Elite", -- 精英怪模型：ReplicatedStorage/Model/Enemies/Elite
+        Boss = "Boss", -- Boss 模型：ReplicatedStorage/Model/Enemies/Boss
     },
 
     -- 12. 飞剑系统 (御剑流) 初始配置
@@ -338,6 +358,52 @@ local GameConfig = {
         MaxCount = 6,             -- 飞剑最大数量
         MaxCooldownReduction = 60,-- 最大冷却缩减 (%)
     },
+
+    -- 13. 升级卡图标配置表；先留空占位，后续把 "" 替换成 "rbxassetid://资源ID" 即可。
+    -- 代码会按 BuffId/Attr 查找图标；没有配置或资源为空时自动隐藏图标，不影响发牌和升级。
+    -- 如果填的是 Creator Store/Decal/Asset 页面 ID，缩略图模式通常比直接 rbxassetid 更稳定。
+    LEVEL_UP_BUFF_ICON_USE_THUMBNAIL = true,
+    LEVEL_UP_BUFF_ICONS = {
+        ATK_Bonus = "rbxassetid://15403007921",
+        ASPD_Bonus = "rbxassetid://17368087730",
+        MaxHP_Bonus = "rbxassetid://17368075795",
+        SPD_Bonus = "",
+        RNG_Bonus = "",
+        MagnetRadius_Bonus = "",
+        EXP_Gain_Bonus = "",
+        ALL = "",
+        MultiShot = "",
+        Pet_Count = "",
+        Pet_ASPD_Bonus = "",
+        Pet_ATK_Bonus = "",
+        WindBlade_Range_Bonus = "",
+        Sword_Unlocked = "",
+        Sword_Count = "",
+        Sword_ATK_Bonus = "",
+        Sword_CD_Reduction = "",
+    },
+
+    -- 14. 升级卡美术分类配置；美术可以按 Category 做预制卡片，代码只负责填角标/切换分类层。
+    LEVEL_UP_CARD_ART = {
+        ATK_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击" },
+        ASPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻速" },
+        MaxHP_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "生命" },
+        SPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "弹速" },
+        RNG_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "射程" },
+        MagnetRadius_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "磁力" },
+        EXP_Gain_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "经验" },
+        ALL = { Category = "Rare", CategoryName = "稀有通用", Badge = "全能" },
+        MultiShot = { Category = "WeaponProjectile", CategoryName = "武器弹道", Badge = "弹道" },
+        Pet_Count = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠物" },
+        Pet_ASPD_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠速" },
+        Pet_ATK_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠攻" },
+        WindBlade_Range_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "风刃" },
+        Sword_Unlocked = { Category = "Sword", CategoryName = "御剑技能", Badge = "御剑" },
+        Sword_Count = { Category = "Sword", CategoryName = "御剑技能", Badge = "剑数" },
+        Sword_ATK_Bonus = { Category = "Sword", CategoryName = "御剑技能", Badge = "剑伤" },
+        Sword_CD_Reduction = { Category = "Sword", CategoryName = "御剑技能", Badge = "冷却" },
+    },
+
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
         -- 角色属性增益
@@ -371,14 +437,14 @@ local GameConfig = {
         Elite = { NumDrops = 5, Exp = 50, Coins = 50 },
         Boss  = { NumDrops = 15, Exp = 200, Coins = 100 }
     },
-    
+
 }
 
 -- 商品计算价格方法，全局共享
 function GameConfig.GetTalentCost(talentId, currentLevel)
 	local talent = GameConfig.TALENTS[talentId]
 	if not talent then return math.huge end -- 如果查不到配置，返回无限大价格防止被刷
-	
+
 	-- 计算公式：基础价格 * (乘数 ^ 当前等级)
 	return math.floor(talent.BaseCost * (talent.CostMulti ^ currentLevel))
 end
@@ -387,12 +453,12 @@ end
 function GameConfig.GetRunSpeed(stageNum)
 	-- 公式：基础速度 25 + (当前关卡数 - 1) * 每关增加的速度 2
 	local currentSpeed = GameConfig.RUN_SPEED + (stageNum - 1) * GameConfig.RUN_SPEED_INCREMENT
-	
+
 	-- 加上一个绝对速度上限，防止玩家跑到 20 关时速度达到 60 直接瞬移穿墙
-	if currentSpeed > GameConfig.MAX_RUN_SPEED then 
-		currentSpeed = GameConfig.MAX_RUN_SPEED 
+	if currentSpeed > GameConfig.MAX_RUN_SPEED then
+		currentSpeed = GameConfig.MAX_RUN_SPEED
 	end
-	
+
 	return currentSpeed
 end
 

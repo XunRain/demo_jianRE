@@ -16,6 +16,38 @@ function GameController.Init(deps)
 	Controllers = deps
 end
 
+-- 在 Workspace 中查找大厅物件；兼容物件直接放在 Workspace 或放在 paodao/其他 Model 下面。
+local function findLobbyObject(objectName)
+	return Workspace:FindFirstChild(objectName) or Workspace:FindFirstChild(objectName, true)
+end
+
+-- 等待大厅物件加载完成；用于处理 Streaming 或角色重生后物件还没到客户端的情况。
+local function waitForLobbyObject(objectName, timeout)
+	local object = findLobbyObject(objectName)
+	if object then return object end
+
+	local deadline = os.clock() + (timeout or 10)
+	while os.clock() < deadline do
+		object = findLobbyObject(objectName)
+		if object then return object end
+		task.wait(0.1)
+	end
+
+	return nil
+end
+
+-- 获取可挂 ProximityPrompt/引导光束的部件；Studio 里目标做成 Part 或 Model 都可以兼容。
+local function getInteractBasePart(target)
+	if not target then return nil end
+	if target:IsA("BasePart") then
+		return target
+	end
+	if target:IsA("Model") and target.PrimaryPart then
+		return target.PrimaryPart
+	end
+	return target:FindFirstChildWhichIsA("BasePart", true)
+end
+
 -- 模块生命周期启动入口：绑定事件及全局生命周期监听
 function GameController.Start()
 	-- 初始化挂载大厅交互触发器
@@ -158,11 +190,11 @@ function GameController.Start()
 				
 				-- 智能引导算法：有钱抽卡就指引去抽宠物，没钱就指引去商店点小天赋
 				if coins >= Controllers.Config.PET_GACHA_COST then
-					target = Workspace:FindFirstChild("paodao"):FindFirstChild("PetEgg")
+					target = getInteractBasePart(findLobbyObject("PetEgg"))
 					text = "去抽取宠物增强火力！"
 				else
-					local npc = Workspace:FindFirstChild("paodao"):FindFirstChild("ShopNPC")
-					target = npc and (npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildWhichIsA("BasePart"))
+					local npc = findLobbyObject("ShopNPC")
+					target = npc and (npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc))
 					text = "去商店升级天赋！"
 				end
 				
@@ -238,8 +270,7 @@ function GameController.EnterCombat()
 	Controllers.VFX.ClearGuide()
 	
 	local character = player.Character
-	local startPart = Workspace:WaitForChild("paodao"):WaitForChild("StartButton", 10)
-	local Config = Controllers.Config
+	local startPart = getInteractBasePart(waitForLobbyObject("StartButton", 10))
 	
 	if character and startPart then
 		-- 1. 呼叫地图模块：重置原点并铺满初始视野跑道
@@ -281,36 +312,52 @@ end
 -- 挂载大厅触发器的交互事件
 function GameController.SetupStartButton()
 	task.spawn(function()
-		local startPart = Workspace:WaitForChild("paodao"):WaitForChild("StartButton", 10)
-		if not startPart then 
-			warn("GameController 警告: 未能在世界中找到名为 'StartButton' 的大厅出生 Part！")
-			return 
-		end
-		
-		local prompt = startPart:FindFirstChildOfClass("ProximityPrompt")
-		if not prompt then
-			prompt = Instance.new("ProximityPrompt")
+		-- 持续补绑开始按钮交互；Streaming 或重生后大厅物件重新加载时，本地创建的 Prompt 可能丢失。
+		local function bindStartPrompt(startPart)
+			if not startPart or not startPart:IsA("BasePart") then return end
+
+			local prompt = startPart:FindFirstChildOfClass("ProximityPrompt")
+			if not prompt then
+				prompt = Instance.new("ProximityPrompt")
+				prompt.Parent = startPart
+			end
+
 			prompt.ObjectText = "跑道入口"
 			prompt.ActionText = "开始挑战"
 			prompt.HoldDuration = 0.2
 			prompt.RequiresLineOfSight = false -- 防止视线判定 Bug
-			prompt.Parent = startPart
-		else
-			prompt.RequiresLineOfSight = false -- 如果是 Studio 里建好的，也强行关掉
+			prompt.MaxActivationDistance = 14
+			prompt.Enabled = true
+
+			if prompt:GetAttribute("ClientStartPromptBound") then return end
+			prompt:SetAttribute("ClientStartPromptBound", true)
+			prompt.Triggered:Connect(function(triggeringPlayer)
+				if triggeringPlayer == player and not GameController.IsCombatActive then
+					GameController.EnterCombat()
+				end
+			end)
 		end
-		
-		prompt.Triggered:Connect(function(triggeringPlayer)
-			if triggeringPlayer == player and not GameController.IsCombatActive then
-				GameController.EnterCombat()
+
+		Workspace.DescendantAdded:Connect(function(descendant)
+			if descendant.Name == "StartButton" then
+				task.defer(bindStartPrompt, descendant)
 			end
 		end)
+
+		while true do
+			local startPart = getInteractBasePart(findLobbyObject("StartButton"))
+			if startPart then
+				bindStartPrompt(startPart)
+			end
+			task.wait(2)
+		end
 	end)
 end
 
 -- NPC 绑定逻辑
 function GameController.SetupNPC()
 	task.spawn(function()
-		local npc = Workspace:WaitForChild("paodao"):WaitForChild("ShopNPC", 10)
+		local npc = waitForLobbyObject("ShopNPC", 10)
 		if npc then
 			local prompt = npc:FindFirstChildOfClass("ProximityPrompt")
 			if prompt then
