@@ -241,7 +241,7 @@ function UIController.Start()
 				end
 
 				if stageText then
-					stageText.Text = "STAGE " .. tostring(currentStage)
+					stageText.Text = tostring(currentStage)
 				end
 			end
 
