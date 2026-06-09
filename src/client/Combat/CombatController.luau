@@ -404,7 +404,6 @@ end
 
 function CombatController.StartSwordSystem()
 	local orbitingSwords = {}
-	local globalOrbitAngle = 0
 
 	local function getSwordCFrame(swordData)
 		if not swordData or not swordData.model or not swordData.primary then return nil end
@@ -440,6 +439,38 @@ function CombatController.StartSwordSystem()
 		local delta = targetPosition - position
 		local lookDir = delta.Magnitude > 0.01 and delta.Unit or Vector3.new(0, 0, -1)
 		return CFrame.lookAt(position, position + lookDir)
+	end
+
+	local function getSwordHoverCFrame(rootPart, swordIndex, totalCount, sc, now)
+		if not rootPart then return nil end
+
+		local pairIndex = math.ceil(swordIndex / 2)
+		local side = (swordIndex % 2 == 1) and 1 or -1
+		if totalCount <= 1 then
+			side = 1
+			pairIndex = 1
+		end
+
+		local sideOffset = sc.HoverSideOffset or sc.OrbitRadius or 5
+		local backOffset = sc.HoverBackOffset or 1.2
+		local depthSpacing = sc.HoverDepthSpacing or 1.4
+		local baseHeight = sc.HoverHeight or 2.8
+		local heightSpacing = sc.HoverHeightSpacing or 0.25
+		local bobAmplitude = sc.HoverBobAmplitude or 0.18
+		local bobSpeed = sc.HoverBobSpeed or 2.5
+		local heightPattern = {0, 1, -1}
+
+		local heightOffset = (heightPattern[((pairIndex - 1) % #heightPattern) + 1] or 0) * heightSpacing
+		local bobOffset = math.sin(now * bobSpeed + swordIndex * 0.8) * bobAmplitude
+		local localOffset = CFrame.new(
+			side * sideOffset,
+			baseHeight + heightOffset + bobOffset,
+			backOffset + (pairIndex - 1) * depthSpacing
+		)
+		local hoverPos = (rootPart.CFrame * localOffset).Position
+		local lookDir = rootPart.CFrame.LookVector
+
+		return CFrame.lookAt(hoverPos, hoverPos + lookDir)
 	end
 
 	local function isSwordTargetAlive(enemy)
@@ -514,7 +545,7 @@ function CombatController.StartSwordSystem()
 
 		local character = player.Character
 		if not character or not character.PrimaryPart then return end
-		local playerPos = character.PrimaryPart.Position
+		local rootPart = character.PrimaryPart
 		local sc = Controllers.Config.SWORD_SKILL
 		local count = math.min((player:GetAttribute("Sword_Count") or 0) + 1, sc.MaxCount)
 
@@ -556,27 +587,24 @@ function CombatController.StartSwordSystem()
 			if removed.model then removed.model:Destroy() end
 		end
 
-		globalOrbitAngle = (globalOrbitAngle + dt * 3) % (math.pi * 2)
-
+		local now = os.clock()
 		for i, swordData in ipairs(orbitingSwords) do
-			local offsetAngle = globalOrbitAngle + (i / count) * (math.pi * 2)
-			local orbitPos = playerPos + Vector3.new(math.cos(offsetAngle) * sc.OrbitRadius, 2, math.sin(offsetAngle) * sc.OrbitRadius)
+			local hoverCFrame = getSwordHoverCFrame(rootPart, i, count, sc, now)
+			if not hoverCFrame then continue end
+			local hoverPos = hoverCFrame.Position
 			local currentCFrame = getSwordCFrame(swordData)
 			if not currentCFrame then continue end
 			local currentPos = currentCFrame.Position
 
 			if swordData.state == "Orbiting" then
-				local lookDir = Vector3.new(math.cos(offsetAngle + math.pi/2), 0, math.sin(offsetAngle + math.pi/2))
-				local targetCFrame = CFrame.lookAt(orbitPos, orbitPos + lookDir)
-
-				pivotSwordTo(swordData, currentCFrame:Lerp(targetCFrame, dt * 10))
+				pivotSwordTo(swordData, currentCFrame:Lerp(hoverCFrame, dt * 10))
 				setSwordTransparency(swordData, 0)
 
 			elseif swordData.state == "Returning" then
-				local newPos = currentPos:Lerp(orbitPos, dt * 18)
-				pivotSwordTo(swordData, getLookCFrame(newPos, orbitPos))
+				local newPos = currentPos:Lerp(hoverPos, dt * 18)
+				pivotSwordTo(swordData, getLookCFrame(newPos, hoverPos))
 
-				if (newPos - orbitPos).Magnitude < 1.5 then
+				if (newPos - hoverPos).Magnitude < 1.5 then
 					clearSwordAttackData(swordData)
 					swordData.state = "Orbiting"
 				end
