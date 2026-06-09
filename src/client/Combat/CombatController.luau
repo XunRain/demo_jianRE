@@ -444,6 +444,8 @@ function CombatController.StartSwordSystem()
 	local function getSwordHoverCFrame(rootPart, swordIndex, totalCount, sc, now)
 		if not rootPart then return nil end
 
+		-- 飞剑待机队形：左右交替排列，同一侧逐步外扩，同时叠加前后和高低错位。
+		-- 这样数量增加到 3-6 把时，玩家从背后视角也能直观看出每一把飞剑。
 		local pairIndex = math.ceil(swordIndex / 2)
 		local side = (swordIndex % 2 == 1) and 1 or -1
 		if totalCount <= 1 then
@@ -452,18 +454,21 @@ function CombatController.StartSwordSystem()
 		end
 
 		local sideOffset = sc.HoverSideOffset or sc.OrbitRadius or 5
+		local sideSpacing = sc.HoverSideSpacing or 0
 		local backOffset = sc.HoverBackOffset or 1.2
 		local depthSpacing = sc.HoverDepthSpacing or 1.4
 		local baseHeight = sc.HoverHeight or 2.8
 		local heightSpacing = sc.HoverHeightSpacing or 0.25
 		local bobAmplitude = sc.HoverBobAmplitude or 0.18
 		local bobSpeed = sc.HoverBobSpeed or 2.5
-		local heightPattern = {0, 1, -1}
+		local bobPhaseSpacing = sc.HoverBobPhaseSpacing or 0.8
+		local heightPattern = sc.HoverHeightPattern or {0, 1, -1}
 
-		local heightOffset = (heightPattern[((pairIndex - 1) % #heightPattern) + 1] or 0) * heightSpacing
-		local bobOffset = math.sin(now * bobSpeed + swordIndex * 0.8) * bobAmplitude
+		local heightKey = heightPattern[((swordIndex - 1) % #heightPattern) + 1] or 0
+		local heightOffset = heightKey * heightSpacing
+		local bobOffset = math.sin(now * bobSpeed + swordIndex * bobPhaseSpacing) * bobAmplitude
 		local localOffset = CFrame.new(
-			side * sideOffset,
+			side * (sideOffset + (pairIndex - 1) * sideSpacing),
 			baseHeight + heightOffset + bobOffset,
 			backOffset + (pairIndex - 1) * depthSpacing
 		)

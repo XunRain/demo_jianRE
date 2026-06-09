@@ -22,7 +22,7 @@ local DEFAULT_STATS = {
     -- 默认装备的武器 ID
 	EquippedWeapon = "DefaultWeapon",
 
-	-- 排行榜相关数据：保存玩家个人历史最高米数，不做全服排行榜。
+	-- 排行榜相关数据：个人存档保存历史最高米数，全服榜单由 LeaderboardManager 另写 OrderedDataStore。
 	BestDistance = 0,
 }
 
@@ -61,6 +61,13 @@ function DataManager.LoadPlayerData(player)
 	for statName, statValue in pairs(playerData) do
 		player:SetAttribute(statName, statValue)
 	end
+
+	-- 旧数据渐进迁移：已有个人最高米数的玩家进入游戏后，补写到全服排行榜。
+	if _Services and _Services.LeaderboardManager and _Services.LeaderboardManager.SubmitPlayerBestDistance then
+		task.spawn(function()
+			_Services.LeaderboardManager.SubmitPlayerBestDistance(player)
+		end)
+	end
 end
 
 -- ==========================================
@@ -87,6 +94,12 @@ function DataManager.SavePlayerData(player)
 
 	if success then
 		print("💾 云端同步完毕！安全保存了玩家 " .. player.Name .. " 的资产。金币:", dataToSave.Coins)
+		-- 保存个人数据成功后，同步刷新全服排行榜最高米数。
+		if _Services and _Services.LeaderboardManager and _Services.LeaderboardManager.SubmitPlayerBestDistance then
+			task.spawn(function()
+				_Services.LeaderboardManager.SubmitPlayerBestDistance(player)
+			end)
+		end
 	else
 		warn("❌ 云端同步灾难！玩家 " .. player.Name .. " 存档失败:", err)
 	end

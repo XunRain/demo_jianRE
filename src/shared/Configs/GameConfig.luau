@@ -49,12 +49,26 @@ local GameConfig = {
     MOBILE_TOUCH_ACTIVE_Y_RATIO = 0.5, -- 手机端只响应屏幕下半区触控，避免误点 UI
     MOBILE_TOUCH_SMOOTHING = 0, -- 预留触控平滑参数；当前使用即时方向切换
 
-    -- 服务器内排行榜配置；展示板在 Studio 中命名为 LeaderboardBoard 即可被客户端自动绑定。
+    -- 客户端光照切换配置：大厅使用 Studio 默认光照，进入战斗后切到跑道专用光照方向。
+    -- 不需要该功能时，把 Enabled 改成 false 即可完全关闭光照切换。
+    COMBAT_LIGHTING = {
+        Enabled = false, -- 战斗光照切换总开关
+        TransitionTime = 0.75, -- 光照切换过渡时间，避免进入/退出战斗时画面突然闪烁
+        ClockTime = 9.5, -- 战斗太阳时间；用于改变阴影朝向，后续按跑道画面继续微调
+        GeographicLatitude = -35, -- 战斗太阳纬度；与 ClockTime 配合控制影子方向
+        Brightness = 2, -- 战斗亮度；设置为 nil 则沿用大厅默认亮度
+    },
+
+    -- 全服持久排行榜配置；展示板在 Studio 中命名为 LeaderboardBoard 即可被客户端自动绑定。
     LEADERBOARD = {
+        Mode = "Global",
         BoardName = "LeaderboardBoard",
         TopCount = 10,
-        RefreshInterval = 2,
+        RefreshInterval = 5,
         ServerUpdateInterval = 0.5,
+        OrderedStoreName = "BestDistanceLeaderboard_V1",
+        GlobalRefreshInterval = 60,
+        SelfRankScanLimit = 200,
         MissingWarnDelay = 10,
     },
 
@@ -231,8 +245,28 @@ local GameConfig = {
 		}
 	},
 
+	-- 商店天赋显示顺序；不要用 pairs 遍历，避免每次刷新时卡片顺序不稳定。
+	SHOP_TALENT_ORDER = {
+		"Talent_ATK",
+		"Talent_ASPD",
+		"Talent_HP",
+	},
+
+	-- 商店卡片复用升级卡美术分类；代码只切换 Studio 里对应的 CategoryLayer_* 图层。
+	SHOP_TALENT_CARD_ART = {
+		Talent_ATK = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击", BadgeSource = "ATK_Bonus" },
+		Talent_ASPD = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻速", BadgeSource = "ASPD_Bonus" },
+		Talent_HP = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "生命", BadgeSource = "MaxHP_Bonus" },
+	},
+
     -- 9. 宠物与抽卡系统配置
-	PET_GACHA_COST = 200,
+	PET_GACHA_COST = 2000,
+
+	PET_BAG_UI = {
+		MaxEquipSlots = 1, -- 出战区显示的槽位数量；当前玩法只支持 1 个出战宠物
+		ViewportYawDegrees = 180, -- 背包 ViewportFrame 中宠物模型朝向微调，模型背对玩家时改这里
+		SyncTemplateSizeToGrid = true, -- 克隆格子时同步 UIGridLayout.CellSize，避免宠物格和空槽大小不一致
+	},
 
 	PETS = {
 		["Slime"] = {
@@ -357,12 +391,15 @@ local GameConfig = {
         MinAttackInterval = 0.35, -- 最低攻击间隔
         OrbitRadius = 5,          -- 兼容旧字段：飞剑返回/索敌仍可参考该范围
         HoverSideOffset = 3.2,    -- 飞剑待机时距离玩家左右两侧的偏移
+        HoverSideSpacing = 0.85,  -- 同一侧多把飞剑继续向外错开，避免在镜头里叠成一条线
         HoverBackOffset = 1.2,    -- 飞剑待机时相对玩家身后的基础偏移
         HoverDepthSpacing = 1.4,  -- 多把飞剑在前后方向的错位间距
         HoverHeight = 2.8,        -- 飞剑待机悬浮高度
-        HoverHeightSpacing = 0.25,-- 多把飞剑之间的高度错位，避免视觉重叠
-        HoverBobAmplitude = 0.18, -- 待机上下轻微浮动幅度
+        HoverHeightSpacing = 0.42,-- 多把飞剑之间的高度错位，避免视觉重叠
+        HoverHeightPattern = {0, 0.65, -0.45, 1.05, -0.75, 0.3}, -- 1-6 把飞剑的高低节奏
+        HoverBobAmplitude = 0.28, -- 待机上下轻微浮动幅度
         HoverBobSpeed = 2.5,      -- 待机上下轻微浮动速度
+        HoverBobPhaseSpacing = 1.15, -- 每把飞剑浮动相位错开，避免一起上下移动
         TargetRange = 90,         -- 索敌范围
         FlySpeed = 140,           -- 飞剑出鞘飞行速度
         MaxCount = 6,             -- 飞剑最大数量
@@ -393,6 +430,29 @@ local GameConfig = {
         Sword_CD_Reduction = "",
     },
 
+    -- 升级卡右上角标图标配置；上传 PNG 后把对应资源 ID 填到这里。
+    -- 图标文件建议对应：攻击力、攻速、最大生命、弹速、射程、磁力、经验、弹道、宠物、御剑、稀有卡。
+    LEVEL_UP_CARD_BADGE_ICON_USE_THUMBNAIL = true,
+    LEVEL_UP_CARD_BADGE_ICONS = {
+        ATK_Bonus = "rbxassetid://83843411342786", -- 攻击力.png
+        ASPD_Bonus = "rbxassetid://89158683195024", -- 攻速.png
+        MaxHP_Bonus = "rbxassetid://111122879940468", -- 最大生命.png
+        SPD_Bonus = "rbxassetid://88743848478283", -- 弹速.png
+        RNG_Bonus = "rbxassetid://114496329613617", -- 射程.png
+        MagnetRadius_Bonus = "rbxassetid://111822385402148", -- 磁力.png
+        EXP_Gain_Bonus = "rbxassetid://131151921339029", -- 经验.png
+        MultiShot = "rbxassetid://86684340290458", -- 弹道.png
+        Pet_Count = "rbxassetid://85923690685775", -- 宠物.png
+        Pet_ASPD_Bonus = "rbxassetid://85923690685775", -- 宠物.png
+        Pet_ATK_Bonus = "rbxassetid://85923690685775", -- 宠物.png
+        WindBlade_Range_Bonus = "rbxassetid://85923690685775", -- 宠物.png
+        Sword_Unlocked = "rbxassetid://74531224517277", -- 御剑.png
+        Sword_Count = "rbxassetid://74531224517277", -- 御剑.png
+        Sword_ATK_Bonus = "rbxassetid://74531224517277", -- 御剑.png
+        Sword_CD_Reduction = "rbxassetid://74531224517277", -- 御剑.png
+        ALL = "rbxassetid://75710132785084", -- 稀有卡.png
+    },
+
     -- 14. 升级卡美术分类配置；美术可以按 Category 做预制卡片，代码只负责填角标/切换分类层。
     LEVEL_UP_CARD_ART = {
         ATK_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击" },
@@ -401,7 +461,7 @@ local GameConfig = {
         SPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "弹速" },
         RNG_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "射程" },
         MagnetRadius_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "磁力" },
-        EXP_Gain_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "经验" },
+        EXP_Gain_Bonus = { Category = "Rare", CategoryName = "玩家属性", Badge = "经验" },
         ALL = { Category = "Rare", CategoryName = "稀有通用", Badge = "全能" },
         MultiShot = { Category = "WeaponProjectile", CategoryName = "武器弹道", Badge = "弹道" },
         Pet_Count = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠物" },
@@ -414,6 +474,16 @@ local GameConfig = {
         Sword_CD_Reduction = { Category = "Sword", CategoryName = "御剑技能", Badge = "冷却" },
     },
 
+    -- 升级卡美术层别名配置；用于支持“四类颜色图”和“五类功能分类”同时存在。
+    -- Studio 中既可以使用 CategoryLayer_PlayerStats 这类功能名，也可以使用 CategoryLayer_Purple 这类颜色名。
+    LEVEL_UP_CARD_LAYER_ALIASES = {
+        PlayerStats = { "PlayerStats", "Purple" },
+        Pet = { "Pet", "Green" },
+        Sword = { "Sword", "Blue" },
+        WeaponProjectile = { "WeaponProjectile", "Projectile", "Gold", "Yellow" },
+        Rare = { "Rare", "All", "Gold", "Yellow" },
+    },
+
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
         -- 角色属性增益
@@ -423,7 +493,7 @@ local GameConfig = {
         { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
         { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
         { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(180, 100, 255) },
-        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 40 },
+        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 30 },
         { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
         { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "额外弹道 70%伤害" },
@@ -447,7 +517,6 @@ local GameConfig = {
         Elite = { NumDrops = 5, Exp = 50, Coins = 50 },
         Boss  = { NumDrops = 15, Exp = 200, Coins = 100 }
     },
-
 }
 
 -- 商品计算价格方法，全局共享

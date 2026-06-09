@@ -301,37 +301,28 @@ end
 
 -- 播放抽宠蛋的左右摇晃动画。
 function VFXController.PlayEggShakeVFX(model)
-	if not model or not model.PrimaryPart then return end
-	local part = model.PrimaryPart
-	local baseCFrame = CFrame.new(0, 0, 0)
+	if not model or not model:IsA("PVInstance") then return end
+	local baseCFrame = getInstanceWorldCFrame(model) or CFrame.new(0, 0, 0)
 
 	task.spawn(function()
-		local tInfo = TweenInfo.new(0.06, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-		local t1 = TweenService:Create(part, tInfo, {CFrame = baseCFrame * CFrame.Angles(0, 0, math.rad(30))})
-		local t2 = TweenService:Create(part, tInfo, {CFrame = baseCFrame * CFrame.Angles(0, 0, math.rad(-30))})
-		local t3 = TweenService:Create(part, tInfo, {CFrame = baseCFrame})
-
-		t1:Play()
-		t1.Completed:Wait()
-		if not part or not part.Parent then return end
-
-		t2:Play()
-		t2.Completed:Wait()
-		if not part or not part.Parent then return end
-
-		t3:Play()
+		local angles = {30, -30, 0}
+		for _, angle in ipairs(angles) do
+			if not model or not model.Parent then return end
+			model:PivotTo(baseCFrame * CFrame.Angles(0, 0, math.rad(angle)))
+			task.wait(0.06)
+		end
 	end)
 end
 
 -- 启动宠物展示旋转动画，并返回连接对象供外部停止。
 function VFXController.StartPetSpinVFX(model)
-	if not model or not model.PrimaryPart then return nil end
+	if not model or not model:IsA("PVInstance") then return nil end
 
 	local rotationY = 0
 	local spinConnection = RunService.RenderStepped:Connect(function(dt)
-		if model and model.PrimaryPart then
+		if model and model.Parent then
 			rotationY = rotationY + math.rad(45 * dt)
-			model:SetPrimaryPartCFrame(CFrame.new(0, 0, 0) * CFrame.Angles(0, rotationY, 0))
+			model:PivotTo(CFrame.new(0, 0, 0) * CFrame.Angles(0, rotationY, 0))
 		end
 	end)
 
@@ -408,7 +399,7 @@ function VFXController.CreateGuide(targetPart, text)
 	currentGuideBeam.LightEmission = 1
 	currentGuideBeam.Parent = rootPart
 
-	currentGuideLabel = VFXController.CreateBillboard(targetPart, "閸撳秴绶?" .. text, Color3.fromRGB(255, 255, 100), 4)
+	currentGuideLabel = VFXController.CreateBillboard(targetPart, "遇到困难了？" .. text, Color3.fromRGB(255, 255, 100), 4)
 end
 
 -- 清除当前引导光束、附件和文字。

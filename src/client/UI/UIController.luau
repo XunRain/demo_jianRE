@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 
@@ -32,12 +33,22 @@ local function findTextNode(root, names)
 end
 
 -- 查找 Studio 模板里可能存在的图标节点；只负责绑定图片，不修改图标位置和样式。
-local function findImageNode(root, names)
+-- 只按指定名称查找图片节点；用于角标等精确绑定，避免误拿到主图标节点。
+local function findNamedImageNode(root, names)
 	for _, name in ipairs(names) do
 		local node = root:FindFirstChild(name, true)
 		if node and (node:IsA("ImageLabel") or node:IsA("ImageButton")) then
 			return node
 		end
+	end
+
+	return nil
+end
+
+local function findImageNode(root, names)
+	local namedNode = findNamedImageNode(root, names)
+	if namedNode then
+		return namedNode
 	end
 
 	local iconBadge = root:FindFirstChild("IconBadge", true)
@@ -86,79 +97,59 @@ local function normalizeImageAssetId(assetId, useThumbnail)
 	return assetId
 end
 
--- 创建或复用 UI 装饰节点；用于给指定控件补充美术层，不重建 Studio 里的 UI。
-local function getOrCreateUiChild(parent, className, name)
-	local child = parent:FindFirstChild(name)
-	if child and child.ClassName == className then
-		return child
-	end
-
-	child = Instance.new(className)
-	child.Name = name
-	child.Parent = parent
-	return child
-end
-
--- 给退出按钮补充立体层次：渐变、高光、暗边和投影；不改按钮的位置、尺寸和点击逻辑。
-local function applyExitButtonDepthStyle(exitButton)
+-- 退出按钮使用美术图片本体；代码只绑定鼠标悬浮缩放，不再额外添加渐变、描边、投影等装饰。
+local function applyExitButtonHoverScale(exitButton)
 	if not exitButton or not exitButton:IsA("GuiButton") then return end
 
-	exitButton.ClipsDescendants = false
-
-	local corner = getOrCreateUiChild(exitButton, "UICorner", "ExitDepthCorner")
-	corner.CornerRadius = UDim.new(0, 8)
-
-	local stroke = getOrCreateUiChild(exitButton, "UIStroke", "ExitDepthStroke")
-	stroke.Color = Color3.fromRGB(58, 14, 18)
-	stroke.Thickness = 2
-	stroke.Transparency = 0
-
-	local gradient = getOrCreateUiChild(exitButton, "UIGradient", "ExitDepthGradient")
-	gradient.Rotation = 90
-	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 91, 91)),
-		ColorSequenceKeypoint.new(0.45, Color3.fromRGB(197, 48, 54)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(123, 25, 34)),
-	})
-
-	local shadow = getOrCreateUiChild(exitButton, "Frame", "ExitDepthShadow")
-	shadow.AnchorPoint = Vector2.new(0.5, 0)
-	shadow.Position = UDim2.new(0.5, 0, 0, 5)
-	shadow.Size = UDim2.new(1, 0, 1, 0)
-	shadow.BackgroundColor3 = Color3.fromRGB(45, 10, 14)
-	shadow.BackgroundTransparency = 0.45
-	shadow.BorderSizePixel = 0
-	shadow.ZIndex = math.max(0, exitButton.ZIndex - 1)
-
-	local shadowCorner = getOrCreateUiChild(shadow, "UICorner", "ExitDepthShadowCorner")
-	shadowCorner.CornerRadius = UDim.new(0, 8)
-
-	local highlight = getOrCreateUiChild(exitButton, "Frame", "ExitDepthHighlight")
-	highlight.AnchorPoint = Vector2.new(0.5, 0)
-	highlight.Position = UDim2.new(0.5, 0, 0, 2)
-	highlight.Size = UDim2.new(0.86, 0, 0.22, 0)
-	highlight.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	highlight.BackgroundTransparency = 0.72
-	highlight.BorderSizePixel = 0
-	highlight.ZIndex = exitButton.ZIndex + 1
-
-	local highlightCorner = getOrCreateUiChild(highlight, "UICorner", "ExitDepthHighlightCorner")
-	highlightCorner.CornerRadius = UDim.new(1, 0)
-
-	local bottomShade = getOrCreateUiChild(exitButton, "Frame", "ExitDepthBottomShade")
-	bottomShade.AnchorPoint = Vector2.new(0.5, 1)
-	bottomShade.Position = UDim2.new(0.5, 0, 1, 0)
-	bottomShade.Size = UDim2.new(1, 0, 0.34, 0)
-	bottomShade.BackgroundColor3 = Color3.fromRGB(64, 11, 18)
-	bottomShade.BackgroundTransparency = 0.62
-	bottomShade.BorderSizePixel = 0
-	bottomShade.ZIndex = exitButton.ZIndex + 1
-
-	if exitButton:IsA("TextButton") then
-		exitButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-		exitButton.TextStrokeColor3 = Color3.fromRGB(24, 6, 9)
-		exitButton.TextStrokeTransparency = 0.15
+	-- 清理旧版代码动态添加的装饰层，避免覆盖美术给的退出按钮图片。
+	for _, child in ipairs(exitButton:GetChildren()) do
+		if string.sub(child.Name, 1, 9) == "ExitDepth" then
+			child:Destroy()
+		end
 	end
+
+	local hoverScale = exitButton:FindFirstChild("ExitHoverScale")
+	if not hoverScale then
+		hoverScale = Instance.new("UIScale")
+		hoverScale.Name = "ExitHoverScale"
+		hoverScale.Parent = exitButton
+	end
+
+	if exitButton:GetAttribute("ExitHoverScaleBound") then return end
+	exitButton:SetAttribute("ExitHoverScaleBound", true)
+
+	local normalScale = hoverScale.Scale
+	local targetScale = 1.08
+	local tweenInfo = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+	exitButton.MouseEnter:Connect(function()
+		TweenService:Create(hoverScale, tweenInfo, { Scale = targetScale }):Play()
+	end)
+
+	exitButton.MouseLeave:Connect(function()
+		TweenService:Create(hoverScale, tweenInfo, { Scale = normalScale }):Play()
+	end)
+
+	exitButton.Activated:Connect(function()
+		TweenService:Create(hoverScale, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 0.96 }):Play()
+		task.delay(0.08, function()
+			if hoverScale and hoverScale.Parent then
+				TweenService:Create(hoverScale, tweenInfo, { Scale = normalScale }):Play()
+			end
+		end)
+	end)
+end
+
+-- 查找关卡 HUD：优先使用美术做好的图片容器，兼容旧版纯文字 StageLabel。
+local function findStageHud(mainUI)
+	for _, name in ipairs({"StageHUD", "StagePanel", "StageContainer", "StageFrame", "StageLabel"}) do
+		local node = mainUI:FindFirstChild(name, true)
+		if node and node:IsA("GuiObject") then
+			return node
+		end
+	end
+
+	return nil
 end
 
 function UIController.Init(deps)
@@ -213,7 +204,7 @@ function UIController.Start()
 			-- 退出按钮
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
-				applyExitButtonDepthStyle(exitButton)
+				applyExitButtonHoverScale(exitButton)
 				exitButton.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
 			end
 
@@ -236,34 +227,22 @@ function UIController.Start()
 				petBagPanel.Visible = false
 			end
 
-         -- 关卡文本 UI 动态控制与自动兜底
-			local stageLabel = mainUI:FindFirstChild("StageLabel")
-			
-			-- 应急机制：如果策划/美术还没在 Studio 里做 StageLabel 控件，且正处于战斗状态
-			if not stageLabel and inCombat then
-				stageLabel = Instance.new("TextLabel")
-				stageLabel.Name = "StageLabel"
-				stageLabel.Size = UDim2.new(0, 300, 0, 60)
-				stageLabel.Position = UDim2.new(0.5, -150, 0, 30) -- 屏幕顶端正中间
-				stageLabel.BackgroundTransparency = 1
-				stageLabel.Font = Enum.Font.FredokaOne
-				stageLabel.TextSize = 36
-				stageLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-				
-				-- 加上一层厚重的黑边描边，更有街机感
-				local stroke = Instance.new("UIStroke")
-				stroke.Thickness = 3
-				stroke.Color = Color3.fromRGB(0, 0, 0)
-				stroke.Parent = stageLabel
-				
-				stageLabel.Parent = mainUI
-			end
-			
-			-- 状态渲染驱动
-			if stageLabel then
-				-- 只有进入战斗（跑酷状态下）且不在升级选卡面板阻挡时才显示关卡数；回到大厅自动隐藏
-				stageLabel.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
-				stageLabel.Text = "STAGE: " .. tostring(currentStage)
+			-- 关卡 HUD 使用 Studio 里的图片容器；代码只控制显隐并填充关卡文本。
+			local stageHud = findStageHud(mainUI)
+			if stageHud then
+				local showStage = inCombat and not player:GetAttribute("IsLevelingUp")
+				stageHud.Visible = showStage
+
+				local stageText = nil
+				if stageHud:IsA("TextLabel") or stageHud:IsA("TextButton") then
+					stageText = stageHud
+				else
+					stageText = findTextNode(stageHud, {"StageText", "StageLabel", "LevelText", "TextLabel"})
+				end
+
+				if stageText then
+					stageText.Text = "STAGE " .. tostring(currentStage)
+				end
 			end
 
 			-- Minecraft 风格底部血条/经验条群组控制
@@ -461,6 +440,24 @@ function UIController.Start()
 			return normalizeImageAssetId(iconAssetId, Controllers.Config.LEVEL_UP_BUFF_ICON_USE_THUMBNAIL == true)
 		end
 
+		-- 获取升级卡右上角标图标；角标和卡片主图标分开配置，避免互相覆盖。
+		local function getBuffBadgeIconAssetId(buff, art)
+			local badgeIconMap = Controllers.Config.LEVEL_UP_CARD_BADGE_ICONS or {}
+			local buffId = getBuffId(buff)
+			local iconAssetId = buff.BadgeIcon
+				or art.BadgeIcon
+				or badgeIconMap[buffId]
+				or badgeIconMap[buff.Attr]
+				or badgeIconMap[art.Category]
+
+			local useThumbnail = Controllers.Config.LEVEL_UP_CARD_BADGE_ICON_USE_THUMBNAIL
+			if useThumbnail == nil then
+				useThumbnail = Controllers.Config.LEVEL_UP_BUFF_ICON_USE_THUMBNAIL == true
+			end
+
+			return normalizeImageAssetId(iconAssetId, useThumbnail == true)
+		end
+
 		-- 获取升级卡美术分类；分类用于切换 Studio 预制层和填右上角角标。
 		local function getBuffCardArt(buff)
 			local artMap = Controllers.Config.LEVEL_UP_CARD_ART or {}
@@ -474,17 +471,52 @@ function UIController.Start()
 
 		-- 按分类切换美术预制层；美术可使用 CategoryLayer_PlayerStats 或给层设置 CardArtCategory 属性。
 		local function applyCardCategoryLayers(card, activeCategory)
-			local categoryKeys = {"PlayerStats", "WeaponProjectile", "Pet", "Sword", "Rare"}
+			-- 根据升级卡功能分类切换 Studio 预制美术层；支持功能名层和颜色名层两种命名。
+			local layerAliases = Controllers.Config.LEVEL_UP_CARD_LAYER_ALIASES or {
+				PlayerStats = {"PlayerStats", "Purple"},
+				Pet = {"Pet", "Green"},
+				Sword = {"Sword", "Blue"},
+				WeaponProjectile = {"WeaponProjectile", "Projectile", "Gold", "Yellow"},
+				Rare = {"Rare", "All", "Gold", "Yellow"},
+			}
+
+			-- 判断某个图层标记是否属于当前要显示的功能分类。
+			local function isActiveLayer(layerKey)
+				if layerKey == activeCategory then
+					return true
+				end
+
+				for _, alias in ipairs(layerAliases[activeCategory] or {}) do
+					if layerKey == alias then
+						return true
+					end
+				end
+
+				return false
+			end
+
+			-- 识别并切换所有分类图层；只改 Visible，不改美术设置好的颜色、尺寸和图片。
+			local function applyLayerVisibility(node, layerKey)
+				node.Visible = isActiveLayer(layerKey)
+				node:SetAttribute("CardArtLayerActive", node.Visible)
+			end
+
 			for _, node in ipairs(card:GetDescendants()) do
 				if node:IsA("GuiObject") then
 					local attrCategory = node:GetAttribute("CardArtCategory")
 					if attrCategory then
-						node.Visible = attrCategory == activeCategory
+						applyLayerVisibility(node, tostring(attrCategory))
 					end
 
-					for _, category in ipairs(categoryKeys) do
+					for category, aliases in pairs(layerAliases) do
 						if node.Name == "CategoryLayer_" .. category or node.Name == "CardArt_" .. category then
-							node.Visible = category == activeCategory
+							applyLayerVisibility(node, category)
+						end
+
+						for _, alias in ipairs(aliases) do
+							if node.Name == "CategoryLayer_" .. alias or node.Name == "CardArt_" .. alias then
+								applyLayerVisibility(node, alias)
+							end
 						end
 					end
 				end
@@ -501,6 +533,8 @@ function UIController.Start()
 			card:SetAttribute("CardArtCategory", category)
 			card:SetAttribute("CardArtCategoryName", categoryName)
 			card:SetAttribute("CardArtBadge", badge)
+			local layerAliases = Controllers.Config.LEVEL_UP_CARD_LAYER_ALIASES or {}
+			card:SetAttribute("CardArtLayerAliases", table.concat(layerAliases[category] or {category}, ","))
 			applyCardCategoryLayers(card, category)
 
 			local badgeText = findTextNode(card, {"BadgeText", "CornerBadgeText", "TypeBadgeText"})
@@ -513,6 +547,43 @@ function UIController.Start()
 			if categoryText then
 				categoryText.Text = categoryName
 				categoryText.Visible = true
+			end
+
+			-- 填充右上角标图片；没有图片节点或资源未配置时自动隐藏，不影响文字角标。
+			local badgeIconAssetId = getBuffBadgeIconAssetId(buff, art)
+			card:SetAttribute("BadgeIconAssetDebug", badgeIconAssetId or "")
+
+			local badgeIconNode = findNamedImageNode(card, {
+				"BadgeIcon",
+				"CornerBadgeIcon",
+				"TypeBadgeIcon",
+				"AttributeIcon",
+				"AttrIcon",
+			})
+			if not badgeIconNode then
+				for _, containerName in ipairs({"CornerBadge", "TypeBadge", "AttributeBadge", "BadgeFrame"}) do
+					local container = card:FindFirstChild(containerName, true)
+					if container then
+						badgeIconNode = container:FindFirstChildWhichIsA("ImageLabel", true)
+							or container:FindFirstChildWhichIsA("ImageButton", true)
+						if badgeIconNode then
+							break
+						end
+					end
+				end
+			end
+
+			card:SetAttribute("BadgeIconNodeFound", badgeIconNode ~= nil)
+			if badgeIconNode then
+				badgeIconNode:SetAttribute("BadgeBuffDebug", getBuffId(buff))
+				badgeIconNode:SetAttribute("BadgeIconAssetDebug", badgeIconAssetId or "")
+				if badgeIconAssetId then
+					badgeIconNode.Image = badgeIconAssetId
+					badgeIconNode.Visible = true
+				else
+					badgeIconNode.Image = ""
+					badgeIconNode.Visible = false
+				end
 			end
 		end
 
@@ -803,6 +874,144 @@ function UIController.Start()
 		local itemTemplate = shopPanel:WaitForChild("ShopItemTemplate")
 		if shopList:IsA("ScrollingFrame") then
 			shopList.ScrollingDirection = Enum.ScrollingDirection.X
+			shopList.AutomaticCanvasSize = Enum.AutomaticSize.X
+		end
+
+		-- 查找可点击按钮；关闭按钮可能是 ImageButton/TextButton，装饰 ImageLabel 不参与绑定。
+		local function findShopButton(root, names)
+			for _, name in ipairs(names) do
+				local node = root:FindFirstChild(name, true)
+				if node and node:IsA("GuiButton") then
+					return node
+				end
+			end
+
+			return nil
+		end
+
+		-- 获取商店卡片美术分类；商店天赋第一版复用升级卡的玩家属性卡面和角标素材。
+		local function getShopTalentArt(talentId, talentData)
+			local artMap = Config.SHOP_TALENT_CARD_ART or {}
+			local art = artMap[talentId]
+			if art then
+				return art
+			end
+
+			return {
+				Category = "PlayerStats",
+				CategoryName = "玩家属性",
+				Badge = talentData.Name or talentId,
+				BadgeSource = talentId,
+			}
+		end
+
+		-- 判断某个 CategoryLayer 是否属于当前商品分类，兼容功能名和颜色名两种 Studio 命名方式。
+		local function isShopLayerActive(layerKey, activeCategory)
+			if layerKey == activeCategory then
+				return true
+			end
+
+			local layerAliases = Config.LEVEL_UP_CARD_LAYER_ALIASES or {}
+			for _, alias in ipairs(layerAliases[activeCategory] or {}) do
+				if layerKey == alias then
+					return true
+				end
+			end
+
+			return false
+		end
+
+		-- 切换商店卡片的预制美术图层；只改 Visible，不覆盖美术做好的图片、颜色、尺寸和布局。
+		local function applyShopCategoryLayers(card, activeCategory)
+			local layerAliases = Config.LEVEL_UP_CARD_LAYER_ALIASES or {
+				PlayerStats = {"PlayerStats", "Purple"},
+				Pet = {"Pet", "Green"},
+				Sword = {"Sword", "Blue"},
+				WeaponProjectile = {"WeaponProjectile", "Projectile", "Gold", "Yellow"},
+				Rare = {"Rare", "All", "Gold", "Yellow"},
+			}
+
+			local function applyLayerVisibility(node, layerKey)
+				node.Visible = isShopLayerActive(layerKey, activeCategory)
+				node:SetAttribute("ShopCardLayerActive", node.Visible)
+			end
+
+			for _, node in ipairs(card:GetDescendants()) do
+				if node:IsA("GuiObject") then
+					local attrCategory = node:GetAttribute("CardArtCategory") or node:GetAttribute("ShopCardCategory")
+					if attrCategory then
+						applyLayerVisibility(node, tostring(attrCategory))
+					end
+
+					for category, aliases in pairs(layerAliases) do
+						if node.Name == "CategoryLayer_" .. category or node.Name == "CardArt_" .. category then
+							applyLayerVisibility(node, category)
+						end
+
+						for _, alias in ipairs(aliases) do
+							if node.Name == "CategoryLayer_" .. alias or node.Name == "CardArt_" .. alias then
+								applyLayerVisibility(node, alias)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		-- 给商店卡片填充分类、角标和图标；图标复用升级卡角标配置，没有图标时自动隐藏。
+		local function applyShopCardArt(card, talentId, talentData)
+			local art = getShopTalentArt(talentId, talentData)
+			local category = art.Category or "PlayerStats"
+			local categoryName = art.CategoryName or category
+			local badge = art.Badge or talentData.Name or talentId
+			local badgeSource = art.BadgeSource or talentId
+
+			card:SetAttribute("ShopCardCategory", category)
+			card:SetAttribute("ShopCardCategoryName", categoryName)
+			card:SetAttribute("ShopCardBadge", badge)
+			card:SetAttribute("ShopCardBadgeSource", badgeSource)
+			applyShopCategoryLayers(card, category)
+
+			local badgeText = findTextNode(card, {"BadgeText", "CornerBadgeText", "TypeBadgeText"})
+			if badgeText then
+				badgeText.Text = badge
+				badgeText.Visible = true
+			end
+
+			local categoryText = findTextNode(card, {"CategoryText", "CategoryNameText", "CardTypeText"})
+			if categoryText then
+				categoryText.Text = categoryName
+				categoryText.Visible = true
+			end
+
+			local badgeIconMap = Config.LEVEL_UP_CARD_BADGE_ICONS or {}
+			local iconAssetId = art.BadgeIcon or badgeIconMap[badgeSource] or badgeIconMap[category]
+			local useThumbnail = Config.LEVEL_UP_CARD_BADGE_ICON_USE_THUMBNAIL == true
+			local normalizedIcon = normalizeImageAssetId(iconAssetId, useThumbnail)
+			local badgeIconNode = findNamedImageNode(card, {
+				"BadgeIcon",
+				"CornerBadgeIcon",
+				"TypeBadgeIcon",
+				"AttributeIcon",
+				"AttrIcon",
+				"IconImage",
+				"CardIcon",
+				"Icon",
+			})
+
+			card:SetAttribute("ShopBadgeIconAssetDebug", normalizedIcon or "")
+			card:SetAttribute("ShopBadgeIconNodeFound", badgeIconNode ~= nil)
+			if badgeIconNode then
+				badgeIconNode:SetAttribute("ShopBadgeSourceDebug", badgeSource)
+				badgeIconNode:SetAttribute("ShopBadgeIconAssetDebug", normalizedIcon or "")
+				if normalizedIcon then
+					badgeIconNode.Image = normalizedIcon
+					badgeIconNode.Visible = true
+				else
+					badgeIconNode.Image = ""
+					badgeIconNode.Visible = false
+				end
+			end
 		end
 
 		-- 填充商店天赋卡；优先写入美术拆好的 TextLabel，没有拆分时回退到模板原文本。
@@ -811,13 +1020,17 @@ function UIController.Start()
 			local effectText = "效果: +" .. tostring(talentData.StatIncrease or 0)
 			local titleText = findTextNode(btn, {"TitleText", "NameText", "TalentNameText"})
 			local levelText = findTextNode(btn, {"LevelText", "LevelLabel"})
-			local priceText = findTextNode(btn, {"PriceText", "CostText", "CoinText"})
-			local effectLabel = findTextNode(btn, {"EffectText", "DescText", "DescriptionText"})
+			local priceText = findTextNode(btn, {"PriceText", "CostText", "CoinText", "AmountText"})
+			local effectLabel = findTextNode(btn, {"EffectText", "DescText", "DescriptionText", "NoteText"})
 			local hasSplitLabels = titleText or levelText or priceText or effectLabel
+			local coins = player:GetAttribute("Coins") or 0
 
 			btn:SetAttribute("TalentId", talentId)
 			btn:SetAttribute("TalentLevel", currentLevel)
 			btn:SetAttribute("TalentCost", cost)
+			btn:SetAttribute("CanAfford", coins >= cost)
+
+			applyShopCardArt(btn, talentId, talentData)
 
 			if titleText then titleText.Text = talentData.Name end
 			if levelText then levelText.Text = "Lv." .. tostring(currentLevel) end
@@ -836,7 +1049,14 @@ function UIController.Start()
 
 		-- 刷新商店文本显示 (支持滑动列表的智能增量更新)
 		local function refreshShopUI()
-			for talentId, talentData in pairs(Config.TALENTS) do
+			local orderedTalentIds = Config.SHOP_TALENT_ORDER or {}
+			local renderedTalentIds = {}
+
+			local function renderTalent(talentId, layoutOrder)
+				local talentData = Config.TALENTS[talentId]
+				if not talentData then return end
+
+				renderedTalentIds[talentId] = true
 				local btnName = "Btn_" .. talentId
 				local btn = shopList:FindFirstChild(btnName)
 				
@@ -849,6 +1069,7 @@ function UIController.Start()
 					btn.Name = btnName
 					btn.Visible = true 
 					btn.Parent = shopList
+					btn:SetAttribute("ShopGenerated", true)
 					
 					-- 绑定购买事件
 					btn.Activated:Connect(function()
@@ -856,8 +1077,25 @@ function UIController.Start()
 						remotes:WaitForChild("BuyTalent"):FireServer(talentId)
 					end)
 				end
+
+				if btn:IsA("GuiObject") then
+					btn.LayoutOrder = layoutOrder
+				end
 				
 				applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
+			end
+
+			for orderIndex, talentId in ipairs(orderedTalentIds) do
+				renderTalent(talentId, orderIndex)
+			end
+
+			-- 兼容后续临时新增但忘记放进 SHOP_TALENT_ORDER 的商品，避免配置遗漏导致商品不显示。
+			local fallbackOrder = #orderedTalentIds
+			for talentId in pairs(Config.TALENTS) do
+				if not renderedTalentIds[talentId] then
+					fallbackOrder += 1
+					renderTalent(talentId, fallbackOrder)
+				end
 			end
 		end
 
@@ -875,7 +1113,7 @@ function UIController.Start()
 		end)
 
 		-- 绑定关闭面板按钮
-		local closeBtn = shopPanel:FindFirstChild("CloseButton")
+		local closeBtn = findShopButton(shopPanel, {"CloseButton", "BtnClose", "ShopCloseButton"})
 		if closeBtn then
 			closeBtn.Activated:Connect(function()
 				player:SetAttribute("IsShopOpen", false)
@@ -902,11 +1140,11 @@ function UIController.Start()
 		local equippedContainer = petList:WaitForChild("EquippedContainer")
 		local standbyContainer = petList:WaitForChild("StandbyContainer")
 		
-		-- 获取放在 Panel 根目录的两个模板
+		-- 获取放在 Panel 根目录的宠物格和空槽模板；空槽只用于出战区补足可装备槽位。
 		local petTemplate = bagPanel:WaitForChild("PetItemTemplate") 
 		local emptySlotTemplate = bagPanel:WaitForChild("EmptySlotTemplate")
-
-		local MAX_EQUIP_SLOTS = 1 -- 目前只开放1个槽位，以后如果要拓展改这里就行
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+		local MAX_EQUIP_SLOTS = petBagConfig.MaxEquipSlots or 1
 
 		-- 安全解析宠物背包；存档字段异常时返回空表，避免 UI 打不开
 		local function decodeOwnedPets()
@@ -952,6 +1190,180 @@ function UIController.Start()
 			return petIds
 		end
 
+		-- 清理代码动态生成的格子；保留 Studio 中的背景、标题、分隔线和 UIGridLayout。
+		local function clearGeneratedBagItems(container)
+			for _, child in ipairs(container:GetChildren()) do
+				if child:GetAttribute("PetBagGenerated") == true then
+					child:Destroy()
+				end
+			end
+		end
+
+		-- 统一克隆格子的外层尺寸；避免 PetItemTemplate 和 EmptySlotTemplate 在 Studio 中尺寸不同导致显示一大一小。
+		local function syncBagItemSizeToGrid(item, parent)
+			if not item or not parent then return end
+			if Controllers.Config.PET_BAG_UI and Controllers.Config.PET_BAG_UI.SyncTemplateSizeToGrid == false then
+				return
+			end
+
+			local gridLayout = parent:FindFirstChildWhichIsA("UIGridLayout")
+			if gridLayout then
+				item.Size = gridLayout.CellSize
+			end
+
+			for _, node in ipairs(item:GetDescendants()) do
+				if node:IsA("ImageLabel") or node:IsA("ImageButton") or node:IsA("ViewportFrame") then
+					if node.Name == "PetViewport"
+						or node.Name == "PetIconViewport"
+						or node.Name == "IconViewport"
+						or node.Name == "Viewport"
+						or node.Name == "SlotImage"
+						or node.Name == "Background"
+						or node.Name == "Bg"
+					then
+						node.AnchorPoint = Vector2.new(0.5, 0.5)
+						node.Position = UDim2.fromScale(0.5, 0.5)
+						node.Size = UDim2.fromScale(1, 1)
+					end
+				end
+			end
+		end
+
+		-- 克隆宠物格模板；只打生成标记，具体文字/图片由后续函数填充。
+		local function createPetButton(parent)
+			local btn = petTemplate:Clone()
+			btn:SetAttribute("PetBagGenerated", true)
+			btn.Visible = true
+			btn.Parent = parent
+			syncBagItemSizeToGrid(btn, parent)
+			return btn
+		end
+
+		-- 克隆出战区空槽；只表达可装备槽位，不参与点击交互。
+		local function createEmptyEquipSlot(parent)
+			local emptySlot = emptySlotTemplate:Clone()
+			emptySlot:SetAttribute("PetBagGenerated", true)
+			emptySlot:SetAttribute("PetBagSlotType", "Equipped")
+			emptySlot.Visible = true
+			emptySlot.Parent = parent
+			syncBagItemSizeToGrid(emptySlot, parent)
+			return emptySlot
+		end
+
+		-- 查找宠物格里的 ViewportFrame；用于直接展示 ReplicatedStorage/Model/Pets 下的宠物模型。
+		local function findPetViewport(root)
+			for _, name in ipairs({"PetViewport", "PetIconViewport", "IconViewport", "Viewport"}) do
+				local node = root:FindFirstChild(name, true)
+				if node and node:IsA("ViewportFrame") then
+					return node
+				end
+			end
+
+			return root:FindFirstChildWhichIsA("ViewportFrame", true)
+		end
+
+		-- 清理上一次渲染到 ViewportFrame 的模型和相机；保留 Studio 里做好的圆角、描边等 UI 子节点。
+		local function clearPetViewport(viewport)
+			for _, child in ipairs(viewport:GetChildren()) do
+				if child:GetAttribute("PetBagViewportGenerated") == true then
+					child:Destroy()
+				end
+			end
+			viewport.CurrentCamera = nil
+		end
+
+		-- 让模型在 ViewportFrame 中稳定显示；兼容 Model、MeshPart、Part。
+		local function fitPetModelInViewport(viewport, petInstance)
+			if not viewport or not petInstance then return false end
+
+			local worldModel = Instance.new("WorldModel")
+			worldModel.Name = "PetViewportWorld"
+			worldModel:SetAttribute("PetBagViewportGenerated", true)
+			worldModel.Parent = viewport
+
+			petInstance.Parent = worldModel
+
+			for _, obj in ipairs(petInstance:GetDescendants()) do
+				if obj:IsA("BasePart") then
+					obj.Anchored = true
+					obj.CanCollide = false
+				end
+			end
+			if petInstance:IsA("BasePart") then
+				petInstance.Anchored = true
+				petInstance.CanCollide = false
+				petInstance.CFrame = CFrame.new(0, 0, 0)
+			elseif petInstance:IsA("Model") then
+				if not petInstance.PrimaryPart then
+					petInstance.PrimaryPart = petInstance:FindFirstChildWhichIsA("BasePart", true)
+				end
+				petInstance:PivotTo(CFrame.new(0, 0, 0))
+			else
+				return false
+			end
+
+			local boundsCFrame
+			local boundsSize
+			if petInstance:IsA("Model") then
+				boundsCFrame, boundsSize = petInstance:GetBoundingBox()
+				petInstance:PivotTo(petInstance:GetPivot() + (-boundsCFrame.Position))
+				local yawDegrees = (Controllers.Config.PET_BAG_UI and Controllers.Config.PET_BAG_UI.ViewportYawDegrees) or 180
+				petInstance:PivotTo(CFrame.Angles(0, math.rad(yawDegrees), 0) * petInstance:GetPivot())
+				boundsCFrame, boundsSize = petInstance:GetBoundingBox()
+			elseif petInstance:IsA("BasePart") then
+				local yawDegrees = (Controllers.Config.PET_BAG_UI and Controllers.Config.PET_BAG_UI.ViewportYawDegrees) or 180
+				petInstance.CFrame = CFrame.Angles(0, math.rad(yawDegrees), 0) * petInstance.CFrame
+				boundsCFrame = petInstance.CFrame
+				boundsSize = petInstance.Size
+			end
+
+			local maxSize = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 1)
+			local cameraDistance = maxSize * 2.15
+			local lookAt = Vector3.new(0, boundsSize.Y * 0.05, 0)
+
+			local camera = Instance.new("Camera")
+			camera.Name = "PetViewportCamera"
+			camera:SetAttribute("PetBagViewportGenerated", true)
+			camera.FieldOfView = 35
+			camera.CFrame = CFrame.lookAt(
+				Vector3.new(cameraDistance * 0.18, boundsSize.Y * 0.18, cameraDistance),
+				lookAt
+			)
+			camera.Parent = viewport
+			viewport.CurrentCamera = camera
+
+			return true
+		end
+
+		-- 将宠物模型渲染到背包格子的 ViewportFrame；模型缺失时安静失败，交给文本兜底。
+		local function applyPetViewport(btn, petId)
+			local viewport = findPetViewport(btn)
+			if not viewport then return false end
+
+			clearPetViewport(viewport)
+			viewport.BackgroundTransparency = 1
+
+			local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+			local petModels = modelFolder and modelFolder:FindFirstChild("Pets")
+			local petTemplateModel = petModels and petModels:FindFirstChild(petId)
+			if not petTemplateModel then
+				viewport.Visible = false
+				btn:SetAttribute("PetViewportModelFound", false)
+				return false
+			end
+
+			local petClone = petTemplateModel:Clone()
+			local ok = fitPetModelInViewport(viewport, petClone)
+			viewport.Visible = ok
+			btn:SetAttribute("PetViewportModelFound", ok)
+			btn:SetAttribute("PetViewportModelNameDebug", petTemplateModel.Name)
+			if not ok then
+				petClone:Destroy()
+			end
+
+			return ok
+		end
+
 		-- 生成宠物卡展示数据，便于美术把宠物名称、数量、稀有度等拆成独立 TextLabel。
 		local function getPetDisplayData(petId, count, statusText)
 			local petConfig = Controllers.Config.PETS[petId]
@@ -991,6 +1403,7 @@ function UIController.Start()
 				Status = statusText or "",
 				Attack = attackText,
 				Description = description,
+				Icon = normalizeImageAssetId(petConfig.Icon, false),
 				FullText = fullText,
 			}
 		end
@@ -1004,12 +1417,14 @@ function UIController.Start()
 			local statusLabel = findTextNode(btn, {"StatusText", "StateText", "EquippedText"})
 			local attackText = findTextNode(btn, {"AttackText", "ATKText", "AtkText"})
 			local descText = findTextNode(btn, {"DescriptionText", "DescText", "NoteText"})
+			local petIcon = findNamedImageNode(btn, {"PetIcon", "IconImage", "PetImage", "Avatar"})
 			local hasSplitLabels = nameText or countLabel or rarityText or statusLabel or attackText or descText
 
 			btn:SetAttribute("PetId", petId)
 			btn:SetAttribute("PetCount", display.Count)
 			btn:SetAttribute("PetRarity", display.Rarity)
 			btn:SetAttribute("PetState", statusText and "Equipped" or "Standby")
+			btn:SetAttribute("PetIconAssetDebug", display.Icon or "")
 
 			if nameText then nameText.Text = display.Name end
 			if countLabel then
@@ -1023,6 +1438,11 @@ function UIController.Start()
 			end
 			if attackText then attackText.Text = "ATK:" .. display.Attack end
 			if descText then descText.Text = display.Description end
+			local viewportRendered = applyPetViewport(btn, petId)
+			if petIcon then
+				petIcon.Image = viewportRendered and "" or (display.Icon or "")
+				petIcon.Visible = not viewportRendered and display.Icon ~= nil
+			end
 
 			if btn:IsA("TextButton") then
 				btn.Text = hasSplitLabels and "" or display.FullText
@@ -1034,13 +1454,8 @@ function UIController.Start()
 		end
 
 		local function refreshBag()
-			-- 安全清理两个容器内的旧 UI (千万别把 UIGridLayout 删了)
-			for _, child in ipairs(equippedContainer:GetChildren()) do
-				if not child:IsA("UIGridLayout") then child:Destroy() end
-			end
-			for _, child in ipairs(standbyContainer:GetChildren()) do
-				if not child:IsA("UIGridLayout") then child:Destroy() end
-			end
+			clearGeneratedBagItems(equippedContainer)
+			clearGeneratedBagItems(standbyContainer)
 			
 			local owned = decodeOwnedPets()
 			local equipped = player:GetAttribute("EquippedPet") or ""
@@ -1059,9 +1474,7 @@ function UIController.Start()
 				equippedCount = 1
 				petCounts[equipped] = petCounts[equipped] - 1 -- 从待机区扣除1个
 				
-				local btn = petTemplate:Clone()
-				btn.Visible = true 
-				btn.Parent = equippedContainer
+				local btn = createPetButton(equippedContainer)
 				
 				applyPetButtonDisplay(btn, equipped, 1, "出战中")
 				
@@ -1072,24 +1485,21 @@ function UIController.Start()
 				end)
 			end
 
-			-- 补齐空槽位 (让 UI 显示出明显的虚线空槽感)
-			for i = equippedCount + 1, MAX_EQUIP_SLOTS do
-				local emptySlot = emptySlotTemplate:Clone()
-				emptySlot.Visible = true
-				emptySlot.Parent = equippedContainer
+			-- 出战区显示“当前可装备宠物数”个槽位；未装备的位置用空槽补齐，不额外 +1。
+			for _ = equippedCount + 1, MAX_EQUIP_SLOTS do
+				createEmptyEquipSlot(equippedContainer)
 			end
 
 			-- ==========================================
 			-- 2. 渲染【待机区】
 			-- ==========================================
-			for _, petId in ipairs(getSortedPetIds(petCounts)) do
+			local standbyPetIds = getSortedPetIds(petCounts)
+			for _, petId in ipairs(standbyPetIds) do
 				local count = petCounts[petId]
 				if count > 0 then -- 如果还有剩余宠物在待机
 					local petConfig = Controllers.Config.PETS[petId]
 					if petConfig then
-						local btn = petTemplate:Clone()
-						btn.Visible = true 
-						btn.Parent = standbyContainer
+						local btn = createPetButton(standbyContainer)
 						
 						applyPetButtonDisplay(btn, petId, count)
 						
@@ -1150,6 +1560,37 @@ function UIController.Start()
 		local function clearViewport()
 			if current3DModel then current3DModel:Destroy() end
 			if spinConnection then spinConnection:Disconnect() end
+			current3DModel = nil
+			spinConnection = nil
+		end
+
+		-- 将抽宠展示资源放进 ViewportFrame；兼容 Model、MeshPart、Part，避免 MeshPart 调 Model 专用 API 报错。
+		local function placeViewportModel(instance, targetCFrame)
+			if not instance then return false end
+			targetCFrame = targetCFrame or CFrame.new(0, 0, 0)
+
+			if instance:IsA("Model") then
+				local primary = instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart", true)
+				if primary and not instance.PrimaryPart then
+					instance.PrimaryPart = primary
+				end
+				instance:PivotTo(targetCFrame)
+				return true
+			end
+
+			if instance:IsA("BasePart") then
+				instance.CFrame = targetCFrame
+				return true
+			end
+
+			return false
+		end
+
+		-- 结束抽宠展示并恢复交互状态；任何异常路径都走这里，避免界面卡住。
+		local function closeHatchScreen()
+			hatchScreen.Visible = false
+			isHatching = false
+			clearViewport()
 		end
 
 		-- 获取可以承载 ProximityPrompt 的部件；宠物蛋如果是 Model，就挂到其中一个 BasePart 上。
@@ -1178,14 +1619,23 @@ function UIController.Start()
 			
 			local remotes = ReplicatedStorage:WaitForChild("Remotes")
 			local resultPetId = remotes:WaitForChild("RollPet"):InvokeServer()
+			if not resultPetId then
+				warn("[UIController] 宠物抽取失败，未收到有效宠物 ID。")
+				closeHatchScreen()
+				return
+			end
 			
 			-- 挂载 3D 蛋模型
 			local eggTemplate = petModels:FindFirstChild("Egg")
 			if eggTemplate then
 				current3DModel = eggTemplate:Clone()
-				current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
-				current3DModel.Parent = viewport
-				camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -6), Vector3.new(0, 0, 0))
+				if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
+					current3DModel.Parent = viewport
+					camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -6), Vector3.new(0, 0, 0))
+				else
+					current3DModel:Destroy()
+					current3DModel = nil
+				end
 			end
 			
 			hatchScreen.Visible = true
@@ -1195,6 +1645,7 @@ function UIController.Start()
 			
 			local clickConn
 			clickConn = clickArea.Activated:Connect(function()
+				local ok, err = pcall(function()
 				clickCount = clickCount + 1
 				
 				-- 1. 呼叫 VFX 模块处理物理晃动反馈
@@ -1211,21 +1662,32 @@ function UIController.Start()
 						
 						if petTemplate and petData then
 							current3DModel = petTemplate:Clone()
-							current3DModel:SetPrimaryPartCFrame(CFrame.new(0, 0, 0))
-							current3DModel.Parent = viewport
+							if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
+								current3DModel.Parent = viewport
+							else
+								current3DModel:Destroy()
+								current3DModel = nil
+							end
 							
 							tipText.Text = string.format("恭喜获得 %s (%s)", petData.Name, petData.Rarity)
 							tipText.TextColor3 = petData.Color
 							
 							-- 3. 呼叫 VFX 模块接管匀速自转动画，并把循环指针存起来以便清理
-							spinConnection = Controllers.VFX.StartPetSpinVFX(current3DModel)
+							if current3DModel then
+								spinConnection = Controllers.VFX.StartPetSpinVFX(current3DModel)
+							end
 						end
 					end
 					
 					task.wait(3) 
-					hatchScreen.Visible = false
-					isHatching = false
-					clearViewport()
+					closeHatchScreen()
+				end
+				end)
+
+				if not ok then
+					warn("[UIController] 抽宠展示流程异常，已关闭抽取界面:", err)
+					if clickConn then clickConn:Disconnect() end
+					closeHatchScreen()
 				end
 			end)
 		end
@@ -1279,7 +1741,7 @@ function UIController.Start()
 		
 		local exitButton = mainUI:FindFirstChild("ExitButton")
 		if exitButton and exitButton:IsA("GuiButton") then
-			applyExitButtonDepthStyle(exitButton)
+			applyExitButtonHoverScale(exitButton)
 			if not exitButton:GetAttribute("IsBound") then
 				exitButton:SetAttribute("IsBound", true)
 				

@@ -5,15 +5,73 @@ local GameController = {}
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera 
 
 local Controllers -- 全局模块依赖依赖指针
 GameController.IsCombatActive = false -- 核心全局开关：当前是否在跑道上处于战斗状态
 
+local lobbyLightingSnapshot = nil
+local lightingTween = nil
+
 -- 依赖注入：在系统启动时建立与其他模块的调用关系
 function GameController.Init(deps)
 	Controllers = deps
+end
+
+-- 记录 Studio 中配置好的大厅光照；回到大厅时恢复这份快照。
+local function captureLobbyLighting()
+	if lobbyLightingSnapshot then return end
+
+	lobbyLightingSnapshot = {
+		ClockTime = Lighting.ClockTime,
+		GeographicLatitude = Lighting.GeographicLatitude,
+		Brightness = Lighting.Brightness,
+	}
+end
+
+-- 平滑切换 Lighting 属性；只改配置里声明的字段，避免覆盖美术的其他后处理。
+local function tweenLightingTo(targetProps, transitionTime)
+	if lightingTween then
+		lightingTween:Cancel()
+		lightingTween = nil
+	end
+
+	local tweenInfo = TweenInfo.new(
+		transitionTime or 0.75,
+		Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut
+	)
+	lightingTween = TweenService:Create(Lighting, tweenInfo, targetProps)
+	lightingTween:Play()
+end
+
+-- 根据当前玩法状态切换客户端光照：大厅用默认光照，战斗用跑道专用阴影方向。
+local function applyLightingMode(inCombat)
+	if not Controllers or not Controllers.Config then return end
+
+	local combatLighting = Controllers.Config.COMBAT_LIGHTING
+	if not combatLighting or combatLighting.Enabled == false then return end
+
+	captureLobbyLighting()
+
+	local targetProps
+	if inCombat then
+		targetProps = {}
+		for _, propName in ipairs({"ClockTime", "GeographicLatitude", "Brightness"}) do
+			local value = combatLighting[propName]
+			if value ~= nil then
+				targetProps[propName] = value
+			end
+		end
+	else
+		targetProps = lobbyLightingSnapshot
+	end
+
+	if not targetProps or next(targetProps) == nil then return end
+	tweenLightingTo(targetProps, combatLighting.TransitionTime)
 end
 
 -- 在 Workspace 中查找大厅物件；兼容物件直接放在 Workspace 或放在 paodao/其他 Model 下面。
@@ -29,6 +87,26 @@ local function waitForLobbyObject(objectName, timeout)
 	local deadline = os.clock() + (timeout or 10)
 	while os.clock() < deadline do
 		object = findLobbyObject(objectName)
+		if object then return object end
+		task.wait(0.1)
+	end
+
+	return nil
+end
+
+-- 查找开始区域；新版本优先使用 StartZone，兼容旧大厅里的 StartButton。
+local function findStartObject()
+	return findLobbyObject("StartZone") or findLobbyObject("StartButton")
+end
+
+-- 等待开始区域加载；Streaming 开启时客户端可能稍晚才能看到大厅对象。
+local function waitForStartObject(timeout)
+	local object = findStartObject()
+	if object then return object end
+
+	local deadline = os.clock() + (timeout or 10)
+	while os.clock() < deadline do
+		object = findStartObject()
 		if object then return object end
 		task.wait(0.1)
 	end
@@ -53,11 +131,17 @@ function GameController.Start()
 	-- 初始化挂载大厅交互触发器
 	GameController.SetupStartButton()
 	GameController.SetupNPC()
+	captureLobbyLighting()
+	applyLightingMode(false)
+	player:GetAttributeChangedSignal("InCombat"):Connect(function()
+		applyLightingMode(player:GetAttribute("InCombat") == true)
+	end)
 	
 	-- 统一的角色重生/复活处理核心函数（彻底收拢生命周期，防止属性回厅变负数）
 	local function onCharacterAdded(newCharacter)
 		GameController.IsCombatActive = false
 		player:SetAttribute("InCombat", false)
+		applyLightingMode(false)
 		
 		-- 核心修复：复活重生回到大厅时，瞬间同步初始化基础数值
 		GameController.ResetPlayerStats()
@@ -87,6 +171,7 @@ function GameController.Start()
 				GameController.IsCombatActive = false
 				player:SetAttribute("InCombat", false)
 				player:SetAttribute("IsLevelingUp", false)
+				applyLightingMode(false)
 
 				-- 1. 剥夺相机跟随，让相机以 Scriptable 模式永远定格在死亡瞬间的坐标！
 				camera.CameraType = Enum.CameraType.Scriptable 
@@ -270,7 +355,7 @@ function GameController.EnterCombat()
 	Controllers.VFX.ClearGuide()
 	
 	local character = player.Character
-	local startPart = getInteractBasePart(waitForLobbyObject("StartButton", 10))
+	local startPart = getInteractBasePart(waitForStartObject(10))
 	
 	if character and startPart then
 		-- 1. 呼叫地图模块：重置原点并铺满初始视野跑道
@@ -305,51 +390,82 @@ function GameController.EnterCombat()
 	-- 正式激活状态机核心开关
 	GameController.IsCombatActive = true
 	player:SetAttribute("InCombat", true) 
+	applyLightingMode(true)
 	
 	print("进入跑道，单局游戏正式开始！整个模块化流水线协同驱动运转！")
 end
 
--- 挂载大厅触发器的交互事件
+-- 挂载大厅开始区域；玩家走进 StartZone/StartButton 后自动进入跑道。
 function GameController.SetupStartButton()
 	task.spawn(function()
-		-- 持续补绑开始按钮交互；Streaming 或重生后大厅物件重新加载时，本地创建的 Prompt 可能丢失。
-		local function bindStartPrompt(startPart)
+		local lastStartAt = 0
+
+		-- 禁用旧版开始交互提示；开始方式已经改为走进区域自动触发。
+		local function disableStartPrompt(startPart)
 			if not startPart or not startPart:IsA("BasePart") then return end
-
 			local prompt = startPart:FindFirstChildOfClass("ProximityPrompt")
-			if not prompt then
-				prompt = Instance.new("ProximityPrompt")
-				prompt.Parent = startPart
+			if prompt then
+				prompt.Enabled = false
 			end
+		end
 
-			prompt.ObjectText = "跑道入口"
-			prompt.ActionText = "开始挑战"
-			prompt.HoldDuration = 0.2
-			prompt.RequiresLineOfSight = false -- 防止视线判定 Bug
-			prompt.MaxActivationDistance = 14
-			prompt.Enabled = true
+		-- 判断玩家根节点是否在开始区域盒体内；给 Y 轴留出较大容差，避免角色跳动漏判。
+		local function isRootInsideStartZone(startPart, rootPart)
+			if not startPart or not rootPart then return false end
 
-			if prompt:GetAttribute("ClientStartPromptBound") then return end
-			prompt:SetAttribute("ClientStartPromptBound", true)
-			prompt.Triggered:Connect(function(triggeringPlayer)
-				if triggeringPlayer == player and not GameController.IsCombatActive then
-					GameController.EnterCombat()
+			local localPos = startPart.CFrame:PointToObjectSpace(rootPart.Position)
+			local halfSize = startPart.Size * 0.5
+			local yPadding = 6
+			return math.abs(localPos.X) <= halfSize.X
+				and math.abs(localPos.Z) <= halfSize.Z
+				and math.abs(localPos.Y) <= (halfSize.Y + yPadding)
+		end
+
+		-- 尝试触发开始；带冷却和状态检查，避免 Touched/轮询同一瞬间重复触发。
+		local function tryEnterFromStartZone(startPart)
+			if GameController.IsCombatActive then return end
+			if os.clock() - lastStartAt < 1 then return end
+
+			local character = player.Character
+			local humanoid = character and character:FindFirstChild("Humanoid")
+			local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+			if not humanoid or humanoid.Health <= 0 or not rootPart then return end
+			if not isRootInsideStartZone(startPart, rootPart) then return end
+
+			lastStartAt = os.clock()
+			GameController.EnterCombat()
+		end
+
+		-- 绑定开始区域触碰事件；同时配合轮询兜底，兼容 CanTouch/Streaming 差异。
+		local function bindStartZone(startPart)
+			if not startPart or not startPart:IsA("BasePart") then return end
+			disableStartPrompt(startPart)
+
+			if startPart:GetAttribute("ClientStartZoneBound") then return end
+			startPart:SetAttribute("ClientStartZoneBound", true)
+			startPart.Touched:Connect(function(hit)
+				local character = player.Character
+				if character and hit and hit:IsDescendantOf(character) then
+					tryEnterFromStartZone(startPart)
 				end
 			end)
 		end
 
 		Workspace.DescendantAdded:Connect(function(descendant)
-			if descendant.Name == "StartButton" then
-				task.defer(bindStartPrompt, descendant)
+			if descendant.Name == "StartZone" or descendant.Name == "StartButton" then
+				task.defer(function()
+					bindStartZone(getInteractBasePart(descendant))
+				end)
 			end
 		end)
 
 		while true do
-			local startPart = getInteractBasePart(findLobbyObject("StartButton"))
+			local startPart = getInteractBasePart(findStartObject())
 			if startPart then
-				bindStartPrompt(startPart)
+				bindStartZone(startPart)
+				tryEnterFromStartZone(startPart)
 			end
-			task.wait(2)
+			task.wait(0.2)
 		end
 	end)
 end

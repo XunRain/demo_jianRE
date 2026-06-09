@@ -1,13 +1,15 @@
 -- src/client/UI/LeaderboardController.luau
--- 服务器内排行榜展示控制器：寻找 Studio 展示板，把当前服务器玩家头像、名字、最高米数渲染到 SurfaceGui。
+-- 全服排行榜展示控制器：寻找 Studio 展示板，把全服历史最高米数榜单渲染到 SurfaceGui。
 local LeaderboardController = {}
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local Controllers
 local thumbnailCache = {}
+local lastLeaderboardSnapshot = nil
 
 function LeaderboardController.Init(deps)
 	Controllers = deps
@@ -18,7 +20,7 @@ local function getLeaderboardConfig()
 	return Controllers.Config.LEADERBOARD or {
 		BoardName = "LeaderboardBoard",
 		TopCount = 10,
-		RefreshInterval = 2,
+		RefreshInterval = 5,
 	}
 end
 
@@ -129,7 +131,7 @@ local function ensureFallbackLayout(surfaceGui)
 	root.Size = UDim2.fromScale(1, 1)
 	root.Parent = surfaceGui
 
-	createText(root, "Title", "服务器排行榜", UDim2.new(1, -24, 0, 52), UDim2.new(0, 12, 0, 8), Color3.fromRGB(255, 255, 255), Enum.TextXAlignment.Center)
+	createText(root, "Title", "全服排行榜", UDim2.new(1, -24, 0, 52), UDim2.new(0, 12, 0, 8), Color3.fromRGB(255, 255, 255), Enum.TextXAlignment.Center)
 
 	local list = Instance.new("Frame")
 	list.Name = "List"
@@ -156,6 +158,7 @@ end
 
 -- 获取玩家头像 URL，并做本地缓存，避免每次刷新都重复请求头像。
 local function getThumbnail(userId)
+	if not userId then return "" end
 	if thumbnailCache[userId] then
 		return thumbnailCache[userId]
 	end
@@ -179,48 +182,84 @@ local function setText(row, names, text)
 end
 
 -- 设置排行榜行内头像节点；兼容 Avatar、HeadIcon、Icon 等常见命名。
-local function setAvatar(row, targetPlayer)
+local function setAvatar(row, userId)
 	local image = findDescendantByNames(row, {"Avatar", "HeadIcon", "Icon", "AvatarImage", "PlayerIcon"})
 	if image and image:IsA("ImageLabel") then
-		image.Image = getThumbnail(targetPlayer.UserId)
+		image.Image = getThumbnail(userId)
 	end
 end
 
 -- 填充单行排行榜数据：排名、头像、名字、最高米数。
-local function fillRow(row, targetPlayer, rank, distance)
-	setText(row, {"RankText", "Rank", "RankLabel"}, tostring(rank) .. ".")
-	setText(row, {"NameText", "PlayerName", "NameLabel", "Name"}, targetPlayer.Name)
+local function fillRow(row, entry)
+	local rankText = entry.RankText or tostring(entry.Rank or "-")
+	local distance = tonumber(entry.Distance) or 0
+	local rankDisplay = entry.Rank and (rankText .. ".") or rankText
+
+	setText(row, {"RankText", "Rank", "RankLabel"}, rankDisplay)
+	setText(row, {"NameText", "PlayerName", "NameLabel", "Name"}, entry.Name or "Player")
 	setText(row, {"DistanceText", "BestDistance", "DistanceLabel", "ScoreText", "Score"}, Controllers.Config.FormatNumber(distance) .. " METERS")
-	setAvatar(row, targetPlayer)
+	setAvatar(row, entry.UserId or player.UserId)
 end
 
--- 获取当前服务器玩家排行榜条目，并按最高米数从高到低排序。
-local function getSortedEntries()
-	local entries = {}
-	for _, targetPlayer in ipairs(Players:GetPlayers()) do
-		local bestDistance = targetPlayer:GetAttribute("BestDistance") or 0
-		local currentDistance = targetPlayer:GetAttribute("CurrentDistance") or 0
-		table.insert(entries, {
-			Player = targetPlayer,
-			Distance = math.max(bestDistance, currentDistance),
-		})
+-- 从服务端请求全服排行榜快照；失败时沿用上一份快照或显示自己的本地数据。
+local function getLeaderboardSnapshot()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local getGlobalLeaderboard = remotes and remotes:FindFirstChild("GetGlobalLeaderboard")
+	if getGlobalLeaderboard and getGlobalLeaderboard:IsA("RemoteFunction") then
+		local success, snapshot = pcall(function()
+			return getGlobalLeaderboard:InvokeServer()
+		end)
+
+		if success and type(snapshot) == "table" then
+			lastLeaderboardSnapshot = snapshot
+			return snapshot
+		end
+
+		warn("[LeaderboardController] 获取全服排行榜失败:", snapshot)
 	end
 
-	table.sort(entries, function(a, b)
-		if a.Distance == b.Distance then
-			return a.Player.Name < b.Player.Name
-		end
-		return a.Distance > b.Distance
-	end)
+	if lastLeaderboardSnapshot then
+		return lastLeaderboardSnapshot
+	end
 
-	return entries
+	local localBest = math.max(player:GetAttribute("BestDistance") or 0, player:GetAttribute("CurrentDistance") or 0)
+	return {
+		Top = {},
+		Self = {
+			Rank = nil,
+			RankText = "-",
+			UserId = player.UserId,
+			Name = player.Name,
+			Distance = localBest,
+		},
+		Mode = "Global",
+		UpdatedAt = os.time(),
+	}
 end
 
--- 清理上一轮代码生成的排行行，保留 Studio 原始模板。
-local function clearGeneratedRows(list)
+-- 获取或创建指定名次的排行行；刷新时复用旧行，避免 Destroy/Clone 导致展示板闪烁。
+local function getOrCreateRow(list, rowTemplate, rank)
+	local rowName = "LeaderboardRow_" .. tostring(rank)
+	local row = list:FindFirstChild(rowName)
+	if row then
+		return row
+	end
+
+	row = rowTemplate:Clone()
+	row.Name = rowName
+	row:SetAttribute("LeaderboardGenerated", true)
+	row.Parent = list
+	return row
+end
+
+-- 隐藏本轮没有用到的旧排行行，保留实例以便下次复用。
+local function hideUnusedRows(list, usedCount)
 	for _, child in ipairs(list:GetChildren()) do
 		if child:GetAttribute("LeaderboardGenerated") then
-			child:Destroy()
+			local rank = tonumber(string.match(child.Name, "^LeaderboardRow_(%d+)$"))
+			if rank and rank > usedCount then
+				child.Visible = false
+			end
 		end
 	end
 end
@@ -233,37 +272,31 @@ local function renderLeaderboard(surfaceGui)
 	local selfRow = findDescendantByNames(root, {"SelfRow", "MyRow", "PlayerSelfRow"})
 	if not list or not rowTemplate then return end
 
-	clearGeneratedRows(list)
 	rowTemplate.Visible = false
 
 	local config = getLeaderboardConfig()
 	local topCount = config.TopCount or 10
-	local entries = getSortedEntries()
-	local localRank = 0
-	local localDistance = 0
-
-	for rank, entry in ipairs(entries) do
-		if entry.Player == player then
-			localRank = rank
-			localDistance = entry.Distance
-			break
-		end
-	end
+	local snapshot = getLeaderboardSnapshot()
+	local entries = snapshot.Top or {}
+	local usedCount = math.min(topCount, #entries)
 
 	for rank, entry in ipairs(entries) do
 		if rank > topCount then break end
-		local row = rowTemplate:Clone()
-		row.Name = "LeaderboardRow_" .. tostring(rank)
-		row:SetAttribute("LeaderboardGenerated", true)
+		local row = getOrCreateRow(list, rowTemplate, rank)
 		row.LayoutOrder = rank
 		row.Visible = true
-		row.Parent = list
-		fillRow(row, entry.Player, rank, entry.Distance)
+		fillRow(row, entry)
 	end
+	hideUnusedRows(list, usedCount)
 
 	if selfRow then
 		selfRow.Visible = true
-		fillRow(selfRow, player, localRank > 0 and localRank or #entries, localDistance)
+		fillRow(selfRow, snapshot.Self or {
+			RankText = "-",
+			UserId = player.UserId,
+			Name = player.Name,
+			Distance = player:GetAttribute("BestDistance") or 0,
+		})
 	end
 end
 
@@ -289,7 +322,7 @@ function LeaderboardController.Start()
 				end
 			end
 
-			task.wait(config.RefreshInterval or 2)
+			task.wait(config.RefreshInterval or 5)
 		end
 	end)
 end
