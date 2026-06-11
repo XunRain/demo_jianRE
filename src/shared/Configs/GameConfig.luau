@@ -39,7 +39,30 @@ local GameConfig = {
     BASE_ASPD = 1.5,            -- 每秒发射次数
     BASE_LEVEL = 1,
     BASE_EXP = 0,
-    EXP_PER_LEVEL = 20,       -- 升级经验倍率 (每一级所需经验 = 当前等级 * EXP_PER_LEVEL)
+    -- 升级经验分段公式配置：
+    -- Range 写法："1-10" 表示 1 到 10 级，"31-" 表示 31 级及以后。
+    -- Formula 里的 x 是当前等级，返回值是升到下一级所需经验。
+    -- 后续只需要调整 Range 或 Formula，就能改变升级曲线。
+    EXP_FORMULA_RULES = {
+        {
+            Range = "1-20",
+            Formula = function(x)
+                return 15 * x
+            end,
+        },
+        {
+            Range = "21-40",
+            Formula = function(x)
+                return 20 * x + 5 * x ^ 2
+            end,
+        },
+        {
+            Range = "41-",
+            Formula = function(x)
+                return 20 + 20 * 1.2 ^ (x - 40)
+            end,
+        },
+    },
     BASE_SPD = 80,           -- 初始子弹飞行速度
     BASE_RNG = 100,           -- 初始子弹射程(存活时间)
     BASE_MULTISHOT = 1,       -- 初始弹道数量 (默认1发)
@@ -104,9 +127,9 @@ local GameConfig = {
             EliteCount = 2,
             HasBoss = true,
 
-            BasicHP = 40,
-            EliteHP = 120,
-            BossHP = 240,
+            BasicHP = 30,
+            EliteHP = 60,
+            BossHP = 120,
 
             GATE_ATK_BONUS_MIN = 5,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 5, GATE_ASPD_BONUS_MAX = 15,
@@ -126,9 +149,9 @@ local GameConfig = {
             EliteCount = 2,
             HasBoss = true,
 
-            BasicHP = 50,
+            BasicHP = 40,
             EliteHP = 100,
-            BossHP = 200,
+            BossHP = 220,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -147,7 +170,7 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 60,
+            BasicHP = 50,
             EliteHP = 120,
             BossHP = 240,
 
@@ -169,7 +192,7 @@ local GameConfig = {
             HasBoss = true,
 
             -- 第 5 关作为无尽模式的基底，怪群非常密集
-            BasicHP = 70,
+            BasicHP = 60,
             EliteHP = 140,
             BossHP = 280,
 
@@ -185,8 +208,15 @@ local GameConfig = {
     },
 
     -- 6. 无尽模式难度动态成长配置
-    ENEMY_HP_SCALE_DIST = 1000, -- 玩家每跑 1000 米
-    ENEMY_HP_SCALE_RATE = 0.5,  -- 怪物血量额外增加 50%（乘区）
+    -- 第 5 关之后，怪物血量按关卡和怪物类型分别成长；数值代表“相对上一关增加的比例”。
+    ENEMY_HP_STAGE_SCALE_START = 5,
+    ENEMY_HP_STAGE_SCALE_RATE = {
+        Basic = 0.2, -- 普通怪：每关相对上一关 +20%
+        Elite = 0.4, -- 精英怪：每关相对上一关 +40%
+        Boss = 0.6, -- Boss：每关相对上一关 +60%
+    },
+    ENEMY_HP_SCALE_DIST = 1000, -- 旧版距离成长配置；当前血量逻辑已改为按关卡成长，保留字段避免旧引用报错
+    ENEMY_HP_SCALE_RATE = 0.3,  -- 旧版距离成长配置；当前血量逻辑已改为按关卡成长，保留字段避免旧引用报错
     GATE_SAFE_GAP = 14, -- 属性门前后安全区；普通怪和精英怪会避开，防止门扎堆或被遮挡
     GATE_CENTER_GAP = 8, -- 左右属性门中间的可通行空隙，玩家可选择不吃门直接通过
     BOSS_GATE_BLOCK_GAP = 60, -- Boss 前后门禁区；门撞到 Boss 安全区时直接跳过
@@ -200,7 +230,7 @@ local GameConfig = {
 
     -- 属性中文化映射表 (用于 3D 文字、UI 界面显示等)
     ATTRIBUTE_NAMES_CN = {
-        HP_Bonus = "当前生命",
+        HP_Bonus = "恢复HP",
         MaxHP_Bonus = "最大生命",
         ATK_Bonus = "攻击加成",
         ASPD_Bonus = "攻速加成",
@@ -230,18 +260,27 @@ local GameConfig = {
 			BaseCost = 50,
 			CostMulti = 1.5,
 			StatIncrease = 20,
+			CostFormula = function(x)--购买升级每次升级所需钱币
+				return 50* x + 50 * x ^ 2
+			end,
 		},
 		Talent_ATK = {
 			Name = "攻击强化",
 			BaseCost = 100,
 			CostMulti = 2.0,
 			StatIncrease = 5,
+			CostFormula = function(x)
+				return  100* x + 80 * x ^ 2
+			end,
 		},
 		Talent_ASPD = {
 			Name = "攻速强化",
 			BaseCost = 150,
 			CostMulti = 2.5,
 			StatIncrease = 0.15,
+			CostFormula = function(x)
+				return 200 * x + 100 * x ^ 2
+			end,
 		}
 	},
 
@@ -414,6 +453,12 @@ local GameConfig = {
         ATK_Bonus = "rbxassetid://15403007921",
         ASPD_Bonus = "rbxassetid://17368087730",
         MaxHP_Bonus = "rbxassetid://17368075795",
+        Gold_ATK_Bonus = "rbxassetid://15403007921",
+        Gold_ASPD_Bonus = "rbxassetid://17368087730",
+        Gold_MaxHP_Bonus = "rbxassetid://17368075795",
+        Gold_RNG_Bonus = "",
+        Gold_MagnetRadius_Bonus = "",
+        Gold_EXP_Gain_Bonus = "",
         SPD_Bonus = "",
         RNG_Bonus = "",
         MagnetRadius_Bonus = "",
@@ -437,6 +482,12 @@ local GameConfig = {
         ATK_Bonus = "rbxassetid://83843411342786", -- 攻击力.png
         ASPD_Bonus = "rbxassetid://89158683195024", -- 攻速.png
         MaxHP_Bonus = "rbxassetid://111122879940468", -- 最大生命.png
+        Gold_ATK_Bonus = "rbxassetid://83843411342786", -- 攻击力.png
+        Gold_ASPD_Bonus = "rbxassetid://89158683195024", -- 攻速.png
+        Gold_MaxHP_Bonus = "rbxassetid://111122879940468", -- 最大生命.png
+        Gold_RNG_Bonus = "rbxassetid://114496329613617", -- 射程.png
+        Gold_MagnetRadius_Bonus = "rbxassetid://111822385402148", -- 磁力.png
+        Gold_EXP_Gain_Bonus = "rbxassetid://131151921339029", -- 经验.png
         SPD_Bonus = "rbxassetid://88743848478283", -- 弹速.png
         RNG_Bonus = "rbxassetid://114496329613617", -- 射程.png
         MagnetRadius_Bonus = "rbxassetid://111822385402148", -- 磁力.png
@@ -457,11 +508,16 @@ local GameConfig = {
     LEVEL_UP_CARD_ART = {
         ATK_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击" },
         ASPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻速" },
-        MaxHP_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "生命" },
+		EXP_Gain_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "经验" },
+        Gold_ATK_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "攻击" },
+        Gold_ASPD_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "攻速" },
+        Gold_MaxHP_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "生命" },
+        Gold_RNG_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "射程" },
+        Gold_MagnetRadius_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "磁力" },
+        Gold_EXP_Gain_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "经验" },
         SPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "弹速" },
         RNG_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "射程" },
         MagnetRadius_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "磁力" },
-        EXP_Gain_Bonus = { Category = "Rare", CategoryName = "玩家属性", Badge = "经验" },
         ALL = { Category = "Rare", CategoryName = "稀有通用", Badge = "全能" },
         MultiShot = { Category = "WeaponProjectile", CategoryName = "武器弹道", Badge = "弹道" },
         Pet_Count = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠物" },
@@ -487,22 +543,30 @@ local GameConfig = {
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
         -- 角色属性增益
-        { BuffId = "ATK_Bonus", Name = "攻击加成", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 100, 100) },
-        { BuffId = "ASPD_Bonus", Name = "攻速加成", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 100) },
-        { BuffId = "MaxHP_Bonus", Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(100, 255, 255) },
+        { BuffId = "ATK_Bonus", Name = "攻击加成", Attr = "ATK_Bonus", Amount = 5, Color = Color3.fromRGB(255, 100, 100) },
+        { BuffId = "ASPD_Bonus", Name = "攻速加成", Attr = "ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 100) },
+        { BuffId = "MaxHP_Bonus", Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 255) },
         { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
-        { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(200, 200, 100) },
-        { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(180, 100, 255) },
-        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 3, Weight = 30 },
-        { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) },
+        { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 5, Color = Color3.fromRGB(200, 200, 100) },
+        { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 10, Color = Color3.fromRGB(180, 100, 255) },
+        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 20, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 5 },
+
+        -- 金色强化卡：保留原来的高数值效果，普通升级中低权重出现，Boss 奖励必定从金色池抽取
+        { BuffId = "Gold_ATK_Bonus", Name = "强力攻击", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_ASPD_Bonus", Name = "强力攻速", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_MaxHP_Bonus", Name = "强力生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_RNG_Bonus", Name = "强力射程", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_MagnetRadius_Bonus", Name = "强力磁力", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_EXP_Gain_Bonus", Name = "经验爆发", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 30 },
+        { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 30 },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
         { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "额外弹道 70%伤害" },
 
         -- 宠物增益
         { BuffId = "Pet_Count", Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "Pet_ASPD_Bonus", Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "Pet_ATK_Bonus", Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "WindBlade_Range_Bonus", Name = "风刃范围", Attr = "WindBlade_Range_Bonus", Amount = 20, Color = Color3.fromRGB(120, 220, 255), RequiresPetSkill = "WindBlade" },
+        { BuffId = "Pet_ASPD_Bonus", Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_ATK_Bonus", Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 10, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "WindBlade_Range_Bonus", Name = "风刃范围", Attr = "WindBlade_Range_Bonus", Amount = 10, Color = Color3.fromRGB(120, 220, 255), RequiresPetSkill = "WindBlade" },
 
         -- 御剑流技能树 (利用 MaxLevel 控制上限，利用 Prereq 控制前置)
         { BuffId = "Sword_Unlocked", Name = "御剑启动", Attr = "Sword_Unlocked", Amount = 1, Color = Color3.fromRGB(0, 255, 255), MaxLevel = 1, Weight = 40 },
@@ -511,11 +575,43 @@ local GameConfig = {
         { BuffId = "Sword_CD_Reduction", Name = "飞剑冷却", Attr = "Sword_CD_Reduction", Amount = 15, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 4 }, -- 最多升4级，4*15=60%上限
     },
 
+    -- Boss 击败奖励：必定弹出金色升级卡，Pool 填 LEVEL_UP_BUFF_POOL 里已有的 BuffId。
+    BOSS_GOLD_REWARD = {
+        Enabled = true,
+        CardCount = 3,
+        Pool = {
+            "Gold_ATK_Bonus",
+            "Gold_ASPD_Bonus",
+            "Gold_MaxHP_Bonus",
+            "Gold_RNG_Bonus",
+            "Gold_MagnetRadius_Bonus",
+            "Gold_EXP_Gain_Bonus",
+            "ALL",
+            "MultiShot",
+        },
+    },
+
+    -- 精英怪击败奖励：弹出升级卡时，至少保底 1 张金色升级卡。
+    ELITE_GOLD_REWARD = {
+        Enabled = true,
+        GuaranteedGoldCount = 1,
+        Pool = {
+            "Gold_ATK_Bonus",
+            "Gold_ASPD_Bonus",
+            "Gold_MaxHP_Bonus",
+            "Gold_RNG_Bonus",
+            "Gold_MagnetRadius_Bonus",
+            "Gold_EXP_Gain_Bonus",
+            "ALL",
+            "MultiShot",
+        },
+    },
+
     -- 16. 怪物击杀掉落配置
     ENEMY_DROPS = {
         Basic = { NumDrops = 2, Exp = 20, Coins = 10 },
-        Elite = { NumDrops = 5, Exp = 50, Coins = 50 },
-        Boss  = { NumDrops = 15, Exp = 200, Coins = 100 }
+        Elite = { NumDrops = 5, Exp = 40, Coins = 50 },
+        Boss  = { NumDrops = 15, Exp = 100, Coins = 100 }
     },
 }
 
@@ -524,8 +620,54 @@ function GameConfig.GetTalentCost(talentId, currentLevel)
 	local talent = GameConfig.TALENTS[talentId]
 	if not talent then return math.huge end -- 如果查不到配置，返回无限大价格防止被刷
 
-	-- 计算公式：基础价格 * (乘数 ^ 当前等级)
-	return math.floor(talent.BaseCost * (talent.CostMulti ^ currentLevel))
+	-- 商店天赋价格公式里的 x 表示“即将购买的目标等级”；当前 0 级时，第一次购买传入 x = 1。
+	local level = math.max(0, math.floor(tonumber(currentLevel) or 0))
+	local x = level + 1
+
+	if type(talent.CostFormula) == "function" then
+		return math.max(1, math.floor(talent.CostFormula(x) + 0.5))
+	end
+
+	-- 兼容旧配置：没有 CostFormula 的天赋仍可使用 BaseCost / CostMulti。
+	return math.max(1, math.floor((talent.BaseCost or 1) * ((talent.CostMulti or 1) ^ level)))
+end
+
+-- 解析升级经验公式的等级范围。
+-- 支持："1-10"、"11-30"、"31-"。
+local function parseLevelRange(rangeText)
+	if type(rangeText) ~= "string" then return nil, nil end
+
+	local startText, endText = string.match(rangeText, "^(%d+)%-(%d*)$")
+	local startLevel = tonumber(startText)
+	local endLevel = tonumber(endText)
+
+	return startLevel, endLevel
+end
+
+-- 根据当前等级计算升到下一级所需经验。
+-- 经验曲线由 GameConfig.EXP_FORMULA_RULES 配置，方便后续按等级段替换公式。
+function GameConfig.GetRequiredExp(level)
+	local currentLevel = math.max(1, math.floor(tonumber(level) or GameConfig.BASE_LEVEL or 1))
+
+	for _, rule in ipairs(GameConfig.EXP_FORMULA_RULES or {}) do
+		local startLevel, endLevel = parseLevelRange(rule.Range)
+		local inRange = false
+
+		if startLevel then
+			if endLevel then
+				inRange = currentLevel >= startLevel and currentLevel <= endLevel
+			else
+				inRange = currentLevel >= startLevel
+			end
+		end
+
+		if inRange and type(rule.Formula) == "function" then
+			return math.max(1, math.floor(rule.Formula(currentLevel) + 0.5))
+		end
+	end
+
+	-- 兜底：如果没有匹配到任何规则，避免 UI 或升级逻辑报错。
+	return math.max(1, 20 * currentLevel)
 end
 
 -- 动态获取指定关卡的前进速度 (基础速度 + 随关卡递增)

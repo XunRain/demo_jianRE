@@ -25,7 +25,7 @@ function ProgressionController.AddExp(gainedExp)
 	local currentLevel = player:GetAttribute("Level") or Config.BASE_LEVEL
 	
 	-- 【修改 1】：从配置表读取经验公式
-	local requiredExp = player:GetAttribute("RequiredEXP") or (currentLevel * Config.EXP_PER_LEVEL)
+	local requiredExp = player:GetAttribute("RequiredEXP") or Config.GetRequiredExp(currentLevel)
 	local didLevelUp = false
 	
 	-- 连续升级判定
@@ -33,7 +33,7 @@ function ProgressionController.AddExp(gainedExp)
 		currentExp = currentExp - requiredExp
 		currentLevel = currentLevel + 1
 		-- 【修改 2】：下一级所需经验同样读取配置表
-		requiredExp = currentLevel * Config.EXP_PER_LEVEL
+		requiredExp = Config.GetRequiredExp(currentLevel)
 		didLevelUp = true
 	end
 	
@@ -42,6 +42,7 @@ function ProgressionController.AddExp(gainedExp)
 	player:SetAttribute("RequiredEXP", requiredExp)
 	
 	if didLevelUp then
+		player:SetAttribute("LevelUpRewardMode", "Normal")
 		player:SetAttribute("IsLevelingUp", true)
 		Controllers.Player.SetMoveDirection(0) 
 		print("玩家升级！当前等级: " .. tostring(currentLevel))

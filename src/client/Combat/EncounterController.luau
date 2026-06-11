@@ -394,18 +394,12 @@ local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackSurfaceY)
 local currentStageConfig = stageConfig or Config.STAGES[#Config.STAGES]
 
 	local hpMultiplier = 1
-	if currentStage > 5 then
-		local safeZoneLength = 0
-		for i = 1, 5 do
-			if Config.STAGES[i] then
-				safeZoneLength = safeZoneLength + Config.STAGES[i].Length
-			end
-		end
-
-		local effectiveDistance = math.abs(zPos) - safeZoneLength
-		if effectiveDistance > 0 then
-			hpMultiplier = 1 + math.floor(effectiveDistance / Config.ENEMY_HP_SCALE_DIST) * Config.ENEMY_HP_SCALE_RATE
-		end
+	local scaleStartStage = Config.ENEMY_HP_STAGE_SCALE_START or 5
+	if currentStage > scaleStartStage then
+		local scaleRates = Config.ENEMY_HP_STAGE_SCALE_RATE or {}
+		local scaleRate = scaleRates[enemyType] or 0
+		local extraStages = currentStage - scaleStartStage
+		hpMultiplier = (1 + scaleRate) ^ extraStages
 	end
 
 	local hp = 0

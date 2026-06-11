@@ -191,6 +191,31 @@ local function playEnemyHitJitter(enemy)
     if not enemy then return end
     Controllers.VFX.PlayHitJitterVFX(enemy.visual or enemy.part, enemy.baseSize)
 end
+
+-- Boss 被玩家击败后，复用升级面板发放全金色奖励卡。
+local function triggerBossGoldReward(enemyType)
+	if enemyType ~= "Boss" then return end
+	local bossGoldReward = Controllers.Config.BOSS_GOLD_REWARD
+	if bossGoldReward and bossGoldReward.Enabled == false then return end
+
+	player:SetAttribute("LevelUpRewardMode", "BossGold")
+	player:SetAttribute("IsLevelingUp", true)
+	Controllers.Player.SetMoveDirection(0)
+end
+
+-- 精英怪被玩家击败后，复用升级面板发放“至少 1 张金色卡”的奖励。
+local function triggerEliteGoldReward(enemyType)
+	if enemyType ~= "Elite" then return end
+	local eliteGoldReward = Controllers.Config.ELITE_GOLD_REWARD
+	if eliteGoldReward and eliteGoldReward.Enabled == false then return end
+	-- 如果当前已经在发奖励，避免同一帧多个精英怪连续覆盖；BossGold 仍由 Boss 逻辑优先覆盖。
+	if player:GetAttribute("IsLevelingUp") then return end
+
+	player:SetAttribute("LevelUpRewardMode", "EliteGoldGuarantee")
+	player:SetAttribute("IsLevelingUp", true)
+	Controllers.Player.SetMoveDirection(0)
+end
+
 -- 检查玩家子弹、门、怪物与玩家之间的碰撞，并处理伤害、掉落与结算逻辑。
 function CombatController.CheckCollisions(rootPart)
 	local pPos = rootPart.Position
@@ -252,6 +277,8 @@ function CombatController.CheckCollisions(rootPart)
 							local deathVfxName = Controllers.Config.ENEMY_VFX[targetE.type] or "BasicDeath"
 							Controllers.VFX.PlayDeathVFX(deathVfxName, targetE.part.Position)
 
+							triggerBossGoldReward(targetE.type)
+							triggerEliteGoldReward(targetE.type)
 							Controllers.Encounter.TriggerDrops(targetE.type, targetE.part.Position)
 							targetE.part:Destroy()
 						end
@@ -267,6 +294,8 @@ function CombatController.CheckCollisions(rootPart)
 						local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
 						Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 
+						triggerBossGoldReward(e.type)
+						triggerEliteGoldReward(e.type)
 						e.part:Destroy()
 						table.remove(activeEnemies, j)
 						Controllers.Encounter.TriggerDrops(e.type, ePos)
@@ -495,6 +524,8 @@ function CombatController.StartSwordSystem()
 	local function killEnemyBySword(enemy, hitPos, Config)
 		local deathVfx = Config.ENEMY_VFX[enemy.type] or "BasicDeath"
 		Controllers.VFX.PlayDeathVFX(deathVfx, hitPos)
+		triggerBossGoldReward(enemy.type)
+		triggerEliteGoldReward(enemy.type)
 		Controllers.Encounter.TriggerDrops(enemy.type, hitPos)
 		removeEnemyFromActiveList(enemy)
 		if enemy.part then

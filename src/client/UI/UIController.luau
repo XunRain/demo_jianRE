@@ -186,7 +186,7 @@ function UIController.Start()
 		local displayAtk = math.floor(Controllers.Config.BASE_ATK * (1 + (atkBonus / 100)))
 		local lvl = player:GetAttribute("Level") or 1
 		local exp = player:GetAttribute("EXP") or 0
-		local requiredExp = player:GetAttribute("RequiredEXP") or (lvl * Controllers.Config.EXP_PER_LEVEL) 
+		local requiredExp = player:GetAttribute("RequiredEXP") or Controllers.Config.GetRequiredExp(lvl)
 		local inCombat = player:GetAttribute("InCombat") == true
       	local currentStage = player:GetAttribute("CurrentStage") or 1
 		local formatNumber = Controllers.Config.FormatNumber
@@ -379,6 +379,16 @@ function UIController.Start()
 		local function isBuffAtMax(buff)
 			local maxLevel = getBuffMaxLevel(buff)
 			return maxLevel ~= nil and getBuffLevel(buff) >= maxLevel
+		end
+
+		-- 根据 BuffId 快速找到完整卡片配置；Boss 金色奖励池只配置 BuffId，实际发牌仍复用 LEVEL_UP_BUFF_POOL 里的完整数据。
+		local function findBuffById(buffId)
+			for _, buff in ipairs(Controllers.Config.LEVEL_UP_BUFF_POOL or {}) do
+				if getBuffId(buff) == buffId then
+					return buff
+				end
+			end
+			return nil
 		end
 
 		-- 点击卡片后记录选择次数；有上限的卡片不会超过最大等级
@@ -761,13 +771,31 @@ function UIController.Start()
 				local currentPetCount = player:GetAttribute("Pet_Count") or 1
 				local validPool = {}
 				local totalWeight = 0
+				local rewardMode = player:GetAttribute("LevelUpRewardMode") or "Normal"
+				local bossGoldConfig = Controllers.Config.BOSS_GOLD_REWARD or {}
+				local eliteGoldConfig = Controllers.Config.ELITE_GOLD_REWARD or {}
+				local useBossGoldPool = rewardMode == "BossGold" and bossGoldConfig.Enabled ~= false
+				local useEliteGoldGuarantee = rewardMode == "EliteGoldGuarantee" and eliteGoldConfig.Enabled ~= false
 
 				-- 获取当前佩戴宠物的专属上限 (如果没有配，兜底为 3)
 				local petConfig = hasPet and Controllers.Config.PETS[equippedPet]
 				local maxPetLimit = (petConfig and petConfig.MaxCount) or 3
+
+				local sourcePool = Controllers.Config.LEVEL_UP_BUFF_POOL
+				if useBossGoldPool then
+					sourcePool = {}
+					for _, buffId in ipairs(bossGoldConfig.Pool or {}) do
+						local buff = findBuffById(buffId)
+						if buff then
+							table.insert(sourcePool, buff)
+						else
+							warn("Boss 金色奖励池里找不到 BuffId:", buffId)
+						end
+					end
+				end
 				
 				-- 智能过滤卡池
-				for _, buff in ipairs(Controllers.Config.LEVEL_UP_BUFF_POOL) do
+				for _, buff in ipairs(sourcePool) do
 					-- 如果卡片需要宠物，但玩家没带，则跳过
 					if buff.RequiresPet and not hasPet then continue end
 					-- 如果卡片绑定特定宠物技能，只有当前装备宠物技能匹配时才进入卡池
@@ -814,24 +842,82 @@ function UIController.Start()
 				end
 
 				if totalWeight <= 0 then
-					warn("升级卡池为空：没有可用的升级选项。")
+					warn((useBossGoldPool and "Boss 金色奖励池为空：没有可用的金色升级选项。") or (useEliteGoldGuarantee and "精英怪升级奖励池为空：没有可用的升级选项。") or "升级卡池为空：没有可用的升级选项。")
 					levelUpPanel.Visible = false
 					player:SetAttribute("IsLevelingUp", false)
+					player:SetAttribute("LevelUpRewardMode", "Normal")
 					return
+				end
+
+				local function removeBuffIdFromPool(pool, buffId)
+					local removedWeight = 0
+					for poolIndex = #pool, 1, -1 do
+						local poolBuff = pool[poolIndex]
+						if getBuffId(poolBuff) == buffId then
+							removedWeight = removedWeight + (poolBuff.Weight or 100)
+							table.remove(pool, poolIndex)
+						end
+					end
+					return removedWeight
+				end
+
+				local eliteGoldPool = {}
+				local eliteGoldTotalWeight = 0
+				if useEliteGoldGuarantee then
+					local eliteGoldIds = {}
+					for _, buffId in ipairs(eliteGoldConfig.Pool or {}) do
+						eliteGoldIds[tostring(buffId)] = true
+					end
+
+					for _, buff in ipairs(validPool) do
+						if eliteGoldIds[tostring(getBuffId(buff))] then
+							table.insert(eliteGoldPool, buff)
+							eliteGoldTotalWeight = eliteGoldTotalWeight + (buff.Weight or 100)
+						end
+					end
+				end
+
+				-- Boss 金色奖励要求三张展示不同卡；精英怪奖励要求至少 1 张从金色池抽取。
+				local drawPool = table.clone(validPool)
+				local drawTotalWeight = totalWeight
+				local guaranteedGoldCardIndex = nil
+				if useEliteGoldGuarantee and eliteGoldTotalWeight > 0 and #cards > 0 then
+					guaranteedGoldCardIndex = math.random(1, #cards)
 				end
 
 				for i, card in ipairs(cards) do
 					if card and card:IsA("GuiButton") then
+						if drawTotalWeight <= 0 then
+							-- 极端兜底：如果可用金卡少于卡位数量，为避免 UI 空白，允许重新使用原池。
+							drawPool = table.clone(validPool)
+							drawTotalWeight = totalWeight
+						end
+
+						local currentDrawPool = drawPool
+						local currentDrawTotalWeight = drawTotalWeight
+						if useEliteGoldGuarantee and i == guaranteedGoldCardIndex and eliteGoldTotalWeight > 0 then
+							currentDrawPool = eliteGoldPool
+							currentDrawTotalWeight = eliteGoldTotalWeight
+						end
+
 						-- 按照权重随机抽取卡片
-						local rand = math.random(1, totalWeight)
+						local rand = math.random(1, currentDrawTotalWeight)
 						local currentWeight = 0
-						local buff = validPool[1] 
+						local buff = currentDrawPool[1]
 						
-						for _, b in ipairs(validPool) do
+						for _, b in ipairs(currentDrawPool) do
 							currentWeight = currentWeight + (b.Weight or 100)
 							if rand <= currentWeight then
 								buff = b
 								break
+							end
+						end
+
+						if useBossGoldPool or useEliteGoldGuarantee then
+							local selectedBuffId = getBuffId(buff)
+							drawTotalWeight = drawTotalWeight - removeBuffIdFromPool(drawPool, selectedBuffId)
+							if useEliteGoldGuarantee then
+								eliteGoldTotalWeight = eliteGoldTotalWeight - removeBuffIdFromPool(eliteGoldPool, selectedBuffId)
 							end
 						end
 						
@@ -856,6 +942,7 @@ function UIController.Start()
 				end
 			else
 				levelUpPanel.Visible = false
+				player:SetAttribute("LevelUpRewardMode", "Normal")
 			end
 		end)
 	end

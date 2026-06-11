@@ -26,6 +26,33 @@ local DEFAULT_STATS = {
 	BestDistance = 0,
 }
 
+-- 测试白名单：命中的玩家进入游戏时会清空存档，并发放指定金币。
+-- 适合测试号快速重置进度；该逻辑每次进游戏都会生效。
+local RESET_REWARD_WHITELIST = {
+	[10162193146] = {
+		Coins = 50000,
+	},
+}
+
+local function buildDefaultPlayerData()
+	local playerData = {}
+	for statName, statValue in pairs(DEFAULT_STATS) do
+		playerData[statName] = statValue
+	end
+	return playerData
+end
+
+local function buildResetRewardData(userId)
+	local rewardConfig = RESET_REWARD_WHITELIST[userId]
+	if not rewardConfig then
+		return nil
+	end
+
+	local playerData = buildDefaultPlayerData()
+	playerData.Coins = rewardConfig.Coins or 0
+	return playerData
+end
+
 function DataManager.Init(deps)
 	_Services = deps
 end
@@ -44,10 +71,7 @@ function DataManager.LoadPlayerData(player)
 		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
 	end)
 
-	local playerData = {}
-	for statName, statValue in pairs(DEFAULT_STATS) do
-		playerData[statName] = statValue
-	end
+	local playerData = buildDefaultPlayerData()
 	if success and data then
 		for statName, statValue in pairs(data) do
 			playerData[statName] = statValue
@@ -55,6 +79,12 @@ function DataManager.LoadPlayerData(player)
 		print("✅ " .. player.Name .. " 的云端数据读取成功！")
 	else
 		print("⚠️ " .. player.Name .. " 读取失败或属首次游玩，使用默认 0 资产。")
+	end
+
+	local resetRewardData = buildResetRewardData(player.UserId)
+	if resetRewardData then
+		playerData = resetRewardData
+		print("🧪 测试白名单生效：已清空玩家 " .. player.Name .. " 的记录，并发放金币:", playerData.Coins)
 	end
 
 	-- 服务器端修改属性，会自动下发给客户端同步更新 UI
