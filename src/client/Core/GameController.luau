@@ -13,8 +13,18 @@ local camera = Workspace.CurrentCamera
 local Controllers -- 全局模块依赖依赖指针
 GameController.IsCombatActive = false -- 核心全局开关：当前是否在跑道上处于战斗状态
 
+local isStartingCombat = false -- 进入战斗的过渡锁，避免 Start 区域轮询和 Touched 同时重复触发
 local lobbyLightingSnapshot = nil
 local lightingTween = nil
+
+-- 同步本地跑酷状态给服务端头顶进度 UI；服务端展示给所有玩家看。
+local function reportRunStats(isInCombat)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local reportEvent = remotes and remotes:FindFirstChild("ReportRunStats")
+	if reportEvent then
+		reportEvent:FireServer(isInCombat == true, player:GetAttribute("Level") or 1)
+	end
+end
 
 -- 依赖注入：在系统启动时建立与其他模块的调用关系
 function GameController.Init(deps)
@@ -99,6 +109,23 @@ local function findStartObject()
 	return findLobbyObject("StartZone") or findLobbyObject("StartButton")
 end
 
+-- 查找所有开始区域；用于兼容大厅里同时存在新版 StartZone 和旧版 StartButton 的情况。
+local function findStartObjects()
+	local results = {}
+	local seen = {}
+
+	for _, objectName in ipairs({ "StartZone", "StartButton" }) do
+		for _, node in ipairs(Workspace:GetDescendants()) do
+			if node.Name == objectName and not seen[node] then
+				seen[node] = true
+				table.insert(results, node)
+			end
+		end
+	end
+
+	return results
+end
+
 -- 等待开始区域加载；Streaming 开启时客户端可能稍晚才能看到大厅对象。
 local function waitForStartObject(timeout)
 	local object = findStartObject()
@@ -126,6 +153,61 @@ local function getInteractBasePart(target)
 	return target:FindFirstChildWhichIsA("BasePart", true)
 end
 
+-- 获取大厅触发物的基准 CFrame；Model 使用整体 Pivot，Part 使用自身 CFrame。
+local function getInteractCFrame(target)
+	if not target then return nil end
+	if target:IsA("BasePart") then
+		return target.CFrame
+	end
+	if target:IsA("Model") then
+		return target:GetPivot()
+	end
+
+	local part = getInteractBasePart(target)
+	return part and part.CFrame or nil
+end
+
+-- 获取开始区域的检测盒；Model 使用整体包围盒，Part 使用自身大小。
+local function getStartZoneBounds(startObject)
+	if not startObject then return nil, nil end
+	if startObject:IsA("BasePart") then
+		return startObject.CFrame, startObject.Size
+	end
+	if startObject:IsA("Model") then
+		return startObject:GetBoundingBox()
+	end
+
+	local part = getInteractBasePart(startObject)
+	if part then
+		return part.CFrame, part.Size
+	end
+
+	return nil, nil
+end
+
+-- 大厅弹窗打开时禁止自动开始；避免玩家操作背包/商店/抽卡时被 Start 区域轮询误触发。
+local function isLobbyModalOpen()
+	if player:GetAttribute("IsPetBagOpen") == true
+		or player:GetAttribute("IsShopOpen") == true
+		or player:GetAttribute("IsLevelingUp") == true
+	then
+		return true
+	end
+
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
+	if not mainUI then return false end
+
+	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "HatchScreen", "LevelUpPanel" }) do
+		local panel = mainUI:FindFirstChild(panelName, true)
+		if panel and panel:IsA("GuiObject") and panel.Visible then
+			return true
+		end
+	end
+
+	return false
+end
+
 -- 模块生命周期启动入口：绑定事件及全局生命周期监听
 function GameController.Start()
 	-- 初始化挂载大厅交互触发器
@@ -141,6 +223,7 @@ function GameController.Start()
 	local function onCharacterAdded(newCharacter)
 		GameController.IsCombatActive = false
 		player:SetAttribute("InCombat", false)
+		reportRunStats(false)
 		applyLightingMode(false)
 		
 		-- 核心修复：复活重生回到大厅时，瞬间同步初始化基础数值
@@ -171,6 +254,7 @@ function GameController.Start()
 				GameController.IsCombatActive = false
 				player:SetAttribute("InCombat", false)
 				player:SetAttribute("IsLevelingUp", false)
+				reportRunStats(false)
 				applyLightingMode(false)
 
 				-- 1. 剥夺相机跟随，让相机以 Scriptable 模式永远定格在死亡瞬间的坐标！
@@ -276,11 +360,11 @@ function GameController.Start()
 				-- 智能引导算法：有钱抽卡就指引去抽宠物，没钱就指引去商店点小天赋
 				if coins >= Controllers.Config.PET_GACHA_COST then
 					target = getInteractBasePart(findLobbyObject("PetEgg"))
-					text = "去抽取宠物增强火力！"
+					text = "Draw a pet to boost your firepower!"
 				else
 					local npc = findLobbyObject("ShopNPC")
 					target = npc and (npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc))
-					text = "去商店升级天赋！"
+					text = "Upgrade talents in the shop!"
 				end
 				
 				if target then
@@ -348,123 +432,240 @@ function GameController.ResetPlayerStats()
 	end
 end
 
--- 触发单局跑酷战斗开局
-function GameController.EnterCombat()
-	if GameController.IsCombatActive then return end
-	-- 进入跑道自动清除引导
-	player:SetAttribute("NeedsGuide", false)
-	Controllers.VFX.ClearGuide()
-	
-	local character = player.Character
-	local startPart = getInteractBasePart(waitForStartObject(10))
-	
-	if character and startPart then
-		-- 1. 呼叫地图模块：重置原点并铺满初始视野跑道
-		Controllers.Map.ResetTrack(startPart.CFrame)
-		
-		-- 2. 将玩家角色安全瞬移至跑道起点
-		character:PivotTo(startPart.CFrame * CFrame.new(0, 3, -5))
-		
-		-- 3. 开局将单局局内属性刷新至健康的初始白模状态
-		GameController.ResetPlayerStats()
-		
-		-- 4. 同步真实的最大生命值，而不是写死的 BASE_HP
-		local humanoid = character:FindFirstChild("Humanoid")
-		if humanoid then
-			-- 读取刚刚在 ResetPlayerStats() 里算好的带有天赋加成的真实血量
-			humanoid.MaxHealth = player:GetAttribute("MaxHP")
-			humanoid.Health = player:GetAttribute("HP")
+-- 触发单局跑酷战斗开局；先传送玩家，再初始化跑道，减少踩 START 后的卡顿观感。
+function GameController.EnterCombat(startObjectOverride)
+	if GameController.IsCombatActive or isStartingCombat then return false end
+	if isLobbyModalOpen() then return false end
+
+	isStartingCombat = true
+	local started = false
+	local anchoredRoot = nil
+	local anchoredWas = false
+
+	local ok, err = xpcall(function()
+		-- 关键对象缺失时直接退出，不切换 InCombat，避免玩家仍在大厅但状态已经进入战斗。
+		local character = player.Character
+		if not character then
+			warn("[GameController] 进入战斗失败：未找到玩家角色。")
+			return
 		end
 
-		-- 通知服务端开始记录本局跑酷距离；排行榜只需要起点 Z，后续由服务端按角色位置更新。
+		local humanoid = character:FindFirstChild("Humanoid")
+		local rootPart = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
+		if not humanoid or humanoid.Health <= 0 or not rootPart then
+			warn("[GameController] 进入战斗失败：角色 Humanoid 或 HumanoidRootPart 不可用。")
+			return
+		end
+
+		local startObject = startObjectOverride or waitForStartObject(3)
+		local startCFrame = getInteractCFrame(startObject)
+		if not startCFrame then
+			warn("[GameController] 进入战斗失败：未找到可用的 StartZone/StartButton。")
+			return
+		end
+
+		-- 清掉大厅移动惯性，防止瞬移到跑道时继续横向滑动。
+		Controllers.Player.SetMoveDirection(0)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+
+		-- 先把玩家送到起跑点并短暂锚定，再铺设跑道；这样即使铺设较重，也不会看起来卡在大厅。
+		local spawnCFrame = startCFrame * CFrame.new(0, 3, -5)
+		anchoredRoot = rootPart
+		anchoredWas = rootPart.Anchored
+		rootPart.Anchored = true
+		character:PivotTo(spawnCFrame)
+		task.wait()
+
+		-- 开局刷新单局属性，并同步到当前 Humanoid。
+		GameController.ResetPlayerStats()
+		humanoid.MaxHealth = player:GetAttribute("MaxHP")
+		humanoid.Health = player:GetAttribute("HP")
+
+		-- 重置跑道后再校准一次角色位置，避免模型生成或物理抖动影响起跑点。
+		Controllers.Map.ResetTrack(startCFrame)
+		character:PivotTo(spawnCFrame)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		rootPart.Anchored = anchoredWas
+		anchoredRoot = nil
+
+		player:SetAttribute("NeedsGuide", false)
+		Controllers.VFX.ClearGuide()
+
+		GameController.IsCombatActive = true
+		player:SetAttribute("InCombat", true)
+		reportRunStats(true)
+		applyLightingMode(true)
+
 		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
 		local runStartedEvent = remotes and remotes:WaitForChild("RunStarted", 5)
-		local rootPart = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
-		if runStartedEvent and rootPart then
+		if runStartedEvent then
 			runStartedEvent:FireServer(rootPart.Position.Z)
 		end
+
+		started = true
+		print("[GameController] 进入跑道，单局游戏正式开始。")
+	end, debug.traceback)
+
+	if not ok then
+		warn("[GameController] 进入战斗流程异常：", err)
+		if anchoredRoot then
+			anchoredRoot.Anchored = anchoredWas
+			anchoredRoot = nil
+		end
+		GameController.IsCombatActive = false
+		player:SetAttribute("InCombat", false)
+		reportRunStats(false)
+		applyLightingMode(false)
 	end
-	
-	-- 呼叫输入模块：重置玩家键盘水平输入方向，防止带大厅惯性斜着飘进跑道
-	Controllers.Player.SetMoveDirection(0)
-	
-	-- 正式激活状态机核心开关
-	GameController.IsCombatActive = true
-	player:SetAttribute("InCombat", true) 
-	applyLightingMode(true)
-	
-	print("进入跑道，单局游戏正式开始！整个模块化流水线协同驱动运转！")
+
+	isStartingCombat = false
+	return started
 end
 
 -- 挂载大厅开始区域；玩家走进 StartZone/StartButton 后自动进入跑道。
 function GameController.SetupStartButton()
 	task.spawn(function()
 		local lastStartAt = 0
+		local knownStartObjects = {}
+
+		-- 记录所有可能的开始区域，避免只绑定到 FindFirstChild 找到的第一个旧对象。
+		local function rememberStartObject(startObject)
+			if not startObject then return end
+			for _, existing in ipairs(knownStartObjects) do
+				if existing == startObject then
+					return
+				end
+			end
+			table.insert(knownStartObjects, startObject)
+		end
 
 		-- 禁用旧版开始交互提示；开始方式已经改为走进区域自动触发。
-		local function disableStartPrompt(startPart)
-			if not startPart or not startPart:IsA("BasePart") then return end
-			local prompt = startPart:FindFirstChildOfClass("ProximityPrompt")
-			if prompt then
-				prompt.Enabled = false
+		local function disableStartPrompt(startObject)
+			if not startObject then return end
+			for _, node in ipairs(startObject:GetDescendants()) do
+				if node:IsA("ProximityPrompt") then
+					node.Enabled = false
+				end
+			end
+			if startObject:IsA("ProximityPrompt") then
+				startObject.Enabled = false
 			end
 		end
 
 		-- 判断玩家根节点是否在开始区域盒体内；给 Y 轴留出较大容差，避免角色跳动漏判。
-		local function isRootInsideStartZone(startPart, rootPart)
-			if not startPart or not rootPart then return false end
+		local function isRootInsideStartZone(startObject, rootPart)
+			if not startObject or not rootPart then return false end
 
-			local localPos = startPart.CFrame:PointToObjectSpace(rootPart.Position)
-			local halfSize = startPart.Size * 0.5
-			local yPadding = 6
-			return math.abs(localPos.X) <= halfSize.X
-				and math.abs(localPos.Z) <= halfSize.Z
+			local zoneCFrame, zoneSize = getStartZoneBounds(startObject)
+			if not zoneCFrame or not zoneSize then return false end
+
+			local localPos = zoneCFrame:PointToObjectSpace(rootPart.Position)
+			local halfSize = zoneSize * 0.5
+			local xzPadding = 3
+			local yPadding = 12
+			return math.abs(localPos.X) <= (halfSize.X + xzPadding)
+				and math.abs(localPos.Z) <= (halfSize.Z + xzPadding)
 				and math.abs(localPos.Y) <= (halfSize.Y + yPadding)
 		end
 
+		-- 轮询兜底：即使 Start 部件 CanTouch 关闭，也能通过空间重叠识别玩家已经进入开始区。
+		local function isCharacterOverlappingStartZone(startObject, character)
+			if not startObject or not character then return false end
+
+			local zoneCFrame, zoneSize = getStartZoneBounds(startObject)
+			if not zoneCFrame or not zoneSize then return false end
+
+			local overlapParams = OverlapParams.new()
+			overlapParams.FilterType = Enum.RaycastFilterType.Include
+			overlapParams.FilterDescendantsInstances = { character }
+
+			local expandedSize = zoneSize + Vector3.new(6, 12, 6)
+			local parts = Workspace:GetPartBoundsInBox(zoneCFrame, expandedSize, overlapParams)
+			return #parts > 0
+		end
+
 		-- 尝试触发开始；带冷却和状态检查，避免 Touched/轮询同一瞬间重复触发。
-		local function tryEnterFromStartZone(startPart)
-			if GameController.IsCombatActive then return end
+		local function tryEnterFromStartZone(startObject, fromTouch)
+			if GameController.IsCombatActive or isStartingCombat then return end
+			if isLobbyModalOpen() then return end
 			if os.clock() - lastStartAt < 1 then return end
 
 			local character = player.Character
 			local humanoid = character and character:FindFirstChild("Humanoid")
 			local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
 			if not humanoid or humanoid.Health <= 0 or not rootPart then return end
-			if not isRootInsideStartZone(startPart, rootPart) then return end
+			if not fromTouch
+				and not isRootInsideStartZone(startObject, rootPart)
+				and not isCharacterOverlappingStartZone(startObject, character)
+			then
+				return
+			end
 
-			lastStartAt = os.clock()
-			GameController.EnterCombat()
+			if GameController.EnterCombat(startObject) then
+				lastStartAt = os.clock()
+			end
 		end
 
 		-- 绑定开始区域触碰事件；同时配合轮询兜底，兼容 CanTouch/Streaming 差异。
-		local function bindStartZone(startPart)
-			if not startPart or not startPart:IsA("BasePart") then return end
-			disableStartPrompt(startPart)
+		local function bindStartZone(startObject)
+			if not startObject then return end
+			disableStartPrompt(startObject)
 
-			if startPart:GetAttribute("ClientStartZoneBound") then return end
-			startPart:SetAttribute("ClientStartZoneBound", true)
-			startPart.Touched:Connect(function(hit)
-				local character = player.Character
-				if character and hit and hit:IsDescendantOf(character) then
-					tryEnterFromStartZone(startPart)
+			startObject:SetAttribute("ClientStartZoneBound", true)
+
+			-- 模型型开始区会有多个子 Part；每个 Part 都绑定触碰，但统一用整体区域做最终判定。
+			local touchParts = {}
+			if startObject:IsA("BasePart") then
+				table.insert(touchParts, startObject)
+			else
+				for _, node in ipairs(startObject:GetDescendants()) do
+					if node:IsA("BasePart") then
+						table.insert(touchParts, node)
+					end
 				end
-			end)
+			end
+
+			for _, part in ipairs(touchParts) do
+				if part:GetAttribute("ClientStartZoneTouchBound") then
+					continue
+				end
+				part:SetAttribute("ClientStartZoneTouchBound", true)
+				part.Touched:Connect(function(hit)
+					local character = player.Character
+					if character and hit and hit:IsDescendantOf(character) then
+						tryEnterFromStartZone(startObject, true)
+					end
+				end)
+			end
 		end
 
 		Workspace.DescendantAdded:Connect(function(descendant)
 			if descendant.Name == "StartZone" or descendant.Name == "StartButton" then
+				rememberStartObject(descendant)
 				task.defer(function()
-					bindStartZone(getInteractBasePart(descendant))
+					bindStartZone(descendant)
 				end)
 			end
 		end)
 
+		for _, startObject in ipairs(findStartObjects()) do
+			rememberStartObject(startObject)
+		end
+
 		while true do
-			local startPart = getInteractBasePart(findStartObject())
-			if startPart then
-				bindStartZone(startPart)
-				tryEnterFromStartZone(startPart)
+			for i = #knownStartObjects, 1, -1 do
+				local startObject = knownStartObjects[i]
+				if not startObject or not startObject.Parent then
+					table.remove(knownStartObjects, i)
+				else
+					bindStartZone(startObject)
+					tryEnterFromStartZone(startObject)
+					if GameController.IsCombatActive or isStartingCombat then
+						break
+					end
+				end
 			end
 			task.wait(0.2)
 		end
@@ -474,10 +675,45 @@ end
 -- NPC 绑定逻辑
 function GameController.SetupNPC()
 	task.spawn(function()
-		local npc = waitForLobbyObject("ShopNPC", 10)
-		if npc then
-			local prompt = npc:FindFirstChildOfClass("ProximityPrompt")
-			if prompt then
+		-- 关闭旧商人身上遗留的 Prompt，避免玩家看到旧模型仍然可以交互。
+		local function disableOldShopPrompts()
+			for _, node in ipairs(Workspace:GetDescendants()) do
+				if node.Name == "ShopNPC_OLD" then
+					for _, prompt in ipairs(node:GetDescendants()) do
+						if prompt:IsA("ProximityPrompt") then
+							prompt.Enabled = false
+						end
+					end
+				end
+			end
+		end
+
+		-- 绑定新的 ShopNPC；新商人是 Model 时，Prompt 会挂到 HumanoidRootPart 或第一个 BasePart 上。
+		local function bindShopNPC()
+			disableOldShopPrompts()
+
+			local npc = findLobbyObject("ShopNPC")
+			if not npc then return end
+
+			local promptParent = npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc)
+			if not promptParent then return end
+
+			local prompt = promptParent:FindFirstChildOfClass("ProximityPrompt")
+			if not prompt then
+				prompt = Instance.new("ProximityPrompt")
+				prompt.Name = "ShopPrompt"
+				prompt.Parent = promptParent
+			end
+
+			prompt.ActionText = "Open Shop"
+			prompt.ObjectText = "Merchant"
+			prompt.HoldDuration = 0.2
+			prompt.RequiresLineOfSight = false
+			prompt.MaxActivationDistance = 12
+			prompt.Enabled = true
+
+			if not prompt:GetAttribute("ClientShopPromptBound") then
+				prompt:SetAttribute("ClientShopPromptBound", true)
 				prompt.Triggered:Connect(function(triggeringPlayer)
 					if triggeringPlayer == player and not GameController.IsCombatActive then
 						-- 告诉 UI 系统：玩家打开了商店
@@ -488,6 +724,17 @@ function GameController.SetupNPC()
 					end
 				end)
 			end
+		end
+
+		Workspace.DescendantAdded:Connect(function(descendant)
+			if descendant.Name == "ShopNPC" or descendant.Name == "ShopNPC_OLD" then
+				task.defer(bindShopNPC)
+			end
+		end)
+
+		while true do
+			bindShopNPC()
+			task.wait(2)
 		end
 	end)
 end

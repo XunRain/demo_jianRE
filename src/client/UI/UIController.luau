@@ -8,13 +8,11 @@ local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 
 local Controllers -- 全局依赖指针
-
--- 3D 属性 UI 常驻玩家头顶上方 3.5 格（所有人可见）
-local HEAD_OFFSET = Vector3.new(0, 3.5, 0)   
 
 -- 判断当前设备是否按纯手机端处理；PC 上接了触屏时仍保留桌面 UI 尺寸。
 local function isMobileOnlyDevice()
@@ -97,6 +95,30 @@ local function normalizeImageAssetId(assetId, useThumbnail)
 	return assetId
 end
 
+-- 覆盖 Studio 模板中常见的静态文本；只改 Text 内容，不改美术布局和图片。
+local function applyEnglishStaticTexts(mainUI)
+	if not mainUI then return end
+
+	local textByName = {
+		PetBagTitle = "Pet Inventory",
+		PetInventoryTitle = "Pet Inventory",
+		EquippedTitle = "Equipped Pets",
+		EquippedPetsTitle = "Equipped Pets",
+		StandbyTitle = "Standby Pets",
+		StandbyPetsTitle = "Standby Pets",
+		ShopTitle = "Shop",
+		HatchTitle = "Pet Egg",
+		TipText = "Tap quickly to crack the egg!",
+	}
+
+	for _, node in ipairs(mainUI:GetDescendants()) do
+		local text = textByName[node.Name]
+		if text and (node:IsA("TextLabel") or node:IsA("TextButton")) then
+			node.Text = text
+		end
+	end
+end
+
 -- 退出按钮使用美术图片本体；代码只绑定鼠标悬浮缩放，不再额外添加渐变、描边、投影等装饰。
 local function applyExitButtonHoverScale(exitButton)
 	if not exitButton or not exitButton:IsA("GuiButton") then return end
@@ -176,14 +198,14 @@ function UIController.Start()
 		
 		local mainUI = playerGui:FindFirstChild("MainUI")
 		local statsUI = playerGui:FindFirstChild("CharacterStatsUI") 
+		if mainUI then
+			applyEnglishStaticTexts(mainUI)
+		end
 
 		-- 获取当前最新数值
 		local coins = player:GetAttribute("Coins") or 0
 		local hp = player:GetAttribute("HP") or 0
       	local maxHp = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
-		local atkBonus = player:GetAttribute("ATK_Bonus") or 0
-		-- 根据公式逆推当前的实际攻击面板展示给玩家看
-		local displayAtk = math.floor(Controllers.Config.BASE_ATK * (1 + (atkBonus / 100)))
 		local lvl = player:GetAttribute("Level") or 1
 		local exp = player:GetAttribute("EXP") or 0
 		local requiredExp = player:GetAttribute("RequiredEXP") or Controllers.Config.GetRequiredExp(lvl)
@@ -211,7 +233,8 @@ function UIController.Start()
 			-- 手机端滑动控制提示层：UI 由 Studio 设计，代码只负责按设备和战斗状态控制显隐。
 			local mobileControls = mainUI:FindFirstChild("MobileControls", true)
 			if mobileControls and mobileControls:IsA("GuiObject") then
-				mobileControls.Visible = isMobileOnlyDevice() and inCombat and not player:GetAttribute("IsLevelingUp")
+				local useNativeJoystick = Controllers.Config.MOBILE_USE_NATIVE_JOYSTICK ~= false
+				mobileControls.Visible = (not useNativeJoystick) and isMobileOnlyDevice() and inCombat and not player:GetAttribute("IsLevelingUp")
 			end
 
          -- 大厅专属 UI 的战斗隔离控制
@@ -279,24 +302,9 @@ function UIController.Start()
 			end
 		end
 
-		-- 2. 处理 3D 头顶数值 UI（常驻玩家头顶的等级与攻击力）
+		-- 2. 旧版本地头顶 UI 已改由服务端统一创建；这里关闭本地副本，避免自己看到两套文字。
 		if statsUI and statsUI:IsA("BillboardGui") then
-			local character = player.Character
-			if character then
-				local rootPart = character:FindFirstChild("HumanoidRootPart")
-				if rootPart then
-					-- 将 3D UI 牢牢挂载在身体部件上，始终跟随
-					statsUI.Adornee = rootPart 
-				end
-			end
-
-			statsUI.StudsOffset = HEAD_OFFSET  
-
-			-- 刷新 3D UI 内部的文本
-			local statsLabel = statsUI:FindFirstChild("StatsLabel")
-			if statsLabel and statsLabel:IsA("TextLabel") then
-				statsLabel.Text = string.format("Lv.%d | ATK: %s", lvl, formatNumber(displayAtk))
-			end
+			statsUI.Enabled = false
 		end
 
       
@@ -414,7 +422,7 @@ function UIController.Start()
 			
 			local amountText
 			if buff.Attr == "ALL" then
-				amountText = "各项 +" .. tostring(buff.Amount) .. "%"
+				amountText = "All +" .. tostring(buff.Amount) .. "%"
 			elseif string.find(buff.Attr or "", "Reduction") then
 				-- 如果是“缩减”类属性（如 CD 缩减），前面显示减号 "-"
 				amountText = "-" .. tostring(buff.Amount) .. suffix
@@ -474,7 +482,7 @@ function UIController.Start()
 			local buffId = getBuffId(buff)
 			return artMap[buffId] or artMap[buff.Attr] or {
 				Category = "PlayerStats",
-				CategoryName = "玩家属性",
+				CategoryName = "Player Stats",
 				Badge = buff.Name or buffId,
 			}
 		end
@@ -955,6 +963,12 @@ function UIController.Start()
 		if not shopPanel then return end
 
 		local Config = Controllers.Config -- 拿到全局配置
+		local shopConfig = Config.SHOP_UI or {}
+		local petBagConfig = Config.PET_BAG_UI or {}
+		local shopBlurTween = nil
+		local shopCameraTween = nil
+		local shopSavedFOV = nil
+		local isApplyingShopVisible = false
 		
 		-- 等待美术做好的滑动列表和模板
 		local shopList = shopPanel:WaitForChild("ShopList")
@@ -976,6 +990,136 @@ function UIController.Start()
 			return nil
 		end
 
+		-- 获取或创建商店专用毛玻璃；作为本地后处理，只模糊世界背景，不模糊商店 UI。
+		local function getShopBlur()
+			local blur = Lighting:FindFirstChild("ShopBlur")
+			if blur and not blur:IsA("BlurEffect") then
+				blur = nil
+			end
+
+			if not blur then
+				blur = Instance.new("BlurEffect")
+				blur.Name = "ShopBlur"
+				blur.Size = 0
+				blur.Parent = Lighting
+			end
+
+			return blur
+		end
+
+		-- 播放商店打开/关闭时的背景毛玻璃效果。
+		local function tweenShopBlur(isOpen)
+			local blur = getShopBlur()
+			if shopBlurTween then
+				shopBlurTween:Cancel()
+				shopBlurTween = nil
+			end
+
+			local targetSize = isOpen and (shopConfig.OpenBlurSize or petBagConfig.OpenBlurSize or 14) or 0
+			local tweenTime = shopConfig.OpenBlurTweenTime or petBagConfig.OpenBlurTweenTime or 0.18
+			shopBlurTween = TweenService:Create(
+				blur,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Size = targetSize }
+			)
+			shopBlurTween:Play()
+		end
+
+		-- 商店打开时调整 FOV，关闭时恢复；只改 FieldOfView，不接管相机模式。
+		local function tweenShopCamera(isOpen)
+			local currentCamera = Workspace.CurrentCamera
+			if not currentCamera then return end
+
+			if shopCameraTween then
+				shopCameraTween:Cancel()
+				shopCameraTween = nil
+			end
+
+			if isOpen then
+				if not shopSavedFOV then
+					shopSavedFOV = currentCamera.FieldOfView
+				end
+			elseif not shopSavedFOV then
+				return
+			end
+
+			local targetFOV = isOpen and (shopConfig.OpenCameraFOV or petBagConfig.OpenCameraFOV or 58) or shopSavedFOV
+			local tweenTime = shopConfig.OpenCameraTweenTime or petBagConfig.OpenCameraTweenTime or 0.2
+			shopCameraTween = TweenService:Create(
+				currentCamera,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ FieldOfView = targetFOV }
+			)
+			shopCameraTween:Play()
+
+			if not isOpen then
+				local savedTween = shopCameraTween
+				task.delay(tweenTime, function()
+					if shopCameraTween == savedTween then
+						shopSavedFOV = nil
+					end
+				end)
+			end
+		end
+
+		-- 给商店按钮/卡片添加悬浮缩放；只添加 UIScale，不覆盖美术做好的图片和布局。
+		local function applyShopHoverScale(guiObject, attrName, scaleName, targetScale)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute(attrName) then return end
+			guiObject:SetAttribute(attrName, true)
+
+			local hoverScale = guiObject:FindFirstChild(scaleName)
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = scaleName
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local tweenInfo = TweenInfo.new(
+				shopConfig.HoverTweenTime or petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function playScaleTween(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				playScaleTween(targetScale)
+			end)
+
+			guiObject.MouseLeave:Connect(function()
+				playScaleTween(normalScale)
+			end)
+
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					playScaleTween(normalScale)
+				end)
+			end
+		end
+
+		local refreshShopUI
+
+		-- 统一控制商店打开/关闭，确保 Visible、模糊、FOV 和刷新逻辑同步。
+		local function setShopPanelOpen(isOpen)
+			if isOpen == shopPanel.Visible then
+				return
+			end
+
+			isApplyingShopVisible = true
+			shopPanel.Visible = isOpen
+			isApplyingShopVisible = false
+			tweenShopBlur(isOpen)
+			tweenShopCamera(isOpen)
+
+			if isOpen and refreshShopUI then
+				refreshShopUI()
+			end
+		end
+
 		-- 获取商店卡片美术分类；商店天赋第一版复用升级卡的玩家属性卡面和角标素材。
 		local function getShopTalentArt(talentId, talentData)
 			local artMap = Config.SHOP_TALENT_CARD_ART or {}
@@ -986,7 +1130,7 @@ function UIController.Start()
 
 			return {
 				Category = "PlayerStats",
-				CategoryName = "玩家属性",
+				CategoryName = "Player Stats",
 				Badge = talentData.Name or talentId,
 				BadgeSource = talentId,
 			}
@@ -1103,8 +1247,8 @@ function UIController.Start()
 
 		-- 填充商店天赋卡；优先写入美术拆好的 TextLabel，没有拆分时回退到模板原文本。
 		local function applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
-			local displayText = talentData.Name .. " Lv." .. currentLevel .. "\n金币: " .. Config.FormatNumber(cost)
-			local effectText = "效果: +" .. tostring(talentData.StatIncrease or 0)
+			local displayText = talentData.Name .. " Lv." .. currentLevel .. "\nCoins: " .. Config.FormatNumber(cost)
+			local effectText = "Effect: +" .. tostring(talentData.StatIncrease or 0)
 			local titleText = findTextNode(btn, {"TitleText", "NameText", "TalentNameText"})
 			local levelText = findTextNode(btn, {"LevelText", "LevelLabel"})
 			local priceText = findTextNode(btn, {"PriceText", "CostText", "CoinText", "AmountText"})
@@ -1135,7 +1279,7 @@ function UIController.Start()
 		end
 
 		-- 刷新商店文本显示 (支持滑动列表的智能增量更新)
-		local function refreshShopUI()
+		function refreshShopUI()
 			local orderedTalentIds = Config.SHOP_TALENT_ORDER or {}
 			local renderedTalentIds = {}
 
@@ -1157,6 +1301,12 @@ function UIController.Start()
 					btn.Visible = true 
 					btn.Parent = shopList
 					btn:SetAttribute("ShopGenerated", true)
+					applyShopHoverScale(
+						btn,
+						"ShopCardHoverBound",
+						"ShopCardHoverScale",
+						shopConfig.CardHoverScale or petBagConfig.OpenButtonHoverScale or 1.06
+					)
 					
 					-- 绑定购买事件
 					btn.Activated:Connect(function()
@@ -1167,6 +1317,12 @@ function UIController.Start()
 
 				if btn:IsA("GuiObject") then
 					btn.LayoutOrder = layoutOrder
+					applyShopHoverScale(
+						btn,
+						"ShopCardHoverBound",
+						"ShopCardHoverScale",
+						shopConfig.CardHoverScale or petBagConfig.OpenButtonHoverScale or 1.06
+					)
 				end
 				
 				applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
@@ -1195,13 +1351,29 @@ function UIController.Start()
 
 		-- 监听商店开关状态
 		player:GetAttributeChangedSignal("IsShopOpen"):Connect(function()
-			shopPanel.Visible = player:GetAttribute("IsShopOpen") == true
-			if shopPanel.Visible then refreshShopUI() end
+			setShopPanelOpen(player:GetAttribute("IsShopOpen") == true)
+		end)
+
+		-- 兜底处理其他代码直接修改 ShopPanel.Visible 的情况，避免模糊和 FOV 残留。
+		shopPanel:GetPropertyChangedSignal("Visible"):Connect(function()
+			if isApplyingShopVisible then return end
+
+			tweenShopBlur(shopPanel.Visible)
+			tweenShopCamera(shopPanel.Visible)
+			if shopPanel.Visible then
+				refreshShopUI()
+			end
 		end)
 
 		-- 绑定关闭面板按钮
 		local closeBtn = findShopButton(shopPanel, {"CloseButton", "BtnClose", "ShopCloseButton"})
 		if closeBtn then
+			applyShopHoverScale(
+				closeBtn,
+				"ShopCloseHoverBound",
+				"ShopCloseHoverScale",
+				shopConfig.CloseButtonHoverScale or petBagConfig.CloseButtonHoverScale or 1.06
+			)
 			closeBtn.Activated:Connect(function()
 				player:SetAttribute("IsShopOpen", false)
 			end)
@@ -1222,6 +1394,7 @@ function UIController.Start()
 		
 		local closeBtn = bagPanel:WaitForChild("BtnClose")
 		local petList = bagPanel:WaitForChild("PetList")
+		player:SetAttribute("IsPetBagOpen", bagPanel.Visible)
 		
 		-- 获取刚才新建的两个独立栅格容器
 		local equippedContainer = petList:WaitForChild("EquippedContainer")
@@ -1232,6 +1405,157 @@ function UIController.Start()
 		local emptySlotTemplate = bagPanel:WaitForChild("EmptySlotTemplate")
 		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
 		local MAX_EQUIP_SLOTS = petBagConfig.MaxEquipSlots or 1
+		local petBagBlurTween = nil
+		local petBagCameraTween = nil
+		local petBagSavedFOV = nil
+
+		-- 获取或创建背包专用毛玻璃；只在本地客户端生效，不影响服务器和其他玩家。
+		local function getPetBagBlur()
+			local blur = Lighting:FindFirstChild("PetBagBlur")
+			if blur and not blur:IsA("BlurEffect") then
+				blur = nil
+			end
+
+			if not blur then
+				blur = Instance.new("BlurEffect")
+				blur.Name = "PetBagBlur"
+				blur.Size = 0
+				blur.Parent = Lighting
+			end
+
+			return blur
+		end
+
+		-- 播放背包打开/关闭时的屏幕毛玻璃效果。
+		local function tweenPetBagBlur(isOpen)
+			local blur = getPetBagBlur()
+			if petBagBlurTween then
+				petBagBlurTween:Cancel()
+				petBagBlurTween = nil
+			end
+
+			local targetSize = isOpen and (petBagConfig.OpenBlurSize or 14) or 0
+			local tweenTime = petBagConfig.OpenBlurTweenTime or 0.18
+			petBagBlurTween = TweenService:Create(
+				blur,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Size = targetSize }
+			)
+			petBagBlurTween:Play()
+		end
+
+		-- 打开背包时轻微拉近玩家视野；关闭时只恢复 FieldOfView，不接管相机类型和跟随目标。
+		local function tweenPetBagCamera(isOpen)
+			local currentCamera = Workspace.CurrentCamera
+			if not currentCamera then return end
+
+			if petBagCameraTween then
+				petBagCameraTween:Cancel()
+				petBagCameraTween = nil
+			end
+
+			if isOpen then
+				if not petBagSavedFOV then
+					petBagSavedFOV = currentCamera.FieldOfView
+				end
+			elseif not petBagSavedFOV then
+				return
+			end
+
+			local targetFOV = isOpen and (petBagConfig.OpenCameraFOV or 58) or petBagSavedFOV
+			local tweenTime = petBagConfig.OpenCameraTweenTime or 0.2
+			petBagCameraTween = TweenService:Create(
+				currentCamera,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ FieldOfView = targetFOV }
+			)
+			petBagCameraTween:Play()
+
+			if not isOpen then
+				local savedTween = petBagCameraTween
+				task.delay(tweenTime, function()
+					if petBagCameraTween == savedTween then
+						petBagSavedFOV = nil
+					end
+				end)
+			end
+		end
+
+		-- 关闭按钮悬浮反馈：轻微放大并旋转，移出或点击后恢复美术原始角度。
+		local function applyCloseButtonHover()
+			if not closeBtn or not closeBtn:IsA("GuiButton") then return end
+			if closeBtn:GetAttribute("PetBagCloseHoverBound") then return end
+			closeBtn:SetAttribute("PetBagCloseHoverBound", true)
+
+			local hoverScale = closeBtn:FindFirstChild("PetBagCloseHoverScale")
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = "PetBagCloseHoverScale"
+				hoverScale.Parent = closeBtn
+			end
+
+			local normalScale = hoverScale.Scale
+			local normalRotation = closeBtn.Rotation
+			local targetScale = petBagConfig.CloseButtonHoverScale or 1.06
+			local targetRotation = normalRotation + (petBagConfig.CloseButtonHoverRotation or 8)
+			local tweenTime = petBagConfig.HoverTweenTime or 0.12
+			local tweenInfo = TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+			local function playHoverTween(scale, rotation)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+				TweenService:Create(closeBtn, tweenInfo, { Rotation = rotation }):Play()
+			end
+
+			closeBtn.MouseEnter:Connect(function()
+				playHoverTween(targetScale, targetRotation)
+			end)
+
+			closeBtn.MouseLeave:Connect(function()
+				playHoverTween(normalScale, normalRotation)
+			end)
+
+			closeBtn.Activated:Connect(function()
+				playHoverTween(normalScale, normalRotation)
+			end)
+		end
+
+		-- 背包入口按钮悬浮反馈：只做缩放，不覆盖美术给的图片和位置。
+		local function applyOpenBagButtonHover()
+			if not openBagBtn or not openBagBtn:IsA("GuiButton") then return end
+			if openBagBtn:GetAttribute("PetBagOpenHoverBound") then return end
+			openBagBtn:SetAttribute("PetBagOpenHoverBound", true)
+
+			local hoverScale = openBagBtn:FindFirstChild("PetBagOpenHoverScale")
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = "PetBagOpenHoverScale"
+				hoverScale.Parent = openBagBtn
+			end
+
+			local normalScale = hoverScale.Scale
+			local targetScale = petBagConfig.OpenButtonHoverScale or petBagConfig.CloseButtonHoverScale or 1.06
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function playScaleTween(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			openBagBtn.MouseEnter:Connect(function()
+				playScaleTween(targetScale)
+			end)
+
+			openBagBtn.MouseLeave:Connect(function()
+				playScaleTween(normalScale)
+			end)
+
+			openBagBtn.Activated:Connect(function()
+				playScaleTween(normalScale)
+			end)
+		end
 
 		-- 安全解析宠物背包；存档字段异常时返回空表，避免 UI 打不开
 		local function decodeOwnedPets()
@@ -1316,23 +1640,80 @@ function UIController.Start()
 			end
 		end
 
+		-- 动态克隆进列表的格子不能沿用模板在 Panel 里的摆放位置，否则待机区顶部会出现大段空白。
+		local function normalizeBagItemLayout(item, parent, layoutOrder)
+			if not item or not item:IsA("GuiObject") then return end
+
+			item.AnchorPoint = Vector2.new(0, 0)
+			item.Position = UDim2.fromScale(0, 0)
+			item.LayoutOrder = layoutOrder or 0
+
+			-- ScrollingFrame 里由 Studio 的 UIGridLayout/UIListLayout 负责排列；代码只补齐滚动画布配置。
+			if parent and parent:IsA("ScrollingFrame") then
+				parent.AutomaticCanvasSize = Enum.AutomaticSize.Y
+				parent.ScrollingDirection = Enum.ScrollingDirection.Y
+			end
+		end
+
 		-- 克隆宠物格模板；只打生成标记，具体文字/图片由后续函数填充。
-		local function createPetButton(parent)
+		local function createPetButton(parent, layoutOrder)
 			local btn = petTemplate:Clone()
 			btn:SetAttribute("PetBagGenerated", true)
 			btn.Visible = true
 			btn.Parent = parent
+			normalizeBagItemLayout(btn, parent, layoutOrder)
 			syncBagItemSizeToGrid(btn, parent)
 			return btn
 		end
 
+		-- 宠物格悬浮反馈：已装备和待机宠物都可响应，空槽不绑定。
+		local function applyPetItemHover(btn)
+			if not btn or not btn:IsA("GuiObject") then return end
+			if btn:GetAttribute("PetBagItemHoverBound") then return end
+			btn:SetAttribute("PetBagItemHoverBound", true)
+
+			local hoverScale = btn:FindFirstChild("PetBagItemHoverScale")
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = "PetBagItemHoverScale"
+				hoverScale.Parent = btn
+			end
+
+			local normalScale = hoverScale.Scale
+			local targetScale = petBagConfig.PetStandbyHoverScale or 0.94
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function playScaleTween(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			btn.MouseEnter:Connect(function()
+				playScaleTween(targetScale)
+			end)
+
+			btn.MouseLeave:Connect(function()
+				playScaleTween(normalScale)
+			end)
+
+			if btn:IsA("GuiButton") then
+				btn.Activated:Connect(function()
+					playScaleTween(normalScale)
+				end)
+			end
+		end
+
 		-- 克隆出战区空槽；只表达可装备槽位，不参与点击交互。
-		local function createEmptyEquipSlot(parent)
+		local function createEmptyEquipSlot(parent, layoutOrder)
 			local emptySlot = emptySlotTemplate:Clone()
 			emptySlot:SetAttribute("PetBagGenerated", true)
 			emptySlot:SetAttribute("PetBagSlotType", "Equipped")
 			emptySlot.Visible = true
 			emptySlot.Parent = parent
+			normalizeBagItemLayout(emptySlot, parent, layoutOrder)
 			syncBagItemSizeToGrid(emptySlot, parent)
 			return emptySlot
 		end
@@ -1469,7 +1850,7 @@ function UIController.Start()
 
 			local countText = (count and count > 1) and (" x" .. count) or ""
 			local rarityText = petConfig.Rarity or "Unknown"
-			local description = petConfig.Description or "暂无描述"
+			local description = petConfig.Description or "No description"
 			local statusLine = statusText and ("\n" .. statusText) or ""
 			local attackText = Controllers.Config.FormatNumber(petConfig.ATK or 0)
 			local fullText = string.format(
@@ -1543,6 +1924,12 @@ function UIController.Start()
 		local function refreshBag()
 			clearGeneratedBagItems(equippedContainer)
 			clearGeneratedBagItems(standbyContainer)
+			if equippedContainer:IsA("ScrollingFrame") then
+				equippedContainer.CanvasPosition = Vector2.zero
+			end
+			if standbyContainer:IsA("ScrollingFrame") then
+				standbyContainer.CanvasPosition = Vector2.zero
+			end
 			
 			local owned = decodeOwnedPets()
 			local equipped = player:GetAttribute("EquippedPet") or ""
@@ -1561,9 +1948,10 @@ function UIController.Start()
 				equippedCount = 1
 				petCounts[equipped] = petCounts[equipped] - 1 -- 从待机区扣除1个
 				
-				local btn = createPetButton(equippedContainer)
+				local btn = createPetButton(equippedContainer, 1)
 				
-				applyPetButtonDisplay(btn, equipped, 1, "出战中")
+				applyPetButtonDisplay(btn, equipped, 1, "Equipped")
+				applyPetItemHover(btn)
 				
 				-- 点击出战区的宠物：向服务器发送空字符串进行【卸下】
 				btn.Activated:Connect(function()
@@ -1573,22 +1961,25 @@ function UIController.Start()
 			end
 
 			-- 出战区显示“当前可装备宠物数”个槽位；未装备的位置用空槽补齐，不额外 +1。
-			for _ = equippedCount + 1, MAX_EQUIP_SLOTS do
-				createEmptyEquipSlot(equippedContainer)
+			for slotIndex = equippedCount + 1, MAX_EQUIP_SLOTS do
+				createEmptyEquipSlot(equippedContainer, slotIndex)
 			end
 
 			-- ==========================================
 			-- 2. 渲染【待机区】
 			-- ==========================================
 			local standbyPetIds = getSortedPetIds(petCounts)
+			local standbyLayoutOrder = 0
 			for _, petId in ipairs(standbyPetIds) do
 				local count = petCounts[petId]
 				if count > 0 then -- 如果还有剩余宠物在待机
 					local petConfig = Controllers.Config.PETS[petId]
 					if petConfig then
-						local btn = createPetButton(standbyContainer)
+						standbyLayoutOrder += 1
+						local btn = createPetButton(standbyContainer, standbyLayoutOrder)
 						
 						applyPetButtonDisplay(btn, petId, count)
+						applyPetItemHover(btn)
 						
 						-- 点击待机区的宠物：向服务器发送 petId 进行【替换出战】
 						btn.Activated:Connect(function()
@@ -1600,11 +1991,47 @@ function UIController.Start()
 			end
 		end
 
-		openBagBtn.Activated:Connect(function()
-			bagPanel.Visible = not bagPanel.Visible
-			if bagPanel.Visible then refreshBag() end
+		local isApplyingPetBagVisible = false
+
+		-- 统一控制背包开关；所有入口都走这里，避免 Visible、毛玻璃和相机 FOV 状态不同步。
+		local function setPetBagOpen(isOpen)
+			if isOpen == bagPanel.Visible then
+				return
+			end
+
+			player:SetAttribute("IsPetBagOpen", isOpen)
+			isApplyingPetBagVisible = true
+			bagPanel.Visible = isOpen
+			isApplyingPetBagVisible = false
+			tweenPetBagBlur(isOpen)
+			tweenPetBagCamera(isOpen)
+
+			if isOpen then
+				refreshBag()
+			end
+		end
+
+		applyCloseButtonHover()
+		applyOpenBagButtonHover()
+
+		-- 兜底处理外部代码直接改 Visible 的情况，例如进入战斗时主 UI 循环会强制关闭背包。
+		bagPanel:GetPropertyChangedSignal("Visible"):Connect(function()
+			if isApplyingPetBagVisible then return end
+
+			player:SetAttribute("IsPetBagOpen", bagPanel.Visible)
+			tweenPetBagBlur(bagPanel.Visible)
+			tweenPetBagCamera(bagPanel.Visible)
+			if bagPanel.Visible then
+				refreshBag()
+			end
 		end)
-		closeBtn.Activated:Connect(function() bagPanel.Visible = false end)
+
+		openBagBtn.Activated:Connect(function()
+			setPetBagOpen(not bagPanel.Visible)
+		end)
+		closeBtn.Activated:Connect(function()
+			setPetBagOpen(false)
+		end)
 		
 		-- 装备发生变动、或者刚好抽到新宠物时，实时刷新面板
 		player:GetAttributeChangedSignal("EquippedPet"):Connect(function()
@@ -1633,6 +2060,44 @@ function UIController.Start()
 		
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
 		local petModels = ReplicatedStorage:WaitForChild("Model"):WaitForChild("Pets")
+		local hatchBlurTween = nil
+		local isApplyingHatchVisible = false
+
+		-- 获取或创建抽宠专用毛玻璃；放在 Lighting 下作为本地后处理，不会模糊 HatchScreen 本身。
+		local function getHatchBlur()
+			local blur = Lighting:FindFirstChild("HatchBlur")
+			if blur and not blur:IsA("BlurEffect") then
+				blur = nil
+			end
+
+			if not blur then
+				blur = Instance.new("BlurEffect")
+				blur.Name = "HatchBlur"
+				blur.Size = 0
+				blur.Parent = Lighting
+			end
+
+			return blur
+		end
+
+		-- 抽宠界面复用宠物背包同款背景模糊手感：打开淡入，关闭淡出。
+		local function tweenHatchBlur(isOpen)
+			local blur = getHatchBlur()
+			if hatchBlurTween then
+				hatchBlurTween:Cancel()
+				hatchBlurTween = nil
+			end
+
+			local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+			local targetSize = isOpen and (petBagConfig.OpenBlurSize or 14) or 0
+			local tweenTime = petBagConfig.OpenBlurTweenTime or 0.18
+			hatchBlurTween = TweenService:Create(
+				blur,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Size = targetSize }
+			)
+			hatchBlurTween:Play()
+		end
 		
 		-- ViewportFrame 的摄像机必须用代码动态创建并绑定，不然容易出 Bug
 		local camera = Instance.new("Camera")
@@ -1675,10 +2140,19 @@ function UIController.Start()
 
 		-- 结束抽宠展示并恢复交互状态；任何异常路径都走这里，避免界面卡住。
 		local function closeHatchScreen()
+			isApplyingHatchVisible = true
 			hatchScreen.Visible = false
+			isApplyingHatchVisible = false
+			tweenHatchBlur(false)
 			isHatching = false
 			clearViewport()
 		end
+
+		-- 兜底处理其他代码直接改 HatchScreen.Visible 的情况，避免毛玻璃残留。
+		hatchScreen:GetPropertyChangedSignal("Visible"):Connect(function()
+			if isApplyingHatchVisible then return end
+			tweenHatchBlur(hatchScreen.Visible)
+		end)
 
 		-- 获取可以承载 ProximityPrompt 的部件；宠物蛋如果是 Model，就挂到其中一个 BasePart 上。
 		local function getPromptParent(target)
@@ -1698,7 +2172,7 @@ function UIController.Start()
 
 			local coins = player:GetAttribute("Coins") or 0
 			if coins < Controllers.Config.PET_GACHA_COST then
-				print("金币不足！"); return
+				print("Not enough coins!"); return
 			end
 			
 			isHatching = true
@@ -1725,9 +2199,12 @@ function UIController.Start()
 				end
 			end
 			
+			isApplyingHatchVisible = true
 			hatchScreen.Visible = true
+			isApplyingHatchVisible = false
+			tweenHatchBlur(true)
 			clickCount = 0
-			tipText.Text = "疯狂点击蛋壳使其破裂！"
+			tipText.Text = "Tap quickly to crack the egg!"
 			tipText.TextColor3 = Color3.new(1,1,1)
 			
 			local clickConn
@@ -1756,7 +2233,7 @@ function UIController.Start()
 								current3DModel = nil
 							end
 							
-							tipText.Text = string.format("恭喜获得 %s (%s)", petData.Name, petData.Rarity)
+							tipText.Text = string.format("You got %s (%s)", petData.Name, petData.Rarity)
 							tipText.TextColor3 = petData.Color
 							
 							-- 3. 呼叫 VFX 模块接管匀速自转动画，并把循环指针存起来以便清理
@@ -1791,8 +2268,8 @@ function UIController.Start()
 				prompt.Parent = promptParent
 			end
 
-			prompt.ObjectText = "宠物蛋"
-			prompt.ActionText = "花费 " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " 抽宠"
+			prompt.ObjectText = "Pet Egg"
+			prompt.ActionText = "Spend " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " to draw a pet"
 			prompt.HoldDuration = 0.2
 			prompt.RequiresLineOfSight = false
 			prompt.MaxActivationDistance = 12

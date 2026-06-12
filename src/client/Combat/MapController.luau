@@ -103,6 +103,10 @@ function MapController.ResetTrack(startPartCFrame)
 	local initialBlocksNeeded = math.ceil(Config.SPAWN_AHEAD / Config.TRACK_LENGTH) + 1
 	for i = 1, initialBlocksNeeded do
 		MapController.SpawnTrackBlock()
+		-- 初始铺路包含模型克隆和遭遇生成，分帧执行可以避免踩 START 后客户端明显卡住。
+		if i < initialBlocksNeeded then
+			task.wait()
+		end
 	end
 end
 

@@ -24,6 +24,7 @@ local DEFAULT_STATS = {
 
 	-- 排行榜相关数据：个人存档保存历史最高米数，全服榜单由 LeaderboardManager 另写 OrderedDataStore。
 	BestDistance = 0,
+	BestLevel = 1, -- 玩家历史最高局内等级，用于大厅头顶进度展示
 }
 
 -- 测试白名单：命中的玩家进入游戏时会清空存档，并发放指定金币。
@@ -116,6 +117,7 @@ function DataManager.SavePlayerData(player)
 		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,
 		EquippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon",
 		BestDistance = player:GetAttribute("BestDistance") or 0,
+		BestLevel = player:GetAttribute("BestLevel") or 1,
 	}
 
 	local success, err = pcall(function()

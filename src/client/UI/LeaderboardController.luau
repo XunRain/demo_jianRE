@@ -131,7 +131,7 @@ local function ensureFallbackLayout(surfaceGui)
 	root.Size = UDim2.fromScale(1, 1)
 	root.Parent = surfaceGui
 
-	createText(root, "Title", "全服排行榜", UDim2.new(1, -24, 0, 52), UDim2.new(0, 12, 0, 8), Color3.fromRGB(255, 255, 255), Enum.TextXAlignment.Center)
+	createText(root, "Title", "Global Leaderboard", UDim2.new(1, -24, 0, 52), UDim2.new(0, 12, 0, 8), Color3.fromRGB(255, 255, 255), Enum.TextXAlignment.Center)
 
 	local list = Instance.new("Frame")
 	list.Name = "List"

@@ -192,6 +192,22 @@ local function playEnemyHitJitter(enemy)
     Controllers.VFX.PlayHitJitterVFX(enemy.visual or enemy.part, enemy.baseSize)
 end
 
+-- 更新怪物血量数字显示；所有怪物常驻显示，优先使用模型内 HP/SurfaceGui。
+local function updateEnemyHpLabel(enemy)
+	if not enemy or not enemy.label then return end
+
+	enemy.label.Text = Controllers.Config.FormatNumber(math.max(0, enemy.hp or 0))
+
+	local billboard = enemy.hpBillboard or enemy.label.Parent
+	local surfaceGui = enemy.hpSurfaceGui
+
+	if surfaceGui then
+		surfaceGui.Enabled = true
+	elseif billboard and billboard:IsA("BillboardGui") then
+		billboard.Enabled = true
+	end
+end
+
 -- Boss 被玩家击败后，复用升级面板发放全金色奖励卡。
 local function triggerBossGoldReward(enemyType)
 	if enemyType ~= "Boss" then return end
@@ -270,7 +286,7 @@ function CombatController.CheckCollisions(rootPart)
 
 					for _, targetE in ipairs(targetsToDamage) do
 						targetE.hp = targetE.hp - dmg
-						targetE.label.Text = Controllers.Config.FormatNumber(math.max(0, targetE.hp))
+						updateEnemyHpLabel(targetE)
 						playEnemyHitJitter(targetE)
 
 						if targetE.hp <= 0 then
@@ -287,7 +303,7 @@ function CombatController.CheckCollisions(rootPart)
 					b.hitsLeft = 0
 				else
 					e.hp = e.hp - dmg
-					e.label.Text = Controllers.Config.FormatNumber(math.max(0, e.hp))
+					updateEnemyHpLabel(e)
 					playEnemyHitJitter(e)
 
 					if e.hp <= 0 then
@@ -451,26 +467,63 @@ function CombatController.StartSwordSystem()
 		end
 	end
 
-	local function setSwordTransparency(swordData, transparency)
+	-- 获取飞剑模型在 Studio 中保存的原始朝向；后续只移动位置，不再用代码重算朝向。
+	local function getSwordStudioRotation(swordModel, primaryPart)
+		if swordModel and swordModel:IsA("Model") then
+			return swordModel:GetPivot().Rotation
+		elseif primaryPart then
+			return primaryPart.CFrame.Rotation
+		end
+
+		return CFrame.new().Rotation
+	end
+
+	-- 用 Studio 原始朝向生成飞剑 CFrame；避免 CFrame.lookAt 把美术模型转反或转上。
+	local function getSwordStudioCFrame(swordData, position)
+		local rotation = swordData and swordData.studioRotation or CFrame.new().Rotation
+		return CFrame.new(position) * rotation
+	end
+
+	-- 记录飞剑模型每个部件在 Studio 里的原始透明度；显示时恢复原值，避免 VFX 挂载块被强行显示。
+	local function cacheSwordOriginalTransparency(swordData)
 		if not swordData or not swordData.model then return end
+		swordData.originalTransparency = {}
+
 		if swordData.model:IsA("Model") then
 			for _, obj in ipairs(swordData.model:GetDescendants()) do
 				if obj:IsA("BasePart") then
-					obj.Transparency = transparency
+					swordData.originalTransparency[obj] = obj.Transparency
 				end
 			end
 		elseif swordData.primary then
-			swordData.primary.Transparency = transparency
+			swordData.originalTransparency[swordData.primary] = swordData.primary.Transparency
 		end
 	end
 
-	local function getLookCFrame(position, targetPosition)
-		local delta = targetPosition - position
-		local lookDir = delta.Magnitude > 0.01 and delta.Unit or Vector3.new(0, 0, -1)
-		return CFrame.lookAt(position, position + lookDir)
+	local function setSwordTransparency(swordData, transparency)
+		if not swordData or not swordData.model then return end
+		local originalTransparency = swordData.originalTransparency or {}
+
+		if swordData.model:IsA("Model") then
+			for _, obj in ipairs(swordData.model:GetDescendants()) do
+				if obj:IsA("BasePart") then
+					if transparency >= 1 then
+						obj.Transparency = 1
+					else
+						obj.Transparency = originalTransparency[obj] or 0
+					end
+				end
+			end
+		elseif swordData.primary then
+			if transparency >= 1 then
+				swordData.primary.Transparency = 1
+			else
+				swordData.primary.Transparency = originalTransparency[swordData.primary] or 0
+			end
+		end
 	end
 
-	local function getSwordHoverCFrame(rootPart, swordIndex, totalCount, sc, now)
+	local function getSwordHoverCFrame(rootPart, swordIndex, totalCount, sc, now, swordData)
 		if not rootPart then return nil end
 
 		-- 飞剑待机队形：左右交替排列，同一侧逐步外扩，同时叠加前后和高低错位。
@@ -502,9 +555,8 @@ function CombatController.StartSwordSystem()
 			backOffset + (pairIndex - 1) * depthSpacing
 		)
 		local hoverPos = (rootPart.CFrame * localOffset).Position
-		local lookDir = rootPart.CFrame.LookVector
 
-		return CFrame.lookAt(hoverPos, hoverPos + lookDir)
+		return getSwordStudioCFrame(swordData, hoverPos)
 	end
 
 	local function isSwordTargetAlive(enemy)
@@ -616,7 +668,14 @@ function CombatController.StartSwordSystem()
 			targetPart.CanCollide = false
 			swordPart.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
 
-			table.insert(orbitingSwords, { model = swordPart, primary = targetPart, state = "Orbiting" })
+			local swordData = {
+				model = swordPart,
+				primary = targetPart,
+				state = "Orbiting",
+				studioRotation = getSwordStudioRotation(swordPart, targetPart),
+			}
+			cacheSwordOriginalTransparency(swordData)
+			table.insert(orbitingSwords, swordData)
 		end
 		while #orbitingSwords > count do
 			local removed = table.remove(orbitingSwords)
@@ -625,7 +684,7 @@ function CombatController.StartSwordSystem()
 
 		local now = os.clock()
 		for i, swordData in ipairs(orbitingSwords) do
-			local hoverCFrame = getSwordHoverCFrame(rootPart, i, count, sc, now)
+			local hoverCFrame = getSwordHoverCFrame(rootPart, i, count, sc, now, swordData)
 			if not hoverCFrame then continue end
 			local hoverPos = hoverCFrame.Position
 			local currentCFrame = getSwordCFrame(swordData)
@@ -638,7 +697,7 @@ function CombatController.StartSwordSystem()
 
 			elseif swordData.state == "Returning" then
 				local newPos = currentPos:Lerp(hoverPos, dt * 18)
-				pivotSwordTo(swordData, getLookCFrame(newPos, hoverPos))
+				pivotSwordTo(swordData, getSwordStudioCFrame(swordData, newPos))
 
 				if (newPos - hoverPos).Magnitude < 1.5 then
 					clearSwordAttackData(swordData)
@@ -664,13 +723,13 @@ function CombatController.StartSwordSystem()
 
 				local startPos = swordData.attackStartPos or currentPos
 				local newPos = startPos:Lerp(targetPos, swordData.attackProgress)
-				pivotSwordTo(swordData, getLookCFrame(newPos, targetPos))
+				pivotSwordTo(swordData, getSwordStudioCFrame(swordData, newPos))
 
 				if swordData.attackProgress >= 1 then
 					if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") and isSwordTargetAlive(targetEnemy) then
 						local hitPos = targetEnemy.part.Position
 						targetEnemy.hp = targetEnemy.hp - (swordData.damage or 0)
-						targetEnemy.label.Text = Controllers.Config.FormatNumber(math.max(0, targetEnemy.hp))
+						updateEnemyHpLabel(targetEnemy)
 						playEnemyHitJitter(targetEnemy)
 						Controllers.VFX.PlayBulletExplosion("DefaultHit", hitPos)
 

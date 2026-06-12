@@ -68,9 +68,11 @@ local GameConfig = {
     BASE_MULTISHOT = 1,       -- 初始弹道数量 (默认1发)
     MULTISHOT_EXTRA_DAMAGE_RATIO = 0.7, -- 增加弹道的额外子弹伤害系数；主弹道仍然是100%伤害
     MULTISHOT_SPREAD_DISTANCE = 3.5, -- 增加弹道最终横向分散间距
-    MOBILE_TOUCH_DEADZONE = 20, -- 手机端滑动控制死区，避免轻微抖动触发横移
-    MOBILE_TOUCH_ACTIVE_Y_RATIO = 0.5, -- 手机端只响应屏幕下半区触控，避免误点 UI
-    MOBILE_TOUCH_SMOOTHING = 0, -- 预留触控平滑参数；当前使用即时方向切换
+    MOBILE_USE_NATIVE_JOYSTICK = true, -- 手机端使用 Roblox 原生摇杆控制横移，不再使用下半屏滑动控制
+    MOBILE_JOYSTICK_DEADZONE = 0.15, -- 原生摇杆横向死区，避免轻微拨动导致角色晃动
+    MOBILE_TOUCH_DEADZONE = 20, -- 兼容旧滑动控制配置；当前默认不再使用
+    MOBILE_TOUCH_ACTIVE_Y_RATIO = 0.5, -- 兼容旧滑动控制配置；当前默认不再使用
+    MOBILE_TOUCH_SMOOTHING = 0, -- 兼容旧滑动控制配置；当前默认不再使用
 
     -- 客户端光照切换配置：大厅使用 Studio 默认光照，进入战斗后切到跑道专用光照方向。
     -- 不需要该功能时，把 Enabled 改成 false 即可完全关闭光照切换。
@@ -230,13 +232,13 @@ local GameConfig = {
 
     -- 属性中文化映射表 (用于 3D 文字、UI 界面显示等)
     ATTRIBUTE_NAMES_CN = {
-        HP_Bonus = "恢复HP",
-        MaxHP_Bonus = "最大生命",
-        ATK_Bonus = "攻击加成",
-        ASPD_Bonus = "攻速加成",
-        SPD_Bonus = "弹速加成",
-        RNG_Bonus = "射程加成",
-        LateralSpeed_Bonus = "横移速度",
+        HP_Bonus = "Restore HP",
+        MaxHP_Bonus = "Max HP",
+        ATK_Bonus = "Attack",
+        ASPD_Bonus = "Attack Speed",
+        SPD_Bonus = "Bullet Speed",
+        RNG_Bonus = "Range",
+        LateralSpeed_Bonus = "Move Speed",
     },
 
     -- 7. 掉落物与磁吸机制
@@ -256,7 +258,7 @@ local GameConfig = {
     -- 8. 局外天赋商店配置
 	TALENTS = {
 		Talent_HP = {
-			Name = "血量强化",
+			Name = "HP Boost",
 			BaseCost = 50,
 			CostMulti = 1.5,
 			StatIncrease = 20,
@@ -265,7 +267,7 @@ local GameConfig = {
 			end,
 		},
 		Talent_ATK = {
-			Name = "攻击强化",
+			Name = "Attack Boost",
 			BaseCost = 100,
 			CostMulti = 2.0,
 			StatIncrease = 5,
@@ -274,7 +276,7 @@ local GameConfig = {
 			end,
 		},
 		Talent_ASPD = {
-			Name = "攻速强化",
+			Name = "Attack Speed Boost",
 			BaseCost = 150,
 			CostMulti = 2.5,
 			StatIncrease = 0.15,
@@ -293,9 +295,9 @@ local GameConfig = {
 
 	-- 商店卡片复用升级卡美术分类；代码只切换 Studio 里对应的 CategoryLayer_* 图层。
 	SHOP_TALENT_CARD_ART = {
-		Talent_ATK = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击", BadgeSource = "ATK_Bonus" },
-		Talent_ASPD = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻速", BadgeSource = "ASPD_Bonus" },
-		Talent_HP = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "生命", BadgeSource = "MaxHP_Bonus" },
+		Talent_ATK = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack", BadgeSource = "ATK_Bonus" },
+		Talent_ASPD = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack Speed", BadgeSource = "ASPD_Bonus" },
+		Talent_HP = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "HP", BadgeSource = "MaxHP_Bonus" },
 	},
 
     -- 9. 宠物与抽卡系统配置
@@ -305,6 +307,25 @@ local GameConfig = {
 		MaxEquipSlots = 1, -- 出战区显示的槽位数量；当前玩法只支持 1 个出战宠物
 		ViewportYawDegrees = 180, -- 背包 ViewportFrame 中宠物模型朝向微调，模型背对玩家时改这里
 		SyncTemplateSizeToGrid = true, -- 克隆格子时同步 UIGridLayout.CellSize，避免宠物格和空槽大小不一致
+		OpenBlurSize = 14, -- 打开背包时的屏幕毛玻璃强度
+		OpenBlurTweenTime = 0.18, -- 毛玻璃淡入/淡出时间
+		OpenCameraFOV = 88, -- 打开背包时相机视野拉近到的 FOV
+		OpenCameraTweenTime = 0.2, -- 相机 FOV 拉近/恢复时间
+		OpenButtonHoverScale = 1.06, -- 背包入口按钮悬浮时的放大比例
+		CloseButtonHoverScale = 1.06, -- 关闭按钮悬浮时的放大比例
+		CloseButtonHoverRotation = 8, -- 关闭按钮悬浮时的旋转角度
+		PetStandbyHoverScale = 0.94, -- 待机宠物悬浮时的小幅缩小比例
+		HoverTweenTime = 0.12, -- 背包 hover 动画时间
+	},
+
+	SHOP_UI = {
+		OpenBlurSize = 14, -- 打开商店时的屏幕毛玻璃强度
+		OpenBlurTweenTime = 0.18, -- 商店毛玻璃淡入/淡出时间
+		OpenCameraFOV = 88, -- 打开商店时相机视野调整到的 FOV；默认与当前背包表现保持一致
+		OpenCameraTweenTime = 0.2, -- 商店相机 FOV 调整/恢复时间
+		CardHoverScale = 1.06, -- 商店卡片悬浮时的缩放比例
+		CloseButtonHoverScale = 1.06, -- 商店关闭按钮悬浮时的缩放比例
+		HoverTweenTime = 0.12, -- 商店 hover 动画时间
 	},
 
 	PETS = {
@@ -377,7 +398,7 @@ local GameConfig = {
     -- 10. 武器与特效配置表
     WEAPONS = {
         ["DefaultWeapon"] = {
-            Name = "新手短剑",
+            Name = "Starter Sword",
             BulletVFX = "DefaultBullet",
             HitVFX = "DefaultHit",
             FirePattern = "Parallel",
@@ -388,7 +409,7 @@ local GameConfig = {
             MaxRNG = 120,   -- 射程上限：最多飞出 120 Studs
         },
         ["FireWand"] = {
-            Name = "火焰法杖",
+            Name = "Fire Staff",
             BulletVFX = "Fireball",
             HitVFX = "FireExplosion",
             FirePattern = "Spread",
@@ -399,7 +420,7 @@ local GameConfig = {
             MaxRNG = 180,   -- 射程上限：最多飞出 180 Studs
         },
         ["LaserGun"] = {
-            Name = "激光枪",
+            Name = "Laser Gun",
             BulletVFX = "Laser",
             HitVFX = "LaserHit",
             FirePattern = "Pierce",
@@ -506,28 +527,28 @@ local GameConfig = {
 
     -- 14. 升级卡美术分类配置；美术可以按 Category 做预制卡片，代码只负责填角标/切换分类层。
     LEVEL_UP_CARD_ART = {
-        ATK_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻击" },
-        ASPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "攻速" },
-		EXP_Gain_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "经验" },
-        Gold_ATK_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "攻击" },
-        Gold_ASPD_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "攻速" },
-        Gold_MaxHP_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "生命" },
-        Gold_RNG_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "射程" },
-        Gold_MagnetRadius_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "磁力" },
-        Gold_EXP_Gain_Bonus = { Category = "Rare", CategoryName = "金色强化", Badge = "经验" },
-        SPD_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "弹速" },
-        RNG_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "射程" },
-        MagnetRadius_Bonus = { Category = "PlayerStats", CategoryName = "玩家属性", Badge = "磁力" },
-        ALL = { Category = "Rare", CategoryName = "稀有通用", Badge = "全能" },
-        MultiShot = { Category = "WeaponProjectile", CategoryName = "武器弹道", Badge = "弹道" },
-        Pet_Count = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠物" },
-        Pet_ASPD_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠速" },
-        Pet_ATK_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "宠攻" },
-        WindBlade_Range_Bonus = { Category = "Pet", CategoryName = "宠物强化", Badge = "风刃" },
-        Sword_Unlocked = { Category = "Sword", CategoryName = "御剑技能", Badge = "御剑" },
-        Sword_Count = { Category = "Sword", CategoryName = "御剑技能", Badge = "剑数" },
-        Sword_ATK_Bonus = { Category = "Sword", CategoryName = "御剑技能", Badge = "剑伤" },
-        Sword_CD_Reduction = { Category = "Sword", CategoryName = "御剑技能", Badge = "冷却" },
+        ATK_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack" },
+        ASPD_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack Speed" },
+		EXP_Gain_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "EXP" },
+        Gold_ATK_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "Attack" },
+        Gold_ASPD_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "Attack Speed" },
+        Gold_MaxHP_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "HP" },
+        Gold_RNG_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "Range" },
+        Gold_MagnetRadius_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "Magnet" },
+        Gold_EXP_Gain_Bonus = { Category = "Rare", CategoryName = "Rare Boost", Badge = "EXP" },
+        SPD_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Bullet Speed" },
+        RNG_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Range" },
+        MagnetRadius_Bonus = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Magnet" },
+        ALL = { Category = "Rare", CategoryName = "Rare", Badge = "All" },
+        MultiShot = { Category = "WeaponProjectile", CategoryName = "Projectile", Badge = "Shot" },
+        Pet_Count = { Category = "Pet", CategoryName = "Pet", Badge = "Pet" },
+        Pet_ASPD_Bonus = { Category = "Pet", CategoryName = "Pet", Badge = "Pet Speed" },
+        Pet_ATK_Bonus = { Category = "Pet", CategoryName = "Pet", Badge = "Pet ATK" },
+        WindBlade_Range_Bonus = { Category = "Pet", CategoryName = "Pet", Badge = "Wind Blade" },
+        Sword_Unlocked = { Category = "Sword", CategoryName = "Sword", Badge = "Sword" },
+        Sword_Count = { Category = "Sword", CategoryName = "Sword", Badge = "Count" },
+        Sword_ATK_Bonus = { Category = "Sword", CategoryName = "Sword", Badge = "Damage" },
+        Sword_CD_Reduction = { Category = "Sword", CategoryName = "Sword", Badge = "Cooldown" },
     },
 
     -- 升级卡美术层别名配置；用于支持“四类颜色图”和“五类功能分类”同时存在。
@@ -543,36 +564,36 @@ local GameConfig = {
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
         -- 角色属性增益
-        { BuffId = "ATK_Bonus", Name = "攻击加成", Attr = "ATK_Bonus", Amount = 5, Color = Color3.fromRGB(255, 100, 100) },
-        { BuffId = "ASPD_Bonus", Name = "攻速加成", Attr = "ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 100) },
-        { BuffId = "MaxHP_Bonus", Name = "最大生命", Attr = "MaxHP_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 255) },
-        { BuffId = "SPD_Bonus", Name = "弹速加成", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
-        { BuffId = "RNG_Bonus", Name = "射程加成", Attr = "RNG_Bonus", Amount = 5, Color = Color3.fromRGB(200, 200, 100) },
-        { BuffId = "MagnetRadius_Bonus", Name = "磁力范围", Attr = "MagnetRadius_Bonus", Amount = 10, Color = Color3.fromRGB(180, 100, 255) },
-        { BuffId = "EXP_Gain_Bonus", Name = "经验倍率", Attr = "EXP_Gain_Bonus", Amount = 20, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 5 },
+        { BuffId = "ATK_Bonus", Name = "Attack Up", Attr = "ATK_Bonus", Amount = 5, Color = Color3.fromRGB(255, 100, 100) },
+        { BuffId = "ASPD_Bonus", Name = "Attack Speed Up", Attr = "ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 100) },
+        { BuffId = "MaxHP_Bonus", Name = "Max HP Up", Attr = "MaxHP_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 255) },
+        { BuffId = "SPD_Bonus", Name = "Bullet Speed Up", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
+        { BuffId = "RNG_Bonus", Name = "Range Up", Attr = "RNG_Bonus", Amount = 5, Color = Color3.fromRGB(200, 200, 100) },
+        { BuffId = "MagnetRadius_Bonus", Name = "Magnet Range", Attr = "MagnetRadius_Bonus", Amount = 10, Color = Color3.fromRGB(180, 100, 255) },
+        { BuffId = "EXP_Gain_Bonus", Name = "EXP Gain", Attr = "EXP_Gain_Bonus", Amount = 20, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 5 },
 
         -- 金色强化卡：保留原来的高数值效果，普通升级中低权重出现，Boss 奖励必定从金色池抽取
-        { BuffId = "Gold_ATK_Bonus", Name = "强力攻击", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_ASPD_Bonus", Name = "强力攻速", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_MaxHP_Bonus", Name = "强力生命", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_RNG_Bonus", Name = "强力射程", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_MagnetRadius_Bonus", Name = "强力磁力", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_EXP_Gain_Bonus", Name = "经验爆发", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 30 },
-        { BuffId = "ALL", Name = "小幅全能", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 30 },
+        { BuffId = "Gold_ATK_Bonus", Name = "Power Attack", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_ASPD_Bonus", Name = "Power Attack Speed", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_MaxHP_Bonus", Name = "Power HP", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_RNG_Bonus", Name = "Power Range", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_MagnetRadius_Bonus", Name = "Power Magnet", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
+        { BuffId = "Gold_EXP_Gain_Bonus", Name = "EXP Burst", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 30 },
+        { BuffId = "ALL", Name = "All Stats", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 30 },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
-        { BuffId = "MultiShot", Name = "弹道增加", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "额外弹道 70%伤害" },
+        { BuffId = "MultiShot", Name = "Extra Projectile", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "Extra projectiles deal 70% damage" },
 
         -- 宠物增益
-        { BuffId = "Pet_Count", Name = "增加宠物", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "Pet_ASPD_Bonus", Name = "宠物攻速", Attr = "Pet_ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "Pet_ATK_Bonus", Name = "宠物攻击", Attr = "Pet_ATK_Bonus", Amount = 10, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
-        { BuffId = "WindBlade_Range_Bonus", Name = "风刃范围", Attr = "WindBlade_Range_Bonus", Amount = 10, Color = Color3.fromRGB(120, 220, 255), RequiresPetSkill = "WindBlade" },
+        { BuffId = "Pet_Count", Name = "More Pets", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_ASPD_Bonus", Name = "Pet Attack Speed", Attr = "Pet_ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "Pet_ATK_Bonus", Name = "Pet Attack", Attr = "Pet_ATK_Bonus", Amount = 10, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
+        { BuffId = "WindBlade_Range_Bonus", Name = "Wind Blade Range", Attr = "WindBlade_Range_Bonus", Amount = 10, Color = Color3.fromRGB(120, 220, 255), RequiresPetSkill = "WindBlade" },
 
         -- 御剑流技能树 (利用 MaxLevel 控制上限，利用 Prereq 控制前置)
-        { BuffId = "Sword_Unlocked", Name = "御剑启动", Attr = "Sword_Unlocked", Amount = 1, Color = Color3.fromRGB(0, 255, 255), MaxLevel = 1, Weight = 40 },
-        { BuffId = "Sword_Count", Name = "飞剑数量", Attr = "Sword_Count", Amount = 1, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 5 }, -- 最多升5级，加上初始1把共6把
-        { BuffId = "Sword_ATK_Bonus", Name = "飞剑伤害", Attr = "Sword_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked" }, -- 每次提升 20%
-        { BuffId = "Sword_CD_Reduction", Name = "飞剑冷却", Attr = "Sword_CD_Reduction", Amount = 15, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 4 }, -- 最多升4级，4*15=60%上限
+        { BuffId = "Sword_Unlocked", Name = "Sword Mastery", Attr = "Sword_Unlocked", Amount = 1, Color = Color3.fromRGB(0, 255, 255), MaxLevel = 1, Weight = 40 },
+        { BuffId = "Sword_Count", Name = "Flying Sword Count", Attr = "Sword_Count", Amount = 1, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 5 }, -- 最多升5级，加上初始1把共6把
+        { BuffId = "Sword_ATK_Bonus", Name = "Flying Sword Damage", Attr = "Sword_ATK_Bonus", Amount = 20, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked" }, -- 每次提升 20%
+        { BuffId = "Sword_CD_Reduction", Name = "Flying Sword Cooldown", Attr = "Sword_CD_Reduction", Amount = 15, Color = Color3.fromRGB(0, 200, 255), Prereq = "Sword_Unlocked", MaxLevel = 4 }, -- 最多升4级，4*15=60%上限
     },
 
     -- Boss 击败奖励：必定弹出金色升级卡，Pool 填 LEVEL_UP_BUFF_POOL 里已有的 BuffId。
@@ -683,7 +704,7 @@ function GameConfig.GetRunSpeed(stageNum)
 	return currentSpeed
 end
 
--- 统一格式化大数字展示；例如 1000 -> 1K，1500000 -> 1.5M
+-- 统一格式化大数字展示；例如 1000 -> 1K，15200 -> 15.2K，1500000 -> 1.5M
 function GameConfig.FormatNumber(value)
 	local number = tonumber(value) or 0
 	local sign = number < 0 and "-" or ""
@@ -703,25 +724,17 @@ function GameConfig.FormatNumber(value)
 	for i, unit in ipairs(suffixes) do
 		if absNumber >= unit.Value then
 			local scaled = absNumber / unit.Value
-			local decimals = scaled < 10 and 1 or 0
-			local multiplier = 10 ^ decimals
+			local multiplier = 10
 			local rounded = math.floor(scaled * multiplier + 0.5) / multiplier
 
 			-- 999.9K 四舍五入到 1000K 时，自动进位成 1M，避免显示别扭
 			if rounded >= 1000 and i > 1 then
 				unit = suffixes[i - 1]
 				scaled = absNumber / unit.Value
-				decimals = scaled < 10 and 1 or 0
-				multiplier = 10 ^ decimals
 				rounded = math.floor(scaled * multiplier + 0.5) / multiplier
 			end
 
-			local text
-			if decimals > 0 then
-				text = string.gsub(string.format("%.1f", rounded), "%.0$", "")
-			else
-				text = tostring(math.floor(rounded))
-			end
+			local text = string.gsub(string.format("%.1f", rounded), "%.0$", "")
 
 			return sign .. text .. unit.Suffix
 		end

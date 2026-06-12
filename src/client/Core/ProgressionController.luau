@@ -3,9 +3,19 @@
 local ProgressionController = {}
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
 local Controllers -- 全局依赖指针
+
+-- 将当前局内等级同步给服务端头顶 UI；服务端会做上限和类型校验。
+local function reportRunLevel(level)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local reportEvent = remotes and remotes:FindFirstChild("ReportRunStats")
+	if reportEvent then
+		reportEvent:FireServer(true, level)
+	end
+end
 
 function ProgressionController.Init(deps)
 	Controllers = deps
@@ -40,6 +50,7 @@ function ProgressionController.AddExp(gainedExp)
 	player:SetAttribute("Level", currentLevel)
 	player:SetAttribute("EXP", currentExp)
 	player:SetAttribute("RequiredEXP", requiredExp)
+	reportRunLevel(currentLevel)
 	
 	if didLevelUp then
 		player:SetAttribute("LevelUpRewardMode", "Normal")

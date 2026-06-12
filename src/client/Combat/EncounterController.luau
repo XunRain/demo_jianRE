@@ -189,7 +189,152 @@ function EncounterController.ResetPointers(startZ)
 	LoadStageConfig(currentStage, startZ)
 end
 
--- 创建单个属性门 Part，并挂载 3D 数值文字。
+-- 获取 Studio 中配置好的属性门模型；资源缺失时返回 nil，后续会走白模兜底。
+local function getBuffGateTemplate()
+	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+	if not modelFolder then return nil end
+
+	return modelFolder:FindFirstChild("BuffGate")
+end
+
+-- 收集模型里的文字节点；用于把属性名和数值分别写入美术预留的两行 Label。
+local function collectGateTextNodes(root)
+	local textNodes = {}
+	for _, obj in ipairs(root:GetDescendants()) do
+		if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+			table.insert(textNodes, obj)
+		end
+	end
+
+	table.sort(textNodes, function(a, b)
+		if a.LayoutOrder ~= b.LayoutOrder then
+			return a.LayoutOrder < b.LayoutOrder
+		end
+
+		if a.Position.Y.Scale ~= b.Position.Y.Scale then
+			return a.Position.Y.Scale < b.Position.Y.Scale
+		end
+
+		if a.Position.Y.Offset ~= b.Position.Y.Offset then
+			return a.Position.Y.Offset < b.Position.Y.Offset
+		end
+
+		return a.Name < b.Name
+	end)
+
+	return textNodes
+end
+
+-- 查找美术明确命名的文字节点；如果没有命名，后续会按从上到下的顺序填充。
+local function findGateTextNode(root, names)
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and (node:IsA("TextLabel") or node:IsA("TextButton")) then
+			return node
+		end
+	end
+
+	return nil
+end
+
+-- 给属性门模型填文字；只改 Text 内容，不覆盖 Studio 里调好的颜色、字体、大小和位置。
+local function applyGateVisualText(visual, displayName, amountText, fullText)
+	local nameNode = findGateTextNode(visual, {
+		"NameText",
+		"TitleText",
+		"AttributeText",
+		"AttrText",
+		"BuffNameText",
+		"GateNameText",
+	})
+	local amountNode = findGateTextNode(visual, {
+		"AmountText",
+		"ValueText",
+		"BonusText",
+		"NumberText",
+		"GateAmountText",
+	})
+
+	if nameNode or amountNode then
+		if nameNode then nameNode.Text = displayName end
+		if amountNode then amountNode.Text = amountText end
+		return true
+	end
+
+	local textNodes = collectGateTextNodes(visual)
+	if #textNodes >= 2 then
+		textNodes[1].Text = displayName
+		textNodes[2].Text = amountText
+		return true
+	elseif #textNodes == 1 then
+		textNodes[1].Text = fullText
+		return true
+	end
+
+	return false
+end
+
+-- 将属性门美术模型摆放到判定盒位置；判定盒负责吃门逻辑，模型只负责视觉表现。
+local function attachBuffGateVisual(hitbox, isBuff, displayName, amountText, fullText)
+	local template = getBuffGateTemplate()
+	if not template then
+		return false, false
+	end
+
+	local visual = template:Clone()
+	visual.Name = "BuffGateVisual"
+	visual.Parent = hitbox
+
+	for _, obj in ipairs(visual:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			obj.Anchored = true
+			obj.CanCollide = false
+			obj.CanTouch = false
+			obj.CanQuery = false
+		end
+	end
+	local hasVisualText = applyGateVisualText(visual, displayName, amountText, fullText)
+
+	if visual:IsA("BasePart") then
+		visual.Anchored = true
+		visual.CanCollide = false
+		visual.CanTouch = false
+		visual.CanQuery = false
+		visual.Size = Vector3.new(hitbox.Size.X, math.max(hitbox.Size.Y, 1), math.max(hitbox.Size.Z, 0.2))
+		visual.CFrame = hitbox.CFrame
+		return true, hasVisualText
+	end
+
+	if visual:IsA("Model") then
+		local firstPart = visual:FindFirstChildWhichIsA("BasePart", true)
+		if not firstPart then
+			visual:Destroy()
+			return false, false
+		end
+
+		local _, boundsSize = visual:GetBoundingBox()
+		local scaleByWidth = hitbox.Size.X / math.max(boundsSize.X, 0.01)
+		local scaleByHeight = hitbox.Size.Y / math.max(boundsSize.Y, 0.01)
+		local scale = math.min(scaleByWidth, scaleByHeight)
+		if scale > 0 and scale < math.huge then
+			visual:ScaleTo(scale)
+		end
+
+		local boundsCFrame, scaledBoundsSize = visual:GetBoundingBox()
+		local targetCFrame = CFrame.new(
+			hitbox.Position.X,
+			hitbox.Position.Y - hitbox.Size.Y / 2 + scaledBoundsSize.Y / 2,
+			hitbox.Position.Z
+		)
+		visual:PivotTo(targetCFrame * (boundsCFrame - boundsCFrame.Position))
+		return true, hasVisualText
+	end
+
+	visual:Destroy()
+	return false, false
+end
+
+-- 创建单个属性门判定盒，并挂载 3D 数值文字和 Studio 美术模型。
 local function CreateGate(xOffset, gateWidth, zPos, trackStartX, trackSurfaceY, isBuff)
 	local Config = Controllers.Config
 	local currentStageConfig = stageConfig or Config.STAGES[1]
@@ -217,12 +362,14 @@ local function CreateGate(xOffset, gateWidth, zPos, trackStartX, trackSurfaceY, 
 	if not isBuff then amount = -amount end
 
 	local gate = Instance.new("Part")
+	gate.Name = "BuffGateHitbox"
 	gate.Size = Vector3.new(gateWidth, 10, 2)
 	gate.Position = Vector3.new(trackStartX + xOffset, trackSurfaceY + (gate.Size.Y / 2), zPos)
 	gate.Anchored = true
 	gate.CanCollide = false
-	gate.Transparency = 0.6
-	gate.Material = Enum.Material.Neon
+	gate.CanTouch = false
+	gate.CanQuery = false
+	gate.Transparency = 1
 	gate.Color = isBuff and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
 
 	local sign = amount > 0 and "+" or ""
@@ -230,13 +377,23 @@ local function CreateGate(xOffset, gateWidth, zPos, trackStartX, trackSurfaceY, 
 
 	local percentageSuffix = string.find(attr, "Bonus") and "%" or ""
 
-	local text = string.format("%s\n%s%s%s", displayName, sign, tostring(amount), percentageSuffix)
-
-	Controllers.VFX.CreateBillboard(gate, text, Color3.new(1,1,1), -(gate.Size.Y / 2))
+	local amountText = string.format("%s%s%s", sign, tostring(amount), percentageSuffix)
+	local text = string.format("%s\n%s", displayName, amountText)
 
 	local folder = Workspace:FindFirstChild("LocalEncounters") or Instance.new("Folder", Workspace)
 	folder.Name = "LocalEncounters"
 	gate.Parent = folder
+
+	local hasVisual, hasVisualText = attachBuffGateVisual(gate, isBuff, displayName, amountText, text)
+	if not hasVisual then
+		-- 属性门模型缺失时保留旧版白模，方便本地调试和资源未同步时继续测试。
+		gate.Transparency = 0.6
+		gate.Material = Enum.Material.Neon
+	end
+
+	if not hasVisualText then
+		Controllers.VFX.CreateBillboard(gate, text, Color3.new(1,1,1), -(gate.Size.Y / 2))
+	end
 
 	return { part = gate, attr = attr, amount = amount }
 end
@@ -377,6 +534,22 @@ local function createEnemyVisual(enemyType, hitbox, trackSurfaceY, Config)
 	return visual
 end
 
+-- 查找怪物模型里美术预制的 HP 显示；结构建议：HP(part)/SurfaceGui/TextLabel。
+local function findEnemyHpDisplay(visual)
+	if not visual then return nil, nil end
+
+	local hpNode = visual:FindFirstChild("HP", true)
+	if not hpNode then return nil, nil end
+
+	local surfaceGui = hpNode:FindFirstChildWhichIsA("SurfaceGui", true)
+	if not surfaceGui then return nil, nil end
+
+	local textLabel = surfaceGui:FindFirstChildWhichIsA("TextLabel", true)
+	if not textLabel then return nil, nil end
+
+	return textLabel, surfaceGui
+end
+
 -- 创建怪物战斗实体，包含碰撞盒、属性、展示模型和血条文字。
 local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackSurfaceY)
 	local Config = Controllers.Config
@@ -431,13 +604,26 @@ local baseHP = currentStageConfig.BasicHP or 30
 		enemy.Transparency = 0
 	end
 
-	local hpLabel = Controllers.VFX.CreateBillboard(enemy, Controllers.Config.FormatNumber(hp), Color3.new(1,1,1), -enemy.Size.Y + 1)
+	local hpLabel, hpSurfaceGui = findEnemyHpDisplay(enemyVisual)
+	local hpBillboard = nil
+	if hpLabel then
+		hpLabel.Text = Controllers.Config.FormatNumber(hp)
+		hpSurfaceGui.Enabled = true
+	else
+		hpLabel = Controllers.VFX.CreateBillboard(enemy, Controllers.Config.FormatNumber(hp), Color3.new(1,1,1), -enemy.Size.Y + 1)
+		hpBillboard = hpLabel and hpLabel.Parent
+		if hpBillboard and hpBillboard:IsA("BillboardGui") then
+			hpBillboard.Enabled = true
+		end
+	end
 
 	table.insert(EncounterController.ActiveEnemies, {
 		part = enemy,
 		hp = hp,
 		maxHp = hp,
 		label = hpLabel,
+		hpBillboard = hpBillboard,
+		hpSurfaceGui = hpSurfaceGui,
 		type = enemyType,
 		baseSize = enemy.Size,
 		visual = enemyVisual

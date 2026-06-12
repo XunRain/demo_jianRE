@@ -41,6 +41,7 @@ function VFXController.CreateBillboard(part, text, textColor, yOffset)
 	if label and label:IsA("TextLabel") then
 		label.Text = text
 		label.TextColor3 = textColor
+		label.Font = Enum.Font.Cartoon
 		if string.find(text, "\n") then
 			billboard.Size = UDim2.new(
 				billboard.Size.X.Scale,
@@ -399,7 +400,7 @@ function VFXController.CreateGuide(targetPart, text)
 	currentGuideBeam.LightEmission = 1
 	currentGuideBeam.Parent = rootPart
 
-	currentGuideLabel = VFXController.CreateBillboard(targetPart, "遇到困难了？" .. text, Color3.fromRGB(255, 255, 100), 4)
+	currentGuideLabel = VFXController.CreateBillboard(targetPart, "Need help? " .. text, Color3.fromRGB(255, 255, 100), 4)
 end
 
 -- 清除当前引导光束、附件和文字。

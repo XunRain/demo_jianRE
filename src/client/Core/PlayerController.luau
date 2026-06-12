@@ -10,9 +10,6 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera 
 local keyboardMoveDirection = 0 -- Keyboard input direction
-local touchMoveDirection = 0 -- Mobile touch input direction
-local activeTouchInput = nil -- 当前正在控制横移的触控输入对象
-local touchStartX = 0 -- 本次滑动的起点 X 坐标
 
 local Controllers -- 全局依赖指针
 local moveDirection = 0 -- 玩家当前的键盘输入方向 (-1左, 0不动, 1右)
@@ -21,27 +18,20 @@ function PlayerController.Init(deps)
 	Controllers = deps
 end
 
--- 合并键盘和触控方向；触控有输入时优先使用触控，避免手机滑动和键盘状态互相干扰。
-local function refreshMoveDirection()
-	if touchMoveDirection ~= 0 then
-		moveDirection = touchMoveDirection
-	else
-		moveDirection = keyboardMoveDirection
-	end
+-- 判断当前设备是否支持触控摇杆；Studio 手机模拟器可能同时开启 KeyboardEnabled，所以这里只看 TouchEnabled。
+local function hasTouchControls()
+	return UserInputService.TouchEnabled
 end
 
--- 清理手机端触控输入状态；用于松手、升级暂停、非战斗等场景。
-local function clearTouchInput()
-	activeTouchInput = nil
-	touchStartX = 0
-	touchMoveDirection = 0
-	refreshMoveDirection()
+-- 刷新键盘方向；手机端的摇杆方向会在每帧从 Humanoid.MoveDirection 读取。
+local function refreshMoveDirection()
+	moveDirection = keyboardMoveDirection
 end
 
 -- 清理全部横向输入；外部强制暂停或退出战斗时调用。
 local function clearAllMoveInput()
 	keyboardMoveDirection = 0
-	clearTouchInput()
+	moveDirection = 0
 end
 
 -- 判断当前是否允许战斗输入；升级选卡和非战斗状态下不响应键盘/触控。
@@ -49,33 +39,40 @@ local function canUseCombatInput()
 	return Controllers and Controllers.Game and Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp")
 end
 
--- 判断触控点是否位于屏幕下半区，避免点击升级卡、背包、商店等 UI 时误触横移。
-local function isTouchInActiveArea(input)
-	local currentCamera = Workspace.CurrentCamera or camera
-	if not currentCamera then return false end
-
-	local activeRatio = Controllers.Config.MOBILE_TOUCH_ACTIVE_Y_RATIO or 0.5
-	return input.Position.Y >= currentCamera.ViewportSize.Y * activeRatio
-end
-
--- 根据手指相对起点的横向偏移刷新移动方向，死区内保持停止。
-local function updateTouchDirection(input)
-	local deadzone = Controllers.Config.MOBILE_TOUCH_DEADZONE or 20
-	local deltaX = input.Position.X - touchStartX
-
-	if math.abs(deltaX) < deadzone then
-		touchMoveDirection = 0
-	elseif deltaX < 0 then
-		touchMoveDirection = -1
-	else
-		touchMoveDirection = 1
+-- 手机端读取 Roblox 原生摇杆产生的横向移动量；只取 X 轴，Z 轴仍由跑酷自动前进控制。
+local function updateNativeJoystickDirection(humanoid)
+	if not hasTouchControls() or Controllers.Config.MOBILE_USE_NATIVE_JOYSTICK == false then
+		return
 	end
 
-	refreshMoveDirection()
+	if not canUseCombatInput() or not humanoid then
+		moveDirection = 0
+		return
+	end
+
+	local joystickX = math.clamp(humanoid.MoveDirection.X, -1, 1)
+	local deadzone = Controllers.Config.MOBILE_JOYSTICK_DEADZONE or 0.15
+	if math.abs(joystickX) < deadzone then
+		moveDirection = 0
+	else
+		moveDirection = joystickX
+	end
+end
+
+-- 手机端使用 Roblox 原生动态摇杆；pcall 防止不同运行环境下属性不可写导致报错。
+local function ensureNativeTouchControls()
+	if not hasTouchControls() or Controllers.Config.MOBILE_USE_NATIVE_JOYSTICK == false then
+		return
+	end
+
+	pcall(function()
+		player.DevTouchMovementMode = Enum.DevTouchMovementMode.DynamicThumbstick
+	end)
 end
 
 -- 启动输入监听与渲染主循环
 function PlayerController.Start()
+	ensureNativeTouchControls()
 	PlayerController.SetupInput()
 	-- 将无优先级的 Connect 改为有优先级的 BindToRenderStep
 	-- 绑定在 Camera.Value (200)。由于 200 先执行，震屏的 201 后执行，
@@ -86,11 +83,7 @@ end
 -- 供外部模块调用的接口 (例如：升级暂停、重置开局时，强制重置移动状态)
 function PlayerController.SetMoveDirection(dir)
 	keyboardMoveDirection = dir
-	if dir == 0 then
-		clearTouchInput()
-	else
-		refreshMoveDirection()
-	end
+	refreshMoveDirection()
 end
 
 -- 绑定玩家的键盘按键输入
@@ -119,31 +112,6 @@ function PlayerController.SetupInput()
 				keyboardMoveDirection = 0
 				refreshMoveDirection()
 			end
-		end
-	end)
-
-	UserInputService.TouchStarted:Connect(function(input, gameProcessed)
-		if gameProcessed or activeTouchInput or not canUseCombatInput() or not isTouchInActiveArea(input) then return end
-
-		activeTouchInput = input
-		touchStartX = input.Position.X
-		touchMoveDirection = 0
-		refreshMoveDirection()
-	end)
-
-	UserInputService.TouchMoved:Connect(function(input, gameProcessed)
-		if input ~= activeTouchInput then return end
-		if gameProcessed or not canUseCombatInput() then
-			clearTouchInput()
-			return
-		end
-
-		updateTouchDirection(input)
-	end)
-
-	UserInputService.TouchEnded:Connect(function(input, gameProcessed)
-		if input == activeTouchInput then
-			clearTouchInput()
 		end
 	end)
 end
@@ -179,6 +147,7 @@ function PlayerController.OnRenderStepped(dt)
 	-- ─── 阶段 C: 跑酷战斗状态 ───
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false) 
 	humanoid.AutoRotate = false                                    
+	updateNativeJoystickDirection(humanoid)
 	
 	local currentPos = rootPart.Position
 	local Config = Controllers.Config
