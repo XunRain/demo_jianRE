@@ -45,19 +45,19 @@ local GameConfig = {
     -- 后续只需要调整 Range 或 Formula，就能改变升级曲线。
     EXP_FORMULA_RULES = {
         {
-            Range = "1-20",
+            Range = "1-13",
             Formula = function(x)
-                return 15 * x
+                return 20 * x
             end,
         },
         {
-            Range = "21-40",
+            Range = "14-35",
             Formula = function(x)
                 return 20 * x + 5 * x ^ 2
             end,
         },
         {
-            Range = "41-",
+            Range = "36-",
             Formula = function(x)
                 return 20 + 20 * 1.2 ^ (x - 40)
             end,
@@ -77,11 +77,11 @@ local GameConfig = {
     -- 客户端光照切换配置：大厅使用 Studio 默认光照，进入战斗后切到跑道专用光照方向。
     -- 不需要该功能时，把 Enabled 改成 false 即可完全关闭光照切换。
     COMBAT_LIGHTING = {
-        Enabled = false, -- 战斗光照切换总开关
+        Enabled = true, -- 战斗光照切换总开关
         TransitionTime = 0.75, -- 光照切换过渡时间，避免进入/退出战斗时画面突然闪烁
-        ClockTime = 9.5, -- 战斗太阳时间；用于改变阴影朝向，后续按跑道画面继续微调
-        GeographicLatitude = -35, -- 战斗太阳纬度；与 ClockTime 配合控制影子方向
-        Brightness = 2, -- 战斗亮度；设置为 nil 则沿用大厅默认亮度
+        ClockTime = 11.2, -- 战斗太阳时间；用于改变阴影朝向，后续按跑道画面继续微调
+        GeographicLatitude = 57, -- 战斗太阳纬度；与 ClockTime 配合控制影子方向
+        Brightness = nil, -- 战斗亮度；设置为 nil 则沿用大厅默认亮度
     },
 
     -- 全服持久排行榜配置；展示板在 Studio 中命名为 LeaderboardBoard 即可被客户端自动绑定。
@@ -96,6 +96,79 @@ local GameConfig = {
         SelfRankScanLimit = 200,
         MissingWarnDelay = 10,
     },
+
+	ACHIEVEMENTS = {
+		{
+			Id = "Distance_1000",
+			Type = "Distance",
+			Title = "1000m Reward",
+			Details = "Reach 1000 meters to claim rewards.",
+			Target = 1000,
+			RewardTickets = 1,
+			RewardCoins = 100,
+			SortOrder = 100,
+		},
+		{
+			Id = "Distance_5000",
+			Type = "Distance",
+			Title = "5000m Reward",
+			Details = "Reach 5000 meters to claim rewards.",
+			Target = 5000,
+			RewardTickets = 2,
+			RewardCoins = 300,
+			SortOrder = 110,
+		},
+		{
+			Id = "Distance_10000",
+			Type = "Distance",
+			Title = "10000m Reward",
+			Details = "Reach 10000 meters to claim rewards.",
+			Target = 10000,
+			RewardTickets = 3,
+			RewardCoins = 600,
+			SortOrder = 120,
+		},
+		{
+			Id = "Stage_1",
+			Type = "Stage",
+			Title = "Stage 1 Reward",
+			Details = "Reach Stage 1 to claim rewards.",
+			Target = 1,
+			RewardTickets = 1,
+			RewardCoins = 100,
+			SortOrder = 200,
+		},
+		{
+			Id = "Stage_5",
+			Type = "Stage",
+			Title = "Stage 5 Reward",
+			Details = "Reach Stage 5 to claim rewards.",
+			Target = 5,
+			RewardTickets = 2,
+			RewardCoins = 500,
+			SortOrder = 210,
+		},
+		{
+			Id = "Stage_10",
+			Type = "Stage",
+			Title = "Stage 10 Reward",
+			Details = "Reach Stage 10 to claim rewards.",
+			Target = 10,
+			RewardTickets = 3,
+			RewardCoins = 1000,
+			SortOrder = 220,
+		},
+		{
+			Id = "Stage_100",
+			Type = "Stage",
+			Title = "Stage 100 Reward",
+			Details = "Reach Stage 100 to claim rewards.",
+			Target = 100,
+			RewardTickets = 10,
+			RewardCoins = 5000,
+			SortOrder = 230,
+		},
+	},
 
     -- 5. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
     STAGES = {
@@ -129,9 +202,9 @@ local GameConfig = {
             EliteCount = 2,
             HasBoss = true,
 
-            BasicHP = 30,
-            EliteHP = 60,
-            BossHP = 120,
+            BasicHP = 40,
+            EliteHP = 80,
+            BossHP = 100,
 
             GATE_ATK_BONUS_MIN = 5,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 5, GATE_ASPD_BONUS_MAX = 15,
@@ -151,9 +224,9 @@ local GameConfig = {
             EliteCount = 2,
             HasBoss = true,
 
-            BasicHP = 40,
+            BasicHP = 50,
             EliteHP = 100,
-            BossHP = 220,
+            BossHP = 200,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -172,9 +245,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 50,
+            BasicHP = 60,
             EliteHP = 120,
-            BossHP = 240,
+            BossHP = 400,
 
            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -194,9 +267,9 @@ local GameConfig = {
             HasBoss = true,
 
             -- 第 5 关作为无尽模式的基底，怪群非常密集
-            BasicHP = 60,
+            BasicHP = 70,
             EliteHP = 140,
-            BossHP = 280,
+            BossHP = 500,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -213,8 +286,8 @@ local GameConfig = {
     -- 第 5 关之后，怪物血量按关卡和怪物类型分别成长；数值代表“相对上一关增加的比例”。
     ENEMY_HP_STAGE_SCALE_START = 5,
     ENEMY_HP_STAGE_SCALE_RATE = {
-        Basic = 0.2, -- 普通怪：每关相对上一关 +20%
-        Elite = 0.4, -- 精英怪：每关相对上一关 +40%
+        Basic = 0.5, -- 普通怪：每关相对上一关 +20%
+        Elite = 0.5, -- 精英怪：每关相对上一关 +40%
         Boss = 0.6, -- Boss：每关相对上一关 +60%
     },
     ENEMY_HP_SCALE_DIST = 1000, -- 旧版距离成长配置；当前血量逻辑已改为按关卡成长，保留字段避免旧引用报错
@@ -302,6 +375,11 @@ local GameConfig = {
 
     -- 9. 宠物与抽卡系统配置
 	PET_GACHA_COST = 2000,
+	PET_DRAW_TICKET_COST = 1,
+	PET_DRAW_BUY_COST = 10000, -- Hatch_Pet_Egg.Equip_1 购买 1 次抽宠次数需要的金币
+	PET_LEVEL_MIN = 1, -- 抽到宠物的最低等级；ATK 字段代表 1 级基础攻击力
+	PET_LEVEL_MAX = 100, -- 抽到宠物的最高等级
+	PET_LEVEL_ATK_STEP = 0.5, -- 每提升 1 级，攻击倍率额外增加 0.5；1级=1x，2级=1.5x
 
 	PET_BAG_UI = {
 		MaxEquipSlots = 1, -- 出战区显示的槽位数量；当前玩法只支持 1 个出战宠物
@@ -332,6 +410,7 @@ local GameConfig = {
 		["Slime"] = {
 			Name = "Slime",
 			Rarity = "Common",
+			Quality = 1,
 			Weight = 45,
 			SortOrder = 100,
 			Description = "WindBlade",
@@ -350,6 +429,7 @@ local GameConfig = {
 		["Dragon"] = {
 			Name = "Dragon",
 			Rarity = "Rare",
+			Quality = 2,
 			Weight = 22,
 			SortOrder = 200,
 			Description = "Fireball",
@@ -367,6 +447,7 @@ local GameConfig = {
 		["Angel"] = {
 			Name = "Angel",
 			Rarity = "Epic",
+			Quality = 3,
 			Weight = 8,
 			SortOrder = 300,
 			Description = "AngelSmite",
@@ -573,15 +654,15 @@ local GameConfig = {
         { BuffId = "EXP_Gain_Bonus", Name = "EXP Gain", Attr = "EXP_Gain_Bonus", Amount = 20, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 5 },
 
         -- 金色强化卡：保留原来的高数值效果，普通升级中低权重出现，Boss 奖励必定从金色池抽取
-        { BuffId = "Gold_ATK_Bonus", Name = "Power Attack", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_ASPD_Bonus", Name = "Power Attack Speed", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_MaxHP_Bonus", Name = "Power HP", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_RNG_Bonus", Name = "Power Range", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_MagnetRadius_Bonus", Name = "Power Magnet", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 30 },
-        { BuffId = "Gold_EXP_Gain_Bonus", Name = "EXP Burst", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 30 },
-        { BuffId = "ALL", Name = "All Stats", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 30 },
+        { BuffId = "Gold_ATK_Bonus", Name = "Power Attack", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_ASPD_Bonus", Name = "Power Attack Speed", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_MaxHP_Bonus", Name = "Power HP", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_RNG_Bonus", Name = "Power Range", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_MagnetRadius_Bonus", Name = "Power Magnet", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_EXP_Gain_Bonus", Name = "EXP Burst", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 15 },
+        { BuffId = "ALL", Name = "All Stats", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 20 },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
-        { BuffId = "MultiShot", Name = "Extra Projectile", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 40, CardNote = "Extra projectiles deal 70% damage" },
+        { BuffId = "MultiShot", Name = "Extra Projectile", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20, CardNote = "Extra projectiles deal 70% damage" },
 
         -- 宠物增益
         { BuffId = "Pet_Count", Name = "More Pets", Attr = "Pet_Count", Amount = 1, Color = Color3.fromRGB(255, 150, 200), RequiresPet = true },
@@ -775,6 +856,46 @@ function GameConfig.RollPetId()
 		return petId
 	end
 	return nil
+end
+
+-- 规范化宠物等级；用于抽宠、UI 展示和战斗伤害统一计算。
+function GameConfig.NormalizePetLevel(level)
+	local minLevel = GameConfig.PET_LEVEL_MIN or 1
+	local maxLevel = GameConfig.PET_LEVEL_MAX or 100
+	return math.clamp(math.floor(tonumber(level) or minLevel), minLevel, maxLevel)
+end
+
+-- 根据宠物等级计算攻击倍率：1级=1x，2级=1.5x，3级=2x，以此类推。
+function GameConfig.GetPetLevelMultiplier(level)
+	local minLevel = GameConfig.PET_LEVEL_MIN or 1
+	local step = GameConfig.PET_LEVEL_ATK_STEP or 0.5
+	local normalizedLevel = GameConfig.NormalizePetLevel(level)
+	return 1 + math.max(0, normalizedLevel - minLevel) * step
+end
+
+-- 获取宠物最终攻击力；PETS[petId].ATK 作为 1 级基础攻击力。
+function GameConfig.GetPetAttack(petId, level)
+	local petConfig = GameConfig.PETS[petId]
+	if not petConfig then return 0 end
+	return math.max(0, math.floor(((petConfig.ATK or 0) * GameConfig.GetPetLevelMultiplier(level)) + 0.5))
+end
+
+-- 获取宠物三档品质，用于 UI 模板 pet_farme_quality1-3 和详情渐变 UIGradient_1-3。
+function GameConfig.GetPetQuality(petId)
+	local petConfig = GameConfig.PETS[petId]
+	if not petConfig then return 1 end
+	if petConfig.Quality then
+		return math.clamp(math.floor(tonumber(petConfig.Quality) or 1), 1, 3)
+	end
+
+	local rarityQuality = {
+		Common = 1,
+		Rare = 2,
+		Epic = 3,
+		Legendary = 3,
+	}
+
+	return rarityQuality[petConfig.Rarity] or 1
 end
 
 -- 获取宠物背包排序值；优先使用 SortOrder，未配置时按稀有度兜底

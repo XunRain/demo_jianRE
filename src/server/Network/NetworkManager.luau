@@ -83,13 +83,44 @@ function NetworkManager.Start()
 		end
 
 		local owned = {}
-		for _, petId in ipairs(decoded) do
-			if type(petId) == "string" and GameConfig.PETS[petId] then
-				table.insert(owned, petId)
+		local needsMigration = false
+		for index, petEntry in ipairs(decoded) do
+			if type(petEntry) == "string" and GameConfig.PETS[petEntry] then
+				needsMigration = true
+				table.insert(owned, {
+					Uid = string.format("legacy_%d_%s_%d", player.UserId, petEntry, index),
+					Id = petEntry,
+					Level = GameConfig.PET_LEVEL_MIN or 1,
+				})
+			elseif type(petEntry) == "table" and type(petEntry.Id) == "string" and GameConfig.PETS[petEntry.Id] then
+				local uid = type(petEntry.Uid) == "string" and petEntry.Uid or string.format("pet_%d_%d_%d", player.UserId, os.time(), index)
+				local level = GameConfig.NormalizePetLevel and GameConfig.NormalizePetLevel(petEntry.Level) or math.max(1, math.floor(tonumber(petEntry.Level) or 1))
+				if uid ~= petEntry.Uid or level ~= petEntry.Level then
+					needsMigration = true
+				end
+				table.insert(owned, {
+					Uid = uid,
+					Id = petEntry.Id,
+					Level = level,
+				})
 			end
 		end
 
+		if needsMigration then
+			player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
+		end
+
 		return owned
+	end
+
+	local function createPetInstance(player, petId)
+		local minLevel = GameConfig.PET_LEVEL_MIN or 1
+		local maxLevel = GameConfig.PET_LEVEL_MAX or 100
+		return {
+			Uid = HttpService:GenerateGUID(false),
+			Id = petId,
+			Level = math.random(minLevel, maxLevel),
+		}
 	end
 
 	-- 1. 抽卡请求 (使用 RemoteFunction，因为需要向客户端返回抽到了什么)
@@ -97,49 +128,129 @@ function NetworkManager.Start()
 	rollPetRF.Name = "RollPet"
 	
 	rollPetRF.OnServerInvoke = function(player)
-		local coins = player:GetAttribute("Coins") or 0
-		if coins >= GameConfig.PET_GACHA_COST then
-			-- 扣钱
-			player:SetAttribute("Coins", coins - GameConfig.PET_GACHA_COST)
-			
-			-- 按宠物配置表权重随机出货
-			local resultId = GameConfig.RollPetId()
-			if not resultId or not GameConfig.PETS[resultId] then
-				warn("宠物抽卡失败：配置表没有可用宠物。")
-				player:SetAttribute("Coins", coins)
-				return nil
-			end
-			
-			-- 解析 JSON 背包 -> 塞入新宠物 -> 重新压成 JSON 存入玩家属性
-			local owned = decodeOwnedPets(player)
-			table.insert(owned, resultId)
-			player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
-			
-			print(player.Name .. " 抽中了宠物: " .. resultId)
-			return resultId -- 将抽奖结果返回给客户端用于展示特效
+		local tickets = math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0))
+		local ticketCost = math.max(1, math.floor(GameConfig.PET_DRAW_TICKET_COST or 1))
+		if tickets < ticketCost then
+			return nil
 		end
-		return nil
+
+		player:SetAttribute("PetDrawTickets", tickets - ticketCost)
+
+		-- 按宠物配置表权重随机出货
+		local resultId = GameConfig.RollPetId()
+		if not resultId or not GameConfig.PETS[resultId] then
+			warn("宠物抽卡失败：配置表没有可用宠物。")
+			player:SetAttribute("PetDrawTickets", tickets)
+			return nil
+		end
+
+		-- 解析 JSON 背包 -> 塞入新宠物 -> 重新压成 JSON 存入玩家属性
+		local owned = decodeOwnedPets(player)
+		local petInstance = createPetInstance(player, resultId)
+		table.insert(owned, petInstance)
+		player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
+
+		print(string.format("%s 抽中了宠物: %s Lv.%d", player.Name, resultId, petInstance.Level))
+		return petInstance -- 将抽奖结果返回给客户端用于展示特效
+	end
+
+	-- 1.5 购买抽宠次数：服务端扣金币并增加 PetDrawTickets，避免客户端作弊直接改属性
+	local buyPetDrawTicketRF = remotes:FindFirstChild("BuyPetDrawTicket") or Instance.new("RemoteFunction", remotes)
+	buyPetDrawTicketRF.Name = "BuyPetDrawTicket"
+
+	buyPetDrawTicketRF.OnServerInvoke = function(player)
+		local cost = math.max(1, math.floor(GameConfig.PET_DRAW_BUY_COST or 10000))
+		local currentCoins = math.max(0, math.floor(player:GetAttribute("Coins") or 0))
+		if currentCoins < cost then
+			return {
+				Success = false,
+				Reason = "NotEnoughCoins",
+				Cost = cost,
+				Coins = currentCoins,
+				Tickets = math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0)),
+			}
+		end
+
+		local tickets = math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0))
+		local newTickets = tickets + 1
+		player:SetAttribute("Coins", currentCoins - cost)
+		player:SetAttribute("PetDrawTickets", newTickets)
+
+		return {
+			Success = true,
+			Cost = cost,
+			Coins = currentCoins - cost,
+			Tickets = newTickets,
+		}
 	end
 
 	-- 2. 装备/卸下宠物请求
 	local equipPetEvent = remotes:FindFirstChild("EquipPet") or Instance.new("RemoteEvent", remotes)
 	equipPetEvent.Name = "EquipPet"
 	
-	equipPetEvent.OnServerEvent:Connect(function(player, petId)
+	equipPetEvent.OnServerEvent:Connect(function(player, petUidOrId)
 		-- 如果传过来的是空字符串，说明玩家点击了卸下宠物
-		if petId == "" then
+		if petUidOrId == "" then
 			player:SetAttribute("EquippedPet", "")
+			player:SetAttribute("EquippedPetUid", "")
+			player:SetAttribute("EquippedPetLevel", 1)
 			return
 		end
 
-		if type(petId) ~= "string" or not GameConfig.PETS[petId] then
+		if type(petUidOrId) ~= "string" then
 			return
 		end
 
 		local owned = decodeOwnedPets(player)
-		-- 校验是否真的拥有该宠物
-		if table.find(owned, petId) then
-			player:SetAttribute("EquippedPet", petId)
+		-- 优先按唯一实例 ID 装备；兼容旧客户端传 petId 时选择第一只同 ID 宠物。
+		for _, petEntry in ipairs(owned) do
+			if petEntry.Uid == petUidOrId or petEntry.Id == petUidOrId then
+				player:SetAttribute("EquippedPet", petEntry.Id)
+				player:SetAttribute("EquippedPetUid", petEntry.Uid)
+				player:SetAttribute("EquippedPetLevel", GameConfig.NormalizePetLevel and GameConfig.NormalizePetLevel(petEntry.Level) or petEntry.Level or 1)
+				return
+			end
+		end
+	end)
+
+	-- 2.5 删除宠物请求：只能删除玩家自己背包里存在的宠物实例。
+	local removePetEvent = remotes:FindFirstChild("RemovePet") or Instance.new("RemoteEvent", remotes)
+	removePetEvent.Name = "RemovePet"
+
+	removePetEvent.OnServerEvent:Connect(function(player, petUidOrId)
+		if type(petUidOrId) ~= "string" or petUidOrId == "" then
+			return
+		end
+
+		local owned = decodeOwnedPets(player)
+		local removedEntry = nil
+		for index, petEntry in ipairs(owned) do
+			-- 优先按唯一实例 ID 删除；保留 petId 兼容但只会删除第一只同 ID 宠物。
+			if petEntry.Uid == petUidOrId or petEntry.Id == petUidOrId then
+				removedEntry = petEntry
+				table.remove(owned, index)
+				break
+			end
+		end
+
+		if not removedEntry then
+			return
+		end
+
+		player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
+
+		-- 如果删除的是当前装备宠物，清空装备状态，避免后续战斗引用不存在的宠物实例。
+		-- 新存档按 Uid 精确判断；只有旧存档没有 EquippedPetUid 时才按宠物 Id 兼容。
+		local equippedUid = player:GetAttribute("EquippedPetUid") or ""
+		local removedEquippedPet = equippedUid ~= "" and equippedUid == removedEntry.Uid
+		if not removedEquippedPet and equippedUid == "" then
+			removedEquippedPet = player:GetAttribute("EquippedPet") == removedEntry.Id
+		end
+
+		if removedEquippedPet then
+			player:SetAttribute("EquippedPet", "")
+			player:SetAttribute("EquippedPetUid", "")
+			player:SetAttribute("EquippedPetLevel", 1)
 		end
 	end)
 

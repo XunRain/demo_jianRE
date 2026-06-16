@@ -11,6 +11,7 @@ local Services = {
 	DataManager    = require(script.Core:WaitForChild("DataManager")),
 	CharacterStatsManager = require(script.Core:WaitForChild("CharacterStatsManager")),
 	LeaderboardManager = require(script.Core:WaitForChild("LeaderboardManager")),
+	AchievementManager = require(script.Core:WaitForChild("AchievementManager")),
 	NetworkManager = require(script.Network:WaitForChild("NetworkManager")),
 }
 

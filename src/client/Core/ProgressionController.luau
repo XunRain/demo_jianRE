@@ -9,11 +9,19 @@ local player = Players.LocalPlayer
 local Controllers -- 全局依赖指针
 
 -- 将当前局内等级同步给服务端头顶 UI；服务端会做上限和类型校验。
+-- 计算当前主武器攻击力，用于同步服务端头顶 UI；与 CombatController 的基础攻击公式保持一致。
+local function getCurrentAttackForDisplay()
+	local config = Controllers and Controllers.Config
+	local baseAtk = (config and config.BASE_ATK) or player:GetAttribute("ATK") or 0
+	local atkBonus = player:GetAttribute("ATK_Bonus") or 0
+	return math.floor(baseAtk * (1 + (atkBonus / 100)))
+end
+
 local function reportRunLevel(level)
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local reportEvent = remotes and remotes:FindFirstChild("ReportRunStats")
 	if reportEvent then
-		reportEvent:FireServer(true, level)
+		reportEvent:FireServer(true, level, getCurrentAttackForDisplay())
 	end
 end
 

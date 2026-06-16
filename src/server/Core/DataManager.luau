@@ -15,6 +15,10 @@ local DEFAULT_STATS = {
     -- 宠物相关存档
 	OwnedPets_JSON = "[]", -- 用 JSON 字符串格式存储拥有的宠物数组
 	EquippedPet = "",      -- 当前上阵的宠物 ID
+	EquippedPetUid = "",   -- 当前上阵的宠物唯一实例 ID
+	EquippedPetLevel = 1,  -- 当前上阵宠物等级
+	PetDrawTickets = 0,
+	ClaimedAchievements_JSON = "{}",
 
     -- 记录玩家是否已经看过第二关的引导
 	HasSeenStage2Guide = false,
@@ -31,7 +35,10 @@ local DEFAULT_STATS = {
 -- 适合测试号快速重置进度；该逻辑每次进游戏都会生效。
 local RESET_REWARD_WHITELIST = {
 	[10162193146] = {
-		Coins = 50000,
+		Coins = 10,
+	},
+	[10761954496] = {
+		Coins = 10000000000000000,
 	},
 }
 
@@ -112,6 +119,10 @@ function DataManager.SavePlayerData(player)
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
         OwnedPets_JSON = player:GetAttribute("OwnedPets_JSON") or "[]",
 		EquippedPet = player:GetAttribute("EquippedPet") or "",
+		EquippedPetUid = player:GetAttribute("EquippedPetUid") or "",
+		EquippedPetLevel = player:GetAttribute("EquippedPetLevel") or 1,
+		PetDrawTickets = player:GetAttribute("PetDrawTickets") or 0,
+		ClaimedAchievements_JSON = player:GetAttribute("ClaimedAchievements_JSON") or "{}",
 
         -- 将第二关引导标记一起存入云端
 		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,

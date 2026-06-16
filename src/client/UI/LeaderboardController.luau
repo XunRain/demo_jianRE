@@ -11,6 +11,51 @@ local Controllers
 local thumbnailCache = {}
 local lastLeaderboardSnapshot = nil
 
+local function applyRankStyle(row, rank)
+	if not row or not row:IsA("GuiObject") then return end
+
+	local backgroundNode = nil
+	for _, name in ipairs({
+		"Background",
+		"RowBackground",
+		"Bg",
+		"BG",
+		"BackgroundImage",
+	}) do
+		backgroundNode = row:FindFirstChild(name, true)
+		if backgroundNode then break end
+	end
+
+	local gradientRoot = (backgroundNode and backgroundNode:IsA("GuiObject")) and backgroundNode or row
+	for index = 1, 3 do
+		local gradient = gradientRoot:FindFirstChild("UIGradient" .. tostring(index), true)
+		if gradient and gradient:IsA("UIGradient") then
+			gradient.Enabled = rank == index
+		end
+	end
+
+	if rank and rank <= 3 then
+		if backgroundNode and backgroundNode:IsA("GuiObject") then
+			row.BackgroundTransparency = 1
+			backgroundNode.BackgroundTransparency = 0
+			backgroundNode.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			if backgroundNode:IsA("ImageLabel") or backgroundNode:IsA("ImageButton") then
+				backgroundNode.ImageColor3 = Color3.fromRGB(255, 255, 255)
+			end
+		else
+			row.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			row.BackgroundTransparency = 0
+		end
+	elseif backgroundNode and backgroundNode:IsA("GuiObject") then
+		row.BackgroundTransparency = 1
+		backgroundNode.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		backgroundNode.BackgroundTransparency = 0
+	else
+		row.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		row.BackgroundTransparency = 0
+	end
+end
+
 function LeaderboardController.Init(deps)
 	Controllers = deps
 end
@@ -195,6 +240,7 @@ local function fillRow(row, entry)
 	local distance = tonumber(entry.Distance) or 0
 	local rankDisplay = entry.Rank and (rankText .. ".") or rankText
 
+	applyRankStyle(row, tonumber(entry.Rank))
 	setText(row, {"RankText", "Rank", "RankLabel"}, rankDisplay)
 	setText(row, {"NameText", "PlayerName", "NameLabel", "Name"}, entry.Name or "Player")
 	setText(row, {"DistanceText", "BestDistance", "DistanceLabel", "ScoreText", "Score"}, Controllers.Config.FormatNumber(distance) .. " METERS")

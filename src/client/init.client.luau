@@ -5,6 +5,39 @@ print("Initializing Client Architecture...")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
+local function createNoopSoundController(reason)
+	warn("[ClientInit][Sound] SoundController disabled:", reason)
+	return {
+		Init = function() end,
+		Start = function() end,
+		PlayBackground = function() end,
+		PlayBattle = function() end,
+		PlaySelect = function() end,
+		PlayUpgrade = function() end,
+	}
+end
+
+local function loadSoundController()
+	local core = script:WaitForChild("Core", 10)
+	if not core then
+		return createNoopSoundController("Core folder missing")
+	end
+
+	local soundModule = core:WaitForChild("SoundController", 2)
+	if not soundModule then
+		return createNoopSoundController("SoundController module missing")
+	end
+
+	local ok, result = pcall(require, soundModule)
+	if not ok then
+		return createNoopSoundController(result)
+	end
+
+	return result
+end
+
+local SoundController = loadSoundController()
+
 -- 1. 定义模块路径表
 local Controllers = {
     -- 配置层
@@ -14,6 +47,7 @@ local Controllers = {
     Game        = require(script.Core:WaitForChild("GameController")),
     Player      = require(script.Core:WaitForChild("PlayerController")),
     Progression = require(script.Core:WaitForChild("ProgressionController")),
+	Sound       = SoundController,
 	Pet 		= require(script.Core:WaitForChild("PetController")),
     
     -- 战斗与场景层

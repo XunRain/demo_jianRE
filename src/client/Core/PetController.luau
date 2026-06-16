@@ -271,7 +271,7 @@ function PetController.Start()
 
 					for petIndex, pModel in ipairs(activePets) do
 						if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then break end
-						PetController.ShootProjectile(petConfig, pModel)
+						PetController.ShootProjectile(petConfig, pModel, equippedPet)
 						if petIndex < #activePets then
 							task.wait(petStaggerDelay)
 						end
@@ -331,7 +331,7 @@ function PetController.RefreshPetModel()
 end
 
 -- 发射宠物子弹/技能：负责索敌、生成预制体或白模，并把命中数据注册到战斗系统。
-function PetController.ShootProjectile(petConfig, petModel)
+function PetController.ShootProjectile(petConfig, petModel, petId)
 	local petPos = petModel:GetPivot().Position
 	local playerPos = player.Character and player.Character.PrimaryPart and player.Character.PrimaryPart.Position or petPos
 	local spawnPos = playerPos + Vector3.new(0, 0, -2)
@@ -341,7 +341,9 @@ function PetController.ShootProjectile(petConfig, petModel)
 	local actualLifetime = currentRng / currentSpd
 
 	local atkBonus = player:GetAttribute("Pet_ATK_Bonus") or 0
-	local petDmg = (petConfig.ATK or 10) * (1 + (atkBonus / 100))
+	local equippedPetLevel = player:GetAttribute("EquippedPetLevel") or 1
+	local basePetDmg = (Controllers.Config.GetPetAttack and petId) and Controllers.Config.GetPetAttack(petId, equippedPetLevel) or (petConfig.ATK or 10)
+	local petDmg = basePetDmg * (1 + (atkBonus / 100))
 	local skillType = petConfig.SkillType or "WindBlade"
 	local bulletVfxName = petConfig.BulletVFX
 	local hitVfx = petConfig.HitVFX

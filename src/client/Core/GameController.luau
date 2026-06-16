@@ -16,13 +16,40 @@ GameController.IsCombatActive = false -- 核心全局开关：当前是否在跑
 local isStartingCombat = false -- 进入战斗的过渡锁，避免 Start 区域轮询和 Touched 同时重复触发
 local lobbyLightingSnapshot = nil
 local lightingTween = nil
+local SHOP_GUIDE_ARROW_DEATHS = 2
+local DEBUG_COMBAT_FLOW = true
+local lastDebugAtByKey = {}
+
+local function debugCombat(...)
+	if DEBUG_COMBAT_FLOW then
+		print("[Debug][CombatFlow]", ...)
+	end
+end
+
+local function debugCombatThrottled(key, interval, ...)
+	if not DEBUG_COMBAT_FLOW then return end
+	local now = os.clock()
+	if lastDebugAtByKey[key] and now - lastDebugAtByKey[key] < (interval or 1) then
+		return
+	end
+	lastDebugAtByKey[key] = now
+	print("[Debug][CombatFlow]", ...)
+end
 
 -- 同步本地跑酷状态给服务端头顶进度 UI；服务端展示给所有玩家看。
+-- 计算当前主武器攻击力，用于同步给服务端头顶 UI；和战斗伤害公式保持一致。
+local function getCurrentAttackForDisplay()
+	local config = Controllers and Controllers.Config
+	local baseAtk = (config and config.BASE_ATK) or player:GetAttribute("ATK") or 0
+	local atkBonus = player:GetAttribute("ATK_Bonus") or 0
+	return math.floor(baseAtk * (1 + (atkBonus / 100)))
+end
+
 local function reportRunStats(isInCombat)
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local reportEvent = remotes and remotes:FindFirstChild("ReportRunStats")
 	if reportEvent then
-		reportEvent:FireServer(isInCombat == true, player:GetAttribute("Level") or 1)
+		reportEvent:FireServer(isInCombat == true, player:GetAttribute("Level") or 1, getCurrentAttackForDisplay())
 	end
 end
 
@@ -104,26 +131,124 @@ local function waitForLobbyObject(objectName, timeout)
 	return nil
 end
 
--- 查找开始区域；新版本优先使用 StartZone，兼容旧大厅里的 StartButton。
-local function findStartObject()
-	return findLobbyObject("StartZone") or findLobbyObject("StartButton")
+local START_HITBOX_NAMES = { "Hitbox", "StartHitbox", "Trigger", "StartTrigger" }
+local START_POINT_NAMES = { "SpawnPoint", "StartPoint" }
+local START_HITBOX_MIN_DEPTH = 8
+local warnedInvalidStartObjects = setmetatable({}, { __mode = "k" })
+
+-- 安全获取对象路径，调试开始区绑定时能直接定位 Studio 节点。
+local function getFullNameSafe(instance)
+	if not instance then return "<nil>" end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+	return ok and fullName or instance.Name
 end
 
--- 查找所有开始区域；用于兼容大厅里同时存在新版 StartZone 和旧版 StartButton 的情况。
-local function findStartObjects()
-	local results = {}
-	local seen = {}
+-- 在指定根节点下按名称寻找 BasePart，用于明确区分装饰模型和真正触发盒。
+local function findNamedBasePart(root, names)
+	if not root then return nil end
 
-	for _, objectName in ipairs({ "StartZone", "StartButton" }) do
-		for _, node in ipairs(Workspace:GetDescendants()) do
-			if node.Name == objectName and not seen[node] then
-				seen[node] = true
-				table.insert(results, node)
+	for _, name in ipairs(names) do
+		local directChild = root:FindFirstChild(name)
+		if directChild and directChild:IsA("BasePart") then
+			return directChild
+		end
+	end
+
+	for _, name in ipairs(names) do
+		local descendant = root:FindFirstChild(name, true)
+		if descendant and descendant:IsA("BasePart") then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+-- 获取开始区真正用于触发的 hitbox；Model 必须显式包含 Hitbox/Trigger，避免整个装饰模型包围盒误触发。
+local function getStartHitbox(startObject)
+	if not startObject then return nil, false end
+	if startObject:IsA("BasePart") then
+		return startObject, false
+	end
+	if startObject:IsA("Model") then
+		local hitbox = findNamedBasePart(startObject, START_HITBOX_NAMES)
+		return hitbox, hitbox ~= nil
+	end
+
+	return nil, false
+end
+
+-- 获取跑道起点朝向；优先使用美术/关卡配置的 SpawnPoint/StartPoint，否则退回 hitbox 自身 CFrame。
+local function getStartCFrame(startObject)
+	if not startObject then return nil end
+
+	if startObject:IsA("Model") then
+		local startPoint = findNamedBasePart(startObject, START_POINT_NAMES)
+		if startPoint then
+			return startPoint.CFrame
+		end
+	end
+
+	local hitbox = getStartHitbox(startObject)
+	return hitbox and hitbox.CFrame or nil
+end
+
+-- 记录无效开始区，避免每轮轮询都刷屏。
+local function warnInvalidStartObject(startObject)
+	if not startObject or warnedInvalidStartObjects[startObject] then return end
+	warnedInvalidStartObjects[startObject] = true
+end
+
+-- 查找所有有效开始区；只要存在 StartZone，就不再兼容旧 StartButton，避免旧模型残留误触发。
+local function findStartObjects()
+	local directStartZone = Workspace:FindFirstChild("StartZone")
+	if directStartZone then
+		if getStartHitbox(directStartZone) then
+			return { directStartZone }
+		end
+
+		-- Streaming/加载早期可能先看到 Model，Hitbox 稍后才到；这里静默等待后续 DescendantAdded 刷新。
+		return {}
+	end
+
+	local startZones = {}
+	local hasAnyStartZone = false
+
+	for _, node in ipairs(Workspace:GetDescendants()) do
+		if node.Name == "StartZone" then
+			hasAnyStartZone = true
+			if getStartHitbox(node) then
+				table.insert(startZones, node)
+			else
+				warnInvalidStartObject(node)
 			end
 		end
 	end
 
-	return results
+	if hasAnyStartZone then
+		return startZones
+	end
+
+	local startButtons = {}
+	for _, node in ipairs(Workspace:GetDescendants()) do
+		if node.Name == "StartButton" then
+			if getStartHitbox(node) then
+				table.insert(startButtons, node)
+			else
+				warnInvalidStartObject(node)
+			end
+		end
+	end
+
+	return startButtons
+end
+
+-- 查找开始区；新版优先 StartZone，旧 StartButton 只作为没有 StartZone 时的兼容入口。
+local function findStartObject()
+	return findStartObjects()[1]
 end
 
 -- 等待开始区域加载；Streaming 开启时客户端可能稍晚才能看到大厅对象。
@@ -153,59 +278,57 @@ local function getInteractBasePart(target)
 	return target:FindFirstChildWhichIsA("BasePart", true)
 end
 
--- 获取大厅触发物的基准 CFrame；Model 使用整体 Pivot，Part 使用自身 CFrame。
-local function getInteractCFrame(target)
-	if not target then return nil end
-	if target:IsA("BasePart") then
-		return target.CFrame
-	end
-	if target:IsA("Model") then
-		return target:GetPivot()
-	end
-
-	local part = getInteractBasePart(target)
-	return part and part.CFrame or nil
-end
-
--- 获取开始区域的检测盒；Model 使用整体包围盒，Part 使用自身大小。
+-- 获取开始区检测盒；只使用明确 hitbox，禁止使用整个 Model 包围盒。
 local function getStartZoneBounds(startObject)
-	if not startObject then return nil, nil end
-	if startObject:IsA("BasePart") then
-		return startObject.CFrame, startObject.Size
-	end
-	if startObject:IsA("Model") then
-		return startObject:GetBoundingBox()
-	end
-
-	local part = getInteractBasePart(startObject)
-	if part then
-		return part.CFrame, part.Size
-	end
-
-	return nil, nil
+	local hitbox = getStartHitbox(startObject)
+	if not hitbox then return nil, nil end
+	return hitbox.CFrame, hitbox.Size
 end
 
 -- 大厅弹窗打开时禁止自动开始；避免玩家操作背包/商店/抽卡时被 Start 区域轮询误触发。
 local function isLobbyModalOpen()
-	if player:GetAttribute("IsPetBagOpen") == true
-		or player:GetAttribute("IsShopOpen") == true
-		or player:GetAttribute("IsLevelingUp") == true
-	then
-		return true
+	for _, attrName in ipairs({ "IsPetBagOpen", "IsShopOpen", "IsLevelingUp" }) do
+		if player:GetAttribute(attrName) == true then
+			debugCombatThrottled("modal_attr_" .. attrName, 1.5, "大厅弹窗/状态阻止开局，Attribute:", attrName, "= true")
+			return true
+		end
 	end
 
 	local playerGui = player:FindFirstChild("PlayerGui")
 	local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
 	if not mainUI then return false end
 
-	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "HatchScreen", "LevelUpPanel" }) do
+	local function isGuiEffectivelyVisible(guiObject)
+		local current = guiObject
+		while current and current ~= mainUI do
+			if current:IsA("GuiObject") and not current.Visible then
+				return false
+			end
+			current = current.Parent
+		end
+		return guiObject.Visible == true
+	end
+
+	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "Hatch_Pet_Egg", "LevelUpPanel", "Achieve" }) do
 		local panel = mainUI:FindFirstChild(panelName, true)
-		if panel and panel:IsA("GuiObject") and panel.Visible then
+		if panel and panel:IsA("GuiObject") and isGuiEffectivelyVisible(panel) then
+			debugCombatThrottled("modal_panel_" .. panelName, 1.5, "大厅 UI 面板阻止开局，Panel effectively visible:", panelName, getFullNameSafe(panel))
 			return true
 		end
 	end
 
 	return false
+end
+
+local function safePlaySound(actionName)
+	if not Controllers or not Controllers.Sound then return end
+	local soundAction = Controllers.Sound[actionName]
+	if type(soundAction) ~= "function" then return end
+
+	local ok, err = pcall(soundAction)
+	if not ok then
+		warn("[GameController][Sound] 音效调用失败，不影响主流程:", actionName, err)
+	end
 end
 
 -- 模块生命周期启动入口：绑定事件及全局生命周期监听
@@ -215,9 +338,23 @@ function GameController.Start()
 	GameController.SetupNPC()
 	captureLobbyLighting()
 	applyLightingMode(false)
+	safePlaySound("PlayBackground")
 	player:GetAttributeChangedSignal("InCombat"):Connect(function()
-		applyLightingMode(player:GetAttribute("InCombat") == true)
+		local inCombat = player:GetAttribute("InCombat") == true
+		applyLightingMode(inCombat)
+		if inCombat then
+			safePlaySound("PlayBattle")
+		else
+			safePlaySound("PlayBackground")
+		end
 	end)
+	for _, attrName in ipairs({ "Level", "ATK_Bonus" }) do
+		player:GetAttributeChangedSignal(attrName):Connect(function()
+			if GameController.IsCombatActive or player:GetAttribute("InCombat") == true then
+				reportRunStats(true)
+			end
+		end)
+	end
 	
 	-- 统一的角色重生/复活处理核心函数（彻底收拢生命周期，防止属性回厅变负数）
 	local function onCharacterAdded(newCharacter)
@@ -225,6 +362,7 @@ function GameController.Start()
 		player:SetAttribute("InCombat", false)
 		reportRunStats(false)
 		applyLightingMode(false)
+		safePlaySound("PlayBackground")
 		
 		-- 核心修复：复活重生回到大厅时，瞬间同步初始化基础数值
 		GameController.ResetPlayerStats()
@@ -238,9 +376,17 @@ function GameController.Start()
 			
 			-- 监听角色死亡事件，执行核心清场
 			humanoid.Died:Connect(function()
+				local diedInCombat = GameController.IsCombatActive or player:GetAttribute("InCombat") == true
+				if diedInCombat then
+					local guideDeathCount = (player:GetAttribute("ShopGuideDeathCount") or 0) + 1
+					player:SetAttribute("ShopGuideDeathCount", guideDeathCount)
+					player:SetAttribute("NeedsGuide", true)
+					player:SetAttribute("ShopGuideUseArrow", guideDeathCount <= SHOP_GUIDE_ARROW_DEATHS)
+				end
+
 				-- 如果玩家死在了第二关及以上，打上“需要引导”的思想钢印
 				-- 【修改】：增加了对 HasSeenStage2Guide 的判断
-				if (player:GetAttribute("CurrentStage") or 1) >= 2 and not player:GetAttribute("HasSeenStage2Guide") then
+				if false and (player:GetAttribute("CurrentStage") or 1) >= 2 and not player:GetAttribute("HasSeenStage2Guide") then
 					player:SetAttribute("NeedsGuide", true)
 					
 					-- 触发引导的同时，立刻呼叫服务器打上永久标记，以后再死就不会触发了
@@ -256,6 +402,7 @@ function GameController.Start()
 				player:SetAttribute("IsLevelingUp", false)
 				reportRunStats(false)
 				applyLightingMode(false)
+				safePlaySound("PlayBackground")
 
 				-- 1. 剥夺相机跟随，让相机以 Scriptable 模式永远定格在死亡瞬间的坐标！
 				camera.CameraType = Enum.CameraType.Scriptable 
@@ -350,25 +497,20 @@ function GameController.Start()
 			end)
 		end
 
-		-- 玩家重生回大厅后，延迟 1 秒弹出智能引导
+		-- 玩家重生回大厅后，延迟 1 秒弹出升级导航；当前首次导航固定指向升级商店。
 		task.delay(1, function()
 			if player:GetAttribute("NeedsGuide") and not GameController.IsCombatActive then
-				local coins = player:GetAttribute("Coins") or 0
 				local target = nil
-				local text = ""
-				
-				-- 智能引导算法：有钱抽卡就指引去抽宠物，没钱就指引去商店点小天赋
-				if coins >= Controllers.Config.PET_GACHA_COST then
-					target = getInteractBasePart(findLobbyObject("PetEgg"))
-					text = "Draw a pet to boost your firepower!"
-				else
-					local npc = findLobbyObject("ShopNPC")
-					target = npc and (npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc))
-					text = "Upgrade talents in the shop!"
-				end
-				
+				local text = "Upgrade talents in the shop!"
+
+				local npc = findLobbyObject("ShopNPC")
+				target = npc and (npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc))
+
+				-- 商店模型暂未加载时才兜底指向宠物蛋，避免引导完全消失。
 				if target then
-					Controllers.VFX.CreateGuide(target, text)
+					Controllers.VFX.CreateGuide(target, text, {
+						ShowBeam = player:GetAttribute("ShopGuideUseArrow") ~= false,
+					})
 				end
 			end
 		end)
@@ -434,8 +576,15 @@ end
 
 -- 触发单局跑酷战斗开局；先传送玩家，再初始化跑道，减少踩 START 后的卡顿观感。
 function GameController.EnterCombat(startObjectOverride)
-	if GameController.IsCombatActive or isStartingCombat then return false end
-	if isLobbyModalOpen() then return false end
+	debugCombat("EnterCombat called", "startObject=", getFullNameSafe(startObjectOverride), "IsCombatActive=", GameController.IsCombatActive, "isStartingCombat=", isStartingCombat)
+	if GameController.IsCombatActive or isStartingCombat then
+		debugCombat("EnterCombat blocked: already active/starting", GameController.IsCombatActive, isStartingCombat)
+		return false
+	end
+	if isLobbyModalOpen() then
+		debugCombat("EnterCombat blocked: lobby modal open")
+		return false
+	end
 
 	isStartingCombat = true
 	local started = false
@@ -447,6 +596,7 @@ function GameController.EnterCombat(startObjectOverride)
 		local character = player.Character
 		if not character then
 			warn("[GameController] 进入战斗失败：未找到玩家角色。")
+			debugCombat("EnterCombat failed: no character")
 			return
 		end
 
@@ -454,15 +604,18 @@ function GameController.EnterCombat(startObjectOverride)
 		local rootPart = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
 		if not humanoid or humanoid.Health <= 0 or not rootPart then
 			warn("[GameController] 进入战斗失败：角色 Humanoid 或 HumanoidRootPart 不可用。")
+			debugCombat("EnterCombat failed: invalid character parts", "humanoid=", humanoid ~= nil, "health=", humanoid and humanoid.Health, "rootPart=", rootPart ~= nil)
 			return
 		end
 
 		local startObject = startObjectOverride or waitForStartObject(3)
-		local startCFrame = getInteractCFrame(startObject)
+		local startCFrame = getStartCFrame(startObject)
 		if not startCFrame then
 			warn("[GameController] 进入战斗失败：未找到可用的 StartZone/StartButton。")
+			debugCombat("EnterCombat failed: startCFrame missing", "startObject=", getFullNameSafe(startObject))
 			return
 		end
+		debugCombat("EnterCombat start point ready", getFullNameSafe(startObject), "pos=", startCFrame.Position)
 
 		-- 清掉大厅移动惯性，防止瞬移到跑道时继续横向滑动。
 		Controllers.Player.SetMoveDirection(0)
@@ -483,7 +636,9 @@ function GameController.EnterCombat(startObjectOverride)
 		humanoid.Health = player:GetAttribute("HP")
 
 		-- 重置跑道后再校准一次角色位置，避免模型生成或物理抖动影响起跑点。
+		debugCombat("Calling Map.ResetTrack")
 		Controllers.Map.ResetTrack(startCFrame)
+		debugCombat("Map.ResetTrack returned")
 		character:PivotTo(spawnCFrame)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
@@ -495,8 +650,10 @@ function GameController.EnterCombat(startObjectOverride)
 
 		GameController.IsCombatActive = true
 		player:SetAttribute("InCombat", true)
+		debugCombat("Combat state set true", "rootZ=", rootPart.Position.Z, "InCombat=", player:GetAttribute("InCombat"))
 		reportRunStats(true)
 		applyLightingMode(true)
+		safePlaySound("PlayBattle")
 
 		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
 		local runStartedEvent = remotes and remotes:WaitForChild("RunStarted", 5)
@@ -518,6 +675,7 @@ function GameController.EnterCombat(startObjectOverride)
 		player:SetAttribute("InCombat", false)
 		reportRunStats(false)
 		applyLightingMode(false)
+		safePlaySound("PlayBackground")
 	end
 
 	isStartingCombat = false
@@ -533,6 +691,10 @@ function GameController.SetupStartButton()
 		-- 记录所有可能的开始区域，避免只绑定到 FindFirstChild 找到的第一个旧对象。
 		local function rememberStartObject(startObject)
 			if not startObject then return end
+			if not getStartHitbox(startObject) then
+				warnInvalidStartObject(startObject)
+				return
+			end
 			for _, existing in ipairs(knownStartObjects) do
 				if existing == startObject then
 					return
@@ -554,7 +716,18 @@ function GameController.SetupStartButton()
 			end
 		end
 
-		-- 判断玩家根节点是否在开始区域盒体内；给 Y 轴留出较大容差，避免角色跳动漏判。
+		-- 重新收集有效开始区；出现 StartZone 时会自动忽略旧 StartButton。
+		local function refreshKnownStartObjects()
+			for i = #knownStartObjects, 1, -1 do
+				table.remove(knownStartObjects, i)
+			end
+
+			for _, startObject in ipairs(findStartObjects()) do
+				rememberStartObject(startObject)
+			end
+		end
+
+		-- 判断玩家根节点是否在开始区 hitbox 内；Z 轴给显式 Hitbox 一个最小厚度，避免薄片触发区被高速穿过。
 		local function isRootInsideStartZone(startObject, rootPart)
 			if not startObject or not rootPart then return false end
 
@@ -563,46 +736,65 @@ function GameController.SetupStartButton()
 
 			local localPos = zoneCFrame:PointToObjectSpace(rootPart.Position)
 			local halfSize = zoneSize * 0.5
-			local xzPadding = 3
-			local yPadding = 12
-			return math.abs(localPos.X) <= (halfSize.X + xzPadding)
-				and math.abs(localPos.Z) <= (halfSize.Z + xzPadding)
+			local minDepthHalf = (START_HITBOX_MIN_DEPTH or 8) * 0.5
+			local effectiveHalfZ = math.max(halfSize.Z, minDepthHalf)
+			local yPadding = 6
+			return math.abs(localPos.X) <= halfSize.X
+				and math.abs(localPos.Z) <= effectiveHalfZ
 				and math.abs(localPos.Y) <= (halfSize.Y + yPadding)
 		end
 
-		-- 轮询兜底：即使 Start 部件 CanTouch 关闭，也能通过空间重叠识别玩家已经进入开始区。
-		local function isCharacterOverlappingStartZone(startObject, character)
+		-- 轮询兜底：只检查角色是否和明确的 Start Hitbox 本体重叠，不再扫描装饰模型或扩大到大厅区域。
+		local function isCharacterTouchingStartHitbox(startObject, character)
 			if not startObject or not character then return false end
 
-			local zoneCFrame, zoneSize = getStartZoneBounds(startObject)
-			if not zoneCFrame or not zoneSize then return false end
+			local hitbox = getStartHitbox(startObject)
+			if not hitbox then return false end
 
 			local overlapParams = OverlapParams.new()
 			overlapParams.FilterType = Enum.RaycastFilterType.Include
 			overlapParams.FilterDescendantsInstances = { character }
 
-			local expandedSize = zoneSize + Vector3.new(6, 12, 6)
-			local parts = Workspace:GetPartBoundsInBox(zoneCFrame, expandedSize, overlapParams)
+			local querySize = Vector3.new(
+				hitbox.Size.X,
+				hitbox.Size.Y + 6,
+				math.max(hitbox.Size.Z, START_HITBOX_MIN_DEPTH)
+			)
+			local parts = Workspace:GetPartBoundsInBox(hitbox.CFrame, querySize, overlapParams)
 			return #parts > 0
 		end
 
 		-- 尝试触发开始；带冷却和状态检查，避免 Touched/轮询同一瞬间重复触发。
-		local function tryEnterFromStartZone(startObject, fromTouch)
-			if GameController.IsCombatActive or isStartingCombat then return end
-			if isLobbyModalOpen() then return end
-			if os.clock() - lastStartAt < 1 then return end
+		local function tryEnterFromStartZone(startObject, fromHitboxTouch)
+			if GameController.IsCombatActive or isStartingCombat then
+				debugCombatThrottled("start_block_active", 1, "StartZone blocked: active/starting", getFullNameSafe(startObject), GameController.IsCombatActive, isStartingCombat)
+				return
+			end
+			if isLobbyModalOpen() then
+				debugCombatThrottled("start_block_modal", 1, "StartZone blocked: lobby modal open", getFullNameSafe(startObject), "fromTouch=", fromHitboxTouch == true)
+				return
+			end
+			if os.clock() - lastStartAt < 1 then
+				debugCombatThrottled("start_block_cooldown", 1, "StartZone blocked: cooldown", getFullNameSafe(startObject))
+				return
+			end
 
 			local character = player.Character
 			local humanoid = character and character:FindFirstChild("Humanoid")
 			local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
-			if not humanoid or humanoid.Health <= 0 or not rootPart then return end
-			if not fromTouch
+			if not humanoid or humanoid.Health <= 0 or not rootPart then
+				debugCombatThrottled("start_block_character", 1, "StartZone blocked: invalid character", "humanoid=", humanoid ~= nil, "health=", humanoid and humanoid.Health, "rootPart=", rootPart ~= nil)
+				return
+			end
+			if not fromHitboxTouch
 				and not isRootInsideStartZone(startObject, rootPart)
-				and not isCharacterOverlappingStartZone(startObject, character)
+				and not isCharacterTouchingStartHitbox(startObject, character)
 			then
+				debugCombatThrottled("start_not_inside", 2, "StartZone polling: player not inside", getFullNameSafe(startObject), "rootPos=", rootPart.Position)
 				return
 			end
 
+			debugCombat("StartZone trigger accepted", getFullNameSafe(startObject), "fromTouch=", fromHitboxTouch == true)
 			if GameController.EnterCombat(startObject) then
 				lastStartAt = os.clock()
 			end
@@ -611,48 +803,76 @@ function GameController.SetupStartButton()
 		-- 绑定开始区域触碰事件；同时配合轮询兜底，兼容 CanTouch/Streaming 差异。
 		local function bindStartZone(startObject)
 			if not startObject then return end
+			local hitbox, fromNamedHitbox = getStartHitbox(startObject)
+			if not hitbox then
+				warnInvalidStartObject(startObject)
+				return
+			end
+
 			disableStartPrompt(startObject)
 
-			startObject:SetAttribute("ClientStartZoneBound", true)
-
-			-- 模型型开始区会有多个子 Part；每个 Part 都绑定触碰，但统一用整体区域做最终判定。
-			local touchParts = {}
-			if startObject:IsA("BasePart") then
-				table.insert(touchParts, startObject)
-			else
-				for _, node in ipairs(startObject:GetDescendants()) do
-					if node:IsA("BasePart") then
-						table.insert(touchParts, node)
-					end
+			if not startObject:GetAttribute("ClientStartZoneBound") then
+				startObject:SetAttribute("ClientStartZoneBound", true)
+				print(("[GameController] Bound start zone hitbox: %s, size=(%.1f, %.1f, %.1f), namedHitbox=%s"):format(
+					getFullNameSafe(hitbox),
+					hitbox.Size.X,
+					hitbox.Size.Y,
+					hitbox.Size.Z,
+					tostring(fromNamedHitbox)
+				))
+				if hitbox.Size.X > 40 or hitbox.Size.Z > 40 then
+					warn(("[GameController] Start hitbox may be too large: %s, size=(%.1f, %.1f, %.1f)"):format(
+						getFullNameSafe(hitbox),
+						hitbox.Size.X,
+						hitbox.Size.Y,
+						hitbox.Size.Z
+					))
 				end
 			end
 
-			for _, part in ipairs(touchParts) do
-				if part:GetAttribute("ClientStartZoneTouchBound") then
-					continue
-				end
-				part:SetAttribute("ClientStartZoneTouchBound", true)
-				part.Touched:Connect(function(hit)
-					local character = player.Character
-					if character and hit and hit:IsDescendantOf(character) then
-						tryEnterFromStartZone(startObject, true)
-					end
-				end)
+			if hitbox:GetAttribute("ClientStartZoneTouchBound") then
+				return
 			end
+			hitbox.CanTouch = true
+			hitbox.CanQuery = true
+			hitbox:SetAttribute("ClientStartZoneTouchBound", true)
+			hitbox.Touched:Connect(function(hit)
+				local character = player.Character
+				if character and hit and hit:IsDescendantOf(character) then
+					tryEnterFromStartZone(startObject, true)
+				end
+			end)
+		end
+
+		local function isStartRelatedName(name)
+			if name == "StartZone" or name == "StartButton" then
+				return true
+			end
+			for _, hitboxName in ipairs(START_HITBOX_NAMES) do
+				if name == hitboxName then
+					return true
+				end
+			end
+			for _, pointName in ipairs(START_POINT_NAMES) do
+				if name == pointName then
+					return true
+				end
+			end
+			return false
 		end
 
 		Workspace.DescendantAdded:Connect(function(descendant)
-			if descendant.Name == "StartZone" or descendant.Name == "StartButton" then
-				rememberStartObject(descendant)
+			if isStartRelatedName(descendant.Name) then
 				task.defer(function()
-					bindStartZone(descendant)
+					refreshKnownStartObjects()
+					for _, startObject in ipairs(knownStartObjects) do
+						bindStartZone(startObject)
+					end
 				end)
 			end
 		end)
 
-		for _, startObject in ipairs(findStartObjects()) do
-			rememberStartObject(startObject)
-		end
+		refreshKnownStartObjects()
 
 		while true do
 			for i = #knownStartObjects, 1, -1 do

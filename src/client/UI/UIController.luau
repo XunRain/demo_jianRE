@@ -19,6 +19,12 @@ local function isMobileOnlyDevice()
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
 
+-- 底部大厅按钮固定放在 MainUI.MainUI_1 下。
+local function getMainButtonRoot(mainUI)
+	if not mainUI then return nil end
+	return mainUI:FindFirstChild("MainUI_1")
+end
+
 -- 查找 Studio 模板里可能存在的文字节点，兼容不同命名，避免代码强制重建 UI。
 local function findTextNode(root, names)
 	for _, name in ipairs(names) do
@@ -215,6 +221,8 @@ function UIController.Start()
 
 		-- 1. 刷新屏幕 UI 控制
 		if mainUI then
+			local buttonRoot = getMainButtonRoot(mainUI)
+
 			-- 金币常驻常显
 			local coinContainer = mainUI:FindFirstChild("CoinContainer")
 			if coinContainer then
@@ -237,17 +245,20 @@ function UIController.Start()
 				mobileControls.Visible = (not useNativeJoystick) and isMobileOnlyDevice() and inCombat and not player:GetAttribute("IsLevelingUp")
 			end
 
-         -- 大厅专属 UI 的战斗隔离控制
-			-- 1. 进战斗后隐藏“打开宠物背包”按钮
-			local openBagBtn = mainUI:FindFirstChild("BtnOpenPetBag")
-			if openBagBtn then
-				openBagBtn.Visible = not inCombat -- 只有不在战斗中（大厅状态）才显示
+			-- 大厅底部按钮整体容器：正式开始游戏后隐藏 MainUI_1，回大厅后显示。
+			if buttonRoot and buttonRoot:IsA("GuiObject") then
+				buttonRoot.Visible = not inCombat
 			end
 			
 			-- 2. 如果玩家开着背包直接冲进了跑道门，强制关掉面板
 			local petBagPanel = mainUI:FindFirstChild("PetBagPanel")
 			if petBagPanel and inCombat then
 				petBagPanel.Visible = false
+			end
+
+			local achievePanel = mainUI:FindFirstChild("Achieve")
+			if achievePanel and inCombat then
+				achievePanel.Visible = false
 			end
 
 			-- 关卡 HUD 使用 Studio 里的图片容器；代码只控制显隐并填充关卡文本。
@@ -685,6 +696,9 @@ function UIController.Start()
 					local buffId = card:GetAttribute("BuffId") or attr
 					local buffMaxLevel = card:GetAttribute("BuffMaxLevel")
 					if not attr then return end
+					if Controllers.Sound then
+						Controllers.Sound.PlaySelect()
+					end
 
 					-- 【核心逻辑】：专门处理最大生命值百分比提升的辅助函数
 					local function applyMaxHpBonus(bonusAmount)
@@ -769,6 +783,9 @@ function UIController.Start()
 			
 			if isLeveling then
 				levelUpPanel.Visible = true
+				if Controllers.Sound then
+					Controllers.Sound.PlayUpgrade()
+				end
 				
 				-- =======================================================
 				-- 【核心修改】：引入权重与弹道上限的卡池过滤机制
@@ -1065,10 +1082,21 @@ function UIController.Start()
 		-- 给商店按钮/卡片添加悬浮缩放；只添加 UIScale，不覆盖美术做好的图片和布局。
 		local function applyShopHoverScale(guiObject, attrName, scaleName, targetScale)
 			if not guiObject or not guiObject:IsA("GuiObject") then return end
-			if guiObject:GetAttribute(attrName) then return end
+
+			for _, descendant in ipairs(guiObject:GetDescendants()) do
+				if descendant:IsA("UIScale") and descendant.Name == scaleName and descendant.Parent ~= guiObject then
+					descendant:Destroy()
+				end
+			end
+
+			local existingScale = guiObject:FindFirstChild(scaleName)
+			if existingScale and not existingScale:IsA("UIScale") then
+				existingScale = nil
+			end
+			if guiObject:GetAttribute(attrName) and existingScale and existingScale:IsA("UIScale") then return end
 			guiObject:SetAttribute(attrName, true)
 
-			local hoverScale = guiObject:FindFirstChild(scaleName)
+			local hoverScale = existingScale
 			if not hoverScale then
 				hoverScale = Instance.new("UIScale")
 				hoverScale.Name = scaleName
@@ -1387,27 +1415,25 @@ function UIController.Start()
 	local function setupPetBagUI()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
+		local buttonRoot = getMainButtonRoot(mainUI)
 		
-		local openBagBtn = mainUI:WaitForChild("BtnOpenPetBag", 5)
+		local openBagBtn = buttonRoot and buttonRoot:WaitForChild("BtnOpenPetBag", 5)
 		local bagPanel = mainUI:WaitForChild("PetBagPanel", 5)
 		if not openBagBtn or not bagPanel then return end
 		
-		local closeBtn = bagPanel:WaitForChild("BtnClose")
-		local petList = bagPanel:WaitForChild("PetList")
+		local closeBtn = bagPanel:FindFirstChild("BtnClose", true)
+			or bagPanel:FindFirstChild("CloseButton", true)
+			or bagPanel:FindFirstChild("BtnClosePetBag", true)
 		player:SetAttribute("IsPetBagOpen", bagPanel.Visible)
 		
-		-- 获取刚才新建的两个独立栅格容器
-		local equippedContainer = petList:WaitForChild("EquippedContainer")
-		local standbyContainer = petList:WaitForChild("StandbyContainer")
-		
-		-- 获取放在 Panel 根目录的宠物格和空槽模板；空槽只用于出战区补足可装备槽位。
-		local petTemplate = bagPanel:WaitForChild("PetItemTemplate") 
-		local emptySlotTemplate = bagPanel:WaitForChild("EmptySlotTemplate")
+		-- 当前宠物界面已改为 Studio 直接摆放；按钮只负责开关 PetBagPanel。
+		-- 不再等待旧版 EquippedContainer / StandbyContainer / PetItemTemplate，避免初始化卡死导致 BtnOpenPetBag 无法绑定。
 		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
 		local MAX_EQUIP_SLOTS = petBagConfig.MaxEquipSlots or 1
 		local petBagBlurTween = nil
 		local petBagCameraTween = nil
 		local petBagSavedFOV = nil
+		print("[UIController][PetBag] setup start. Panel visible:", bagPanel.Visible, "Close button found:", closeBtn ~= nil)
 
 		-- 获取或创建背包专用毛玻璃；只在本地客户端生效，不影响服务器和其他玩家。
 		local function getPetBagBlur()
@@ -1557,7 +1583,24 @@ function UIController.Start()
 			end)
 		end
 
-		-- 安全解析宠物背包；存档字段异常时返回空表，避免 UI 打不开
+		local petList = bagPanel:FindFirstChild("PetList", true)
+		local equippedContainer = bagPanel:FindFirstChild("EquippedContainer", true)
+		local detailButton = equippedContainer and equippedContainer:FindFirstChild("PetButton_1", true)
+		local selectedPetUid = nil
+		local pendingSelectedPetUidAfterRemove = nil
+		local petTemplateByQuality = {}
+
+		if petList then
+			for quality = 1, 3 do
+				local template = petList:FindFirstChild("pet_farme_quality" .. quality, true)
+				if template and template:IsA("GuiObject") then
+					petTemplateByQuality[quality] = template
+					template.Visible = false
+				end
+			end
+		end
+
+		-- 安全解析宠物背包；新结构为 {Uid, Id, Level}，同时兼容旧存档里的字符串宠物 ID。
 		local function decodeOwnedPets()
 			local success, decoded = pcall(function()
 				return HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
@@ -1568,37 +1611,50 @@ function UIController.Start()
 			end
 
 			local owned = {}
-			for _, petId in ipairs(decoded) do
-				if type(petId) == "string" and Controllers.Config.PETS[petId] then
-					table.insert(owned, petId)
+			for index, petEntry in ipairs(decoded) do
+				if type(petEntry) == "string" and Controllers.Config.PETS[petEntry] then
+					table.insert(owned, {
+						Uid = "legacy_client_" .. tostring(index) .. "_" .. petEntry,
+						Id = petEntry,
+						Level = Controllers.Config.PET_LEVEL_MIN or 1,
+					})
+				elseif type(petEntry) == "table" and type(petEntry.Id) == "string" and Controllers.Config.PETS[petEntry.Id] then
+					local normalizeLevel = Controllers.Config.NormalizePetLevel
+					local level = normalizeLevel and normalizeLevel(petEntry.Level) or math.max(1, math.floor(tonumber(petEntry.Level) or 1))
+					table.insert(owned, {
+						Uid = type(petEntry.Uid) == "string" and petEntry.Uid or ("pet_client_" .. tostring(index) .. "_" .. petEntry.Id),
+						Id = petEntry.Id,
+						Level = level,
+					})
 				end
 			end
 
 			return owned
 		end
 
-		-- 将宠物 ID 按配置里的 SortOrder/名称排序，保证背包每次刷新顺序稳定
-		local function getSortedPetIds(petCounts)
-			local petIds = {}
-			for petId, count in pairs(petCounts) do
-				if count > 0 and Controllers.Config.PETS[petId] then
-					table.insert(petIds, petId)
-				end
-			end
-
-			table.sort(petIds, function(a, b)
-				local sortA = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(a) or math.huge
-				local sortB = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(b) or math.huge
+		-- 将宠物实例按配置 SortOrder、等级、名称排序，保证背包每次刷新顺序稳定。
+		local function getSortedPetEntries(ownedPets)
+			table.sort(ownedPets, function(a, b)
+				local sortA = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(a.Id) or math.huge
+				local sortB = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(b.Id) or math.huge
 				if sortA ~= sortB then
 					return sortA < sortB
 				end
 
-				local nameA = Controllers.Config.PETS[a].Name or a
-				local nameB = Controllers.Config.PETS[b].Name or b
-				return nameA < nameB
+				if a.Level ~= b.Level then
+					return a.Level > b.Level
+				end
+
+				local nameA = Controllers.Config.PETS[a.Id].Name or a.Id
+				local nameB = Controllers.Config.PETS[b.Id].Name or b.Id
+				if nameA ~= nameB then
+					return nameA < nameB
+				end
+
+				return tostring(a.Uid) < tostring(b.Uid)
 			end)
 
-			return petIds
+			return ownedPets
 		end
 
 		-- 清理代码动态生成的格子；保留 Studio 中的背景、标题、分隔线和 UIGridLayout。
@@ -1610,42 +1666,10 @@ function UIController.Start()
 			end
 		end
 
-		-- 统一克隆格子的外层尺寸；避免 PetItemTemplate 和 EmptySlotTemplate 在 Studio 中尺寸不同导致显示一大一小。
-		local function syncBagItemSizeToGrid(item, parent)
-			if not item or not parent then return end
-			if Controllers.Config.PET_BAG_UI and Controllers.Config.PET_BAG_UI.SyncTemplateSizeToGrid == false then
-				return
-			end
-
-			local gridLayout = parent:FindFirstChildWhichIsA("UIGridLayout")
-			if gridLayout then
-				item.Size = gridLayout.CellSize
-			end
-
-			for _, node in ipairs(item:GetDescendants()) do
-				if node:IsA("ImageLabel") or node:IsA("ImageButton") or node:IsA("ViewportFrame") then
-					if node.Name == "PetViewport"
-						or node.Name == "PetIconViewport"
-						or node.Name == "IconViewport"
-						or node.Name == "Viewport"
-						or node.Name == "SlotImage"
-						or node.Name == "Background"
-						or node.Name == "Bg"
-					then
-						node.AnchorPoint = Vector2.new(0.5, 0.5)
-						node.Position = UDim2.fromScale(0.5, 0.5)
-						node.Size = UDim2.fromScale(1, 1)
-					end
-				end
-			end
-		end
-
-		-- 动态克隆进列表的格子不能沿用模板在 Panel 里的摆放位置，否则待机区顶部会出现大段空白。
+		-- 动态克隆进列表的格子保留 Studio 模板自身尺寸与内部节点布局；代码只补 LayoutOrder 和滚动配置。
 		local function normalizeBagItemLayout(item, parent, layoutOrder)
 			if not item or not item:IsA("GuiObject") then return end
 
-			item.AnchorPoint = Vector2.new(0, 0)
-			item.Position = UDim2.fromScale(0, 0)
 			item.LayoutOrder = layoutOrder or 0
 
 			-- ScrollingFrame 里由 Studio 的 UIGridLayout/UIListLayout 负责排列；代码只补齐滚动画布配置。
@@ -1655,14 +1679,15 @@ function UIController.Start()
 			end
 		end
 
-		-- 克隆宠物格模板；只打生成标记，具体文字/图片由后续函数填充。
-		local function createPetButton(parent, layoutOrder)
-			local btn = petTemplate:Clone()
+		-- 克隆宠物格模板；按三档品质选择 pet_farme_quality1-3。
+		local function createPetButton(parent, layoutOrder, quality)
+			local template = petTemplateByQuality[quality] or petTemplateByQuality[1] or petTemplateByQuality[2] or petTemplateByQuality[3]
+			if not template then return nil end
+			local btn = template:Clone()
 			btn:SetAttribute("PetBagGenerated", true)
 			btn.Visible = true
 			btn.Parent = parent
 			normalizeBagItemLayout(btn, parent, layoutOrder)
-			syncBagItemSizeToGrid(btn, parent)
 			return btn
 		end
 
@@ -1706,21 +1731,9 @@ function UIController.Start()
 			end
 		end
 
-		-- 克隆出战区空槽；只表达可装备槽位，不参与点击交互。
-		local function createEmptyEquipSlot(parent, layoutOrder)
-			local emptySlot = emptySlotTemplate:Clone()
-			emptySlot:SetAttribute("PetBagGenerated", true)
-			emptySlot:SetAttribute("PetBagSlotType", "Equipped")
-			emptySlot.Visible = true
-			emptySlot.Parent = parent
-			normalizeBagItemLayout(emptySlot, parent, layoutOrder)
-			syncBagItemSizeToGrid(emptySlot, parent)
-			return emptySlot
-		end
-
 		-- 查找宠物格里的 ViewportFrame；用于直接展示 ReplicatedStorage/Model/Pets 下的宠物模型。
 		local function findPetViewport(root)
-			for _, name in ipairs({"PetViewport", "PetIconViewport", "IconViewport", "Viewport"}) do
+			for _, name in ipairs({"ViewportFrame", "PetViewport", "PetIconViewport", "IconViewport", "Viewport"}) do
 				local node = root:FindFirstChild(name, true)
 				if node and node:IsA("ViewportFrame") then
 					return node
@@ -1806,7 +1819,10 @@ function UIController.Start()
 		-- 将宠物模型渲染到背包格子的 ViewportFrame；模型缺失时安静失败，交给文本兜底。
 		local function applyPetViewport(btn, petId)
 			local viewport = findPetViewport(btn)
-			if not viewport then return false end
+			if not viewport then
+				warn("[UIController][PetBag] ViewportFrame not found for pet button:", btn and btn:GetFullName(), "petId:", petId)
+				return false
+			end
 
 			clearPetViewport(viewport)
 			viewport.BackgroundTransparency = 1
@@ -1817,6 +1833,7 @@ function UIController.Start()
 			if not petTemplateModel then
 				viewport.Visible = false
 				btn:SetAttribute("PetViewportModelFound", false)
+				warn("[UIController][PetBag] Pet viewport model missing:", petId, "button:", btn and btn:GetFullName())
 				return false
 			end
 
@@ -1827,37 +1844,83 @@ function UIController.Start()
 			btn:SetAttribute("PetViewportModelNameDebug", petTemplateModel.Name)
 			if not ok then
 				petClone:Destroy()
+				warn("[UIController][PetBag] Failed to render pet in ViewportFrame:", petId, "viewport:", viewport:GetFullName())
 			end
 
 			return ok
 		end
 
-		-- 生成宠物卡展示数据，便于美术把宠物名称、数量、稀有度等拆成独立 TextLabel。
-		local function getPetDisplayData(petId, count, statusText)
+		local function setGradientEnabled(root, gradientName, enabled)
+			if not root then return end
+			for _, node in ipairs(root:GetDescendants()) do
+				if node.Name == gradientName and node:IsA("UIGradient") then
+					node.Enabled = enabled
+				end
+			end
+		end
+
+		local function applyQualityGradients(root, quality)
+			for i = 1, 3 do
+				setGradientEnabled(root, "UIGradient_" .. i, i == quality)
+			end
+		end
+
+		local function setSelectedStroke(root, isSelected)
+			if not root then return end
+			local stroke = root:FindFirstChild("SelectedStroke", true)
+			if not stroke then return end
+			if stroke:IsA("UIStroke") then
+				stroke.Enabled = isSelected
+			elseif stroke:IsA("GuiObject") then
+				stroke.Visible = isSelected
+			end
+		end
+
+		local function findGuiButton(root, names)
+			if not root then return nil end
+			for _, name in ipairs(names) do
+				local node = root:FindFirstChild(name, true)
+				if node and node:IsA("GuiButton") then
+					return node
+				end
+				if node then
+					local button = node:FindFirstChildWhichIsA("GuiButton", true)
+					if button then return button end
+				end
+			end
+			return root:FindFirstChildWhichIsA("GuiButton", true)
+		end
+
+		-- 生成宠物卡展示数据，便于美术把宠物名称、等级、攻击力、稀有度等拆成独立 TextLabel。
+		local function getPetDisplayData(petId, level, statusText)
 			local petConfig = Controllers.Config.PETS[petId]
+			local hasStatus = type(statusText) == "string" and statusText ~= ""
+			level = Controllers.Config.NormalizePetLevel and Controllers.Config.NormalizePetLevel(level) or math.max(1, math.floor(tonumber(level) or 1))
 			if not petConfig then
 				return {
 					Name = petId,
-					Count = count or 1,
-					CountText = "",
+					Level = level,
+					LevelText = "Lv." .. tostring(level),
 					Rarity = "Unknown",
-					Status = statusText or "",
+					Quality = 1,
+					Status = hasStatus and statusText or "",
 					Attack = "0",
 					Description = "",
 					FullText = petId,
 				}
 			end
 
-			local countText = (count and count > 1) and (" x" .. count) or ""
 			local rarityText = petConfig.Rarity or "Unknown"
 			local description = petConfig.Description or "No description"
-			local statusLine = statusText and ("\n" .. statusText) or ""
-			local attackText = Controllers.Config.FormatNumber(petConfig.ATK or 0)
+			local statusLine = hasStatus and ("\n" .. statusText) or ""
+			local finalAtk = Controllers.Config.GetPetAttack and Controllers.Config.GetPetAttack(petId, level) or (petConfig.ATK or 0)
+			local attackText = Controllers.Config.FormatNumber(finalAtk)
+			local quality = Controllers.Config.GetPetQuality and Controllers.Config.GetPetQuality(petId) or 1
 			local fullText = string.format(
-				"%s%s [%s]%s\nATK:%s\n%s",
+				"%s [%s] Lv.%d%s\nATK:%s\n%s",
 				petConfig.Name or petId,
-				countText,
 				rarityText,
+				level,
 				statusLine,
 				attackText,
 				description
@@ -1865,10 +1928,11 @@ function UIController.Start()
 
 			return {
 				Name = petConfig.Name or petId,
-				Count = count or 1,
-				CountText = countText,
+				Level = level,
+				LevelText = "Lv." .. tostring(level),
 				Rarity = rarityText,
-				Status = statusText or "",
+				Quality = quality,
+				Status = hasStatus and statusText or "",
 				Attack = attackText,
 				Description = description,
 				Icon = normalizeImageAssetId(petConfig.Icon, false),
@@ -1877,28 +1941,29 @@ function UIController.Start()
 		end
 
 		-- 给宠物卡填充显示内容；优先写入美术拆好的标签，没有拆分时回退到按钮文本。
-		local function applyPetButtonDisplay(btn, petId, count, statusText)
-			local display = getPetDisplayData(petId, count, statusText)
-			local nameText = findTextNode(btn, {"PetNameText", "NameText", "TitleText"})
-			local countLabel = findTextNode(btn, {"CountText", "CountLabel"})
-			local rarityText = findTextNode(btn, {"RarityText", "RarityLabel"})
-			local statusLabel = findTextNode(btn, {"StatusText", "StateText", "EquippedText"})
-			local attackText = findTextNode(btn, {"AttackText", "ATKText", "AtkText"})
-			local descText = findTextNode(btn, {"DescriptionText", "DescText", "NoteText"})
+		-- textRoot 用于兼容右侧详情区：宠物模型按钮 PetButton_1 与文字标签是 EquippedContainer 下的同级节点。
+		local function applyPetButtonDisplay(btn, petEntry, statusText, textRoot)
+			local display = getPetDisplayData(petEntry.Id, petEntry.Level, statusText)
+			local labelRoot = textRoot or btn
+			local nameText = findTextNode(labelRoot, {"TextLabel-name", "PetNameText", "NameText", "TitleText"})
+			local levelLabel = findTextNode(labelRoot, {"TextLabel-ABC", "LevelText", "LevelLabel", "ABCText"})
+			local rarityText = findTextNode(labelRoot, {"RarityText", "RarityLabel"})
+			local statusLabel = findTextNode(labelRoot, {"StatusText", "StateText", "EquippedText"})
+			local attackText = findTextNode(labelRoot, {"TextLabel-ATK", "AttackText", "ATKText", "AtkText"})
+			local descText = findTextNode(labelRoot, {"DescriptionText", "DescText", "NoteText"})
 			local petIcon = findNamedImageNode(btn, {"PetIcon", "IconImage", "PetImage", "Avatar"})
-			local hasSplitLabels = nameText or countLabel or rarityText or statusLabel or attackText or descText
+			local hasSplitLabels = nameText or levelLabel or rarityText or statusLabel or attackText or descText
 
-			btn:SetAttribute("PetId", petId)
-			btn:SetAttribute("PetCount", display.Count)
+			btn:SetAttribute("PetUid", petEntry.Uid)
+			btn:SetAttribute("PetId", petEntry.Id)
+			btn:SetAttribute("PetLevel", display.Level)
 			btn:SetAttribute("PetRarity", display.Rarity)
-			btn:SetAttribute("PetState", statusText and "Equipped" or "Standby")
+			btn:SetAttribute("PetQuality", display.Quality)
+			btn:SetAttribute("PetState", (type(statusText) == "string" and statusText ~= "") and "Equipped" or "Standby")
 			btn:SetAttribute("PetIconAssetDebug", display.Icon or "")
 
 			if nameText then nameText.Text = display.Name end
-			if countLabel then
-				countLabel.Text = display.CountText
-				countLabel.Visible = display.CountText ~= ""
-			end
+			if levelLabel then levelLabel.Text = display.LevelText end
 			if rarityText then rarityText.Text = display.Rarity end
 			if statusLabel then
 				statusLabel.Text = display.Status
@@ -1906,7 +1971,8 @@ function UIController.Start()
 			end
 			if attackText then attackText.Text = "ATK:" .. display.Attack end
 			if descText then descText.Text = display.Description end
-			local viewportRendered = applyPetViewport(btn, petId)
+			applyQualityGradients(btn, display.Quality)
+			local viewportRendered = applyPetViewport(btn, petEntry.Id)
 			if petIcon then
 				petIcon.Image = viewportRendered and "" or (display.Icon or "")
 				petIcon.Visible = not viewportRendered and display.Icon ~= nil
@@ -1921,74 +1987,196 @@ function UIController.Start()
 			end
 		end
 
+		local function setEquipButtonVisual(isEquipped)
+			if not detailButton then return end
+			local equipRoot = equippedContainer and equippedContainer:FindFirstChild("Equip_1", true) or detailButton:FindFirstChild("Equip_1", true)
+			local equipText = equipRoot and findTextNode(equipRoot, {"Equip"}) or findTextNode(detailButton, {"Equip"})
+			if equipText then
+				equipText.Text = isEquipped and "卸载" or "装备"
+			end
+
+			local gradientRoot = equipRoot or detailButton
+			setGradientEnabled(gradientRoot, "UIGradient-x", not isEquipped)
+			setGradientEnabled(gradientRoot, "UIGradient-y", isEquipped)
+		end
+
+		local function applyPetDetail(petEntry)
+			if not detailButton then return end
+			if not petEntry then
+				detailButton:SetAttribute("PetUid", "")
+				setEquipButtonVisual(false)
+				return
+			end
+
+			local isEquipped = player:GetAttribute("EquippedPetUid") == petEntry.Uid
+			applyPetButtonDisplay(detailButton, petEntry, isEquipped and "Equipped" or "", equippedContainer)
+			setEquipButtonVisual(isEquipped)
+		end
+
+		local function bindEquipButton()
+			if not detailButton or detailButton:GetAttribute("PetBagEquipBound") then return end
+
+			local equipButton = findGuiButton(equippedContainer or detailButton, {"Equip_1"})
+			if not equipButton then
+				warn("[UIController][PetBag] Equip_1 button not found; detail display works but equip action is disabled. equippedContainer:", equippedContainer and equippedContainer:GetFullName(), "detailButton:", detailButton:GetFullName())
+				return
+			end
+			detailButton:SetAttribute("PetBagEquipBound", true)
+			print("[UIController][PetBag] Equip button bound:", equipButton:GetFullName())
+
+			equipButton.Activated:Connect(function()
+				local petUid = detailButton:GetAttribute("PetUid")
+				if type(petUid) ~= "string" or petUid == "" then
+					warn("[UIController][PetBag] Equip clicked but detail PetUid is empty.")
+					return
+				end
+
+				local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+				local equipPetEvent = remotes and remotes:WaitForChild("EquipPet", 5)
+				if not equipPetEvent then
+					warn("[UIController][PetBag] EquipPet RemoteEvent missing.")
+					return
+				end
+
+				if player:GetAttribute("EquippedPetUid") == petUid then
+					print("[UIController][PetBag] Unequip pet request:", petUid)
+					equipPetEvent:FireServer("")
+				else
+					print("[UIController][PetBag] Equip pet request:", petUid, detailButton:GetAttribute("PetId"))
+					equipPetEvent:FireServer(petUid)
+				end
+			end)
+		end
+
+		local function findNamedGuiButton(root, names)
+			if not root then return nil end
+			for _, name in ipairs(names) do
+				local node = root:FindFirstChild(name, true)
+				if node and node:IsA("GuiButton") then
+					return node
+				end
+				if node then
+					local button = node:FindFirstChildWhichIsA("GuiButton", true)
+					if button then return button end
+				end
+			end
+			return nil
+		end
+
+		local function getPreviousSelectionUidAfterRemove(ownedPets, removedPetUid)
+			for index, petEntry in ipairs(ownedPets) do
+				if petEntry.Uid == removedPetUid then
+					if index > 1 then
+						return ownedPets[index - 1].Uid
+					end
+					local nextEntry = ownedPets[index + 1]
+					return nextEntry and nextEntry.Uid or nil
+				end
+			end
+
+			return nil
+		end
+
+		local function bindRemoveButton()
+			if not detailButton or detailButton:GetAttribute("PetBagRemoveBound") then return end
+
+			local removeButton = findNamedGuiButton(equippedContainer or detailButton, {"Remove-pet", "RemovePet", "Remove_1", "BtnRemovePet"})
+			if not removeButton then
+				warn("[UIController][PetBag] Remove-pet button not found; detail display works but remove action is disabled. equippedContainer:", equippedContainer and equippedContainer:GetFullName(), "detailButton:", detailButton:GetFullName())
+				return
+			end
+
+			detailButton:SetAttribute("PetBagRemoveBound", true)
+			print("[UIController][PetBag] Remove-pet button bound:", removeButton:GetFullName())
+
+			removeButton.Activated:Connect(function()
+				local petUid = detailButton:GetAttribute("PetUid")
+				if type(petUid) ~= "string" or petUid == "" then
+					warn("[UIController][PetBag] Remove clicked but detail PetUid is empty.")
+					return
+				end
+
+				local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+				local removePetEvent = remotes and remotes:WaitForChild("RemovePet", 5)
+				if not removePetEvent then
+					warn("[UIController][PetBag] RemovePet RemoteEvent missing.")
+					return
+				end
+
+				local ownedPets = getSortedPetEntries(decodeOwnedPets())
+				pendingSelectedPetUidAfterRemove = getPreviousSelectionUidAfterRemove(ownedPets, petUid)
+				selectedPetUid = pendingSelectedPetUidAfterRemove
+				print("[UIController][PetBag] Remove pet request:", petUid, "next selected:", pendingSelectedPetUidAfterRemove)
+				removePetEvent:FireServer(petUid)
+			end)
+		end
+
 		local function refreshBag()
-			clearGeneratedBagItems(equippedContainer)
-			clearGeneratedBagItems(standbyContainer)
-			if equippedContainer:IsA("ScrollingFrame") then
-				equippedContainer.CanvasPosition = Vector2.zero
-			end
-			if standbyContainer:IsA("ScrollingFrame") then
-				standbyContainer.CanvasPosition = Vector2.zero
-			end
-			
-			local owned = decodeOwnedPets()
-			local equipped = player:GetAttribute("EquippedPet") or ""
-
-			-- 统计同种宠物
-			local petCounts = {}
-			for _, petId in ipairs(owned) do
-				petCounts[petId] = (petCounts[petId] or 0) + 1
+			if not petList or not detailButton then
+				warn("[UIController][PetBag] PetList or EquippedContainer.PetButton_1 missing; cannot refresh redesigned pet bag.")
+				return
 			end
 
-			-- ==========================================
-			-- 1. 渲染【出战区】
-			-- ==========================================
-			local equippedCount = 0
-			if equipped ~= "" and petCounts[equipped] and petCounts[equipped] > 0 then
-				equippedCount = 1
-				petCounts[equipped] = petCounts[equipped] - 1 -- 从待机区扣除1个
-				
-				local btn = createPetButton(equippedContainer, 1)
-				
-				applyPetButtonDisplay(btn, equipped, 1, "Equipped")
-				applyPetItemHover(btn)
-				
-				-- 点击出战区的宠物：向服务器发送空字符串进行【卸下】
-				btn.Activated:Connect(function()
-					local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-					remotes:WaitForChild("EquipPet"):FireServer("")
-				end)
+			clearGeneratedBagItems(petList)
+			local ownedPets = getSortedPetEntries(decodeOwnedPets())
+			local equippedUid = player:GetAttribute("EquippedPetUid") or ""
+			if pendingSelectedPetUidAfterRemove then
+				selectedPetUid = pendingSelectedPetUidAfterRemove
+				pendingSelectedPetUidAfterRemove = nil
 			end
 
-			-- 出战区显示“当前可装备宠物数”个槽位；未装备的位置用空槽补齐，不额外 +1。
-			for slotIndex = equippedCount + 1, MAX_EQUIP_SLOTS do
-				createEmptyEquipSlot(equippedContainer, slotIndex)
+			local selectedEntry = nil
+			for _, petEntry in ipairs(ownedPets) do
+				if selectedPetUid and petEntry.Uid == selectedPetUid then
+					selectedEntry = petEntry
+					break
+				end
 			end
 
-			-- ==========================================
-			-- 2. 渲染【待机区】
-			-- ==========================================
-			local standbyPetIds = getSortedPetIds(petCounts)
-			local standbyLayoutOrder = 0
-			for _, petId in ipairs(standbyPetIds) do
-				local count = petCounts[petId]
-				if count > 0 then -- 如果还有剩余宠物在待机
-					local petConfig = Controllers.Config.PETS[petId]
-					if petConfig then
-						standbyLayoutOrder += 1
-						local btn = createPetButton(standbyContainer, standbyLayoutOrder)
-						
-						applyPetButtonDisplay(btn, petId, count)
-						applyPetItemHover(btn)
-						
-						-- 点击待机区的宠物：向服务器发送 petId 进行【替换出战】
-						btn.Activated:Connect(function()
-							local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-							remotes:WaitForChild("EquipPet"):FireServer(petId)
-						end)
+			if not selectedEntry then
+				for _, petEntry in ipairs(ownedPets) do
+					if petEntry.Uid == equippedUid then
+						selectedEntry = petEntry
+						break
 					end
 				end
 			end
+
+			selectedEntry = selectedEntry or ownedPets[1]
+			selectedPetUid = selectedEntry and selectedEntry.Uid or nil
+
+			for index, petEntry in ipairs(ownedPets) do
+				local quality = Controllers.Config.GetPetQuality and Controllers.Config.GetPetQuality(petEntry.Id) or 1
+				local item = createPetButton(petList, index, quality)
+				if item then
+					local isEquipped = equippedUid ~= "" and petEntry.Uid == equippedUid
+					applyPetButtonDisplay(item, petEntry, isEquipped and "Equipped" or "")
+					setSelectedStroke(item, isEquipped)
+					applyPetItemHover(item)
+
+					local clickButton = item:IsA("GuiButton") and item or item:FindFirstChildWhichIsA("GuiButton", true)
+					if clickButton then
+						clickButton.Activated:Connect(function()
+							selectedPetUid = petEntry.Uid
+							refreshBag()
+						end)
+					elseif item:IsA("GuiObject") then
+						item.Active = true
+						item.InputBegan:Connect(function(input)
+							if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+								return
+							end
+
+							selectedPetUid = petEntry.Uid
+							refreshBag()
+						end)
+					else
+						warn("[UIController][PetBag] Pet list item is not clickable:", item:GetFullName(), petEntry.Uid, petEntry.Id)
+					end
+				end
+			end
+
+			applyPetDetail(selectedEntry)
 		end
 
 		local isApplyingPetBagVisible = false
@@ -2013,6 +2201,8 @@ function UIController.Start()
 
 		applyCloseButtonHover()
 		applyOpenBagButtonHover()
+		bindEquipButton()
+		bindRemoveButton()
 
 		-- 兜底处理外部代码直接改 Visible 的情况，例如进入战斗时主 UI 循环会强制关闭背包。
 		bagPanel:GetPropertyChangedSignal("Visible"):Connect(function()
@@ -2029,12 +2219,23 @@ function UIController.Start()
 		openBagBtn.Activated:Connect(function()
 			setPetBagOpen(not bagPanel.Visible)
 		end)
-		closeBtn.Activated:Connect(function()
-			setPetBagOpen(false)
-		end)
+		if closeBtn and closeBtn:IsA("GuiButton") then
+			closeBtn.Activated:Connect(function()
+				setPetBagOpen(false)
+			end)
+		else
+			warn("[UIController][PetBag] Close button not found; BtnOpenPetBag can still toggle PetBagPanel.")
+		end
+		print("[UIController][PetBag] BtnOpenPetBag bound successfully.")
 		
 		-- 装备发生变动、或者刚好抽到新宠物时，实时刷新面板
 		player:GetAttributeChangedSignal("EquippedPet"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+		player:GetAttributeChangedSignal("EquippedPetUid"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+		player:GetAttributeChangedSignal("EquippedPetLevel"):Connect(function()
 			if bagPanel.Visible then refreshBag() end
 		end)
 		player:GetAttributeChangedSignal("OwnedPets_JSON"):Connect(function()
@@ -2046,22 +2247,525 @@ function UIController.Start()
 	-- =======================================================
 	-- 【重构版】：3D ViewportFrame 宠物蛋破壳动画 (对接 Studio)
 	-- =======================================================
+	local function setupAchievementUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+		local buttonRoot = getMainButtonRoot(mainUI)
+
+		local openButton = buttonRoot and buttonRoot:FindFirstChild("BtnOpenAchieve")
+		local achievePanel = mainUI:FindFirstChild("Achieve")
+		if not openButton or not achievePanel or not achievePanel:IsA("GuiObject") then
+			warn("[UIController] Achievement UI missing: MainUI/MainUI_1/BtnOpenAchieve or MainUI/Achieve.")
+			return
+		end
+
+		local achievePage = achievePanel:FindFirstChild("AchievePage", true)
+		local closeButton = achievePanel:FindFirstChild("CloseButton", true)
+		local uiTemplates = ReplicatedStorage:FindFirstChild("UITemplates")
+		local itemTemplate = uiTemplates and uiTemplates:FindFirstChild("AchieveItem")
+		if not achievePage or not achievePage:IsA("GuiObject") or not itemTemplate or not itemTemplate:IsA("GuiObject") then
+			warn("[UIController] Achievement UI missing: AchievePage or ReplicatedStorage/UITemplates/AchieveItem.")
+			return
+		end
+
+		itemTemplate.Visible = false
+		player:SetAttribute("IsAchieveOpen", achievePanel.Visible)
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local getAchievements = remotes and remotes:WaitForChild("GetAchievements", 5)
+		local claimAchievement = remotes and remotes:WaitForChild("ClaimAchievement", 5)
+		if not getAchievements or not claimAchievement then
+			warn("[UIController] Achievement remotes are not ready.")
+			return
+		end
+
+		if achievePage:IsA("ScrollingFrame") then
+			achievePage.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			achievePage.ScrollingDirection = Enum.ScrollingDirection.Y
+		end
+
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+		local achievementBlurTween = nil
+		local achievementCameraTween = nil
+		local achievementSavedFOV = nil
+		local renderAchievementSnapshot
+		local refreshAchievements
+
+		local function applySimpleHover(guiObject, attributeName, scaleName, targetScale)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute(attributeName) then return end
+			guiObject:SetAttribute(attributeName, true)
+
+			local hoverScale = guiObject:FindFirstChild(scaleName)
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = scaleName
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+			local function playScale(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				playScale(targetScale or 1.06)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				playScale(normalScale)
+			end)
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					playScale(normalScale)
+				end)
+			end
+		end
+
+		-- 获取或创建成就面板专用毛玻璃；只影响本地世界背景，不会模糊 UI 本身。
+		local function getAchievementBlur()
+			local blur = Lighting:FindFirstChild("AchievementBlur")
+			if blur and not blur:IsA("BlurEffect") then
+				blur = nil
+			end
+
+			if not blur then
+				blur = Instance.new("BlurEffect")
+				blur.Name = "AchievementBlur"
+				blur.Size = 0
+				blur.Parent = Lighting
+			end
+
+			return blur
+		end
+
+		-- 成就面板打开/关闭时复用背包同款背景毛玻璃表现。
+		local function tweenAchievementBlur(isOpen)
+			local blur = getAchievementBlur()
+			if achievementBlurTween then
+				achievementBlurTween:Cancel()
+				achievementBlurTween = nil
+			end
+
+			local targetSize = isOpen and (petBagConfig.OpenBlurSize or 14) or 0
+			local tweenTime = petBagConfig.OpenBlurTweenTime or 0.18
+			achievementBlurTween = TweenService:Create(
+				blur,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Size = targetSize }
+			)
+			achievementBlurTween:Play()
+		end
+
+		-- 成就面板打开时调整 FOV 做视野缩放；关闭时恢复打开前的 FOV。
+		local function tweenAchievementCamera(isOpen)
+			local currentCamera = Workspace.CurrentCamera
+			if not currentCamera then return end
+
+			if achievementCameraTween then
+				achievementCameraTween:Cancel()
+				achievementCameraTween = nil
+			end
+
+			if isOpen then
+				if not achievementSavedFOV then
+					achievementSavedFOV = currentCamera.FieldOfView
+				end
+			elseif not achievementSavedFOV then
+				return
+			end
+
+			local targetFOV = isOpen and (petBagConfig.OpenCameraFOV or 58) or achievementSavedFOV
+			local tweenTime = petBagConfig.OpenCameraTweenTime or 0.2
+			achievementCameraTween = TweenService:Create(
+				currentCamera,
+				TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ FieldOfView = targetFOV }
+			)
+			achievementCameraTween:Play()
+
+			if not isOpen then
+				local savedTween = achievementCameraTween
+				task.delay(tweenTime, function()
+					if achievementCameraTween == savedTween then
+						achievementSavedFOV = nil
+					end
+				end)
+			end
+		end
+
+		local function clearGeneratedAchievementItems()
+			for _, child in ipairs(achievePage:GetChildren()) do
+				if child:GetAttribute("AchievementGenerated") == true then
+					child:Destroy()
+				end
+			end
+		end
+
+		local function clearViewport(viewport)
+			if not viewport then return end
+			for _, child in ipairs(viewport:GetChildren()) do
+				if child:GetAttribute("AchievementViewportGenerated") == true then
+					child:Destroy()
+				end
+			end
+			viewport.CurrentCamera = nil
+		end
+
+		local function renderEggReward(viewport)
+			if not viewport or not viewport:IsA("ViewportFrame") then return end
+			clearViewport(viewport)
+			viewport.BackgroundTransparency = 1
+
+			local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+			local petModels = modelFolder and modelFolder:FindFirstChild("Pets")
+			local eggTemplate = petModels and petModels:FindFirstChild("Egg")
+			if not eggTemplate then return end
+
+			local worldModel = Instance.new("WorldModel")
+			worldModel.Name = "AchievementRewardWorld"
+			worldModel:SetAttribute("AchievementViewportGenerated", true)
+			worldModel.Parent = viewport
+
+			local egg = eggTemplate:Clone()
+			egg:SetAttribute("AchievementViewportGenerated", true)
+			egg.Parent = worldModel
+
+			for _, obj in ipairs(egg:GetDescendants()) do
+				if obj:IsA("BasePart") then
+					obj.Anchored = true
+					obj.CanCollide = false
+				end
+			end
+
+			local boundsSize = Vector3.new(2, 2, 2)
+			if egg:IsA("Model") then
+				if not egg.PrimaryPart then
+					egg.PrimaryPart = egg:FindFirstChildWhichIsA("BasePart", true)
+				end
+				egg:PivotTo(CFrame.new(0, 0, 0))
+				local boundsCFrame
+				boundsCFrame, boundsSize = egg:GetBoundingBox()
+				egg:PivotTo(egg:GetPivot() + (-boundsCFrame.Position))
+			elseif egg:IsA("BasePart") then
+				egg.CFrame = CFrame.new(0, 0, 0)
+				boundsSize = egg.Size
+			else
+				worldModel:Destroy()
+				return
+			end
+
+			local maxSize = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 1)
+			local cameraDistance = maxSize * 2.2
+			local camera = Instance.new("Camera")
+			camera.Name = "AchievementRewardCamera"
+			camera:SetAttribute("AchievementViewportGenerated", true)
+			camera.FieldOfView = 35
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, boundsSize.Y * 0.15, cameraDistance), Vector3.new(0, 0, 0))
+			camera.Parent = viewport
+			viewport.CurrentCamera = camera
+		end
+
+		local function setButtonText(button, text)
+			if not button then return end
+			if button:IsA("TextButton") then
+				button.Text = text
+			end
+
+			local label = button:FindFirstChildWhichIsA("TextLabel", true)
+			if label then
+				label.Text = text
+			end
+		end
+
+		local function setClaimButtonState(button, entry)
+			if not button or not button:IsA("GuiButton") then return end
+
+			local stateText = "Locked"
+			if entry.Claimed then
+				stateText = "Claimed"
+			elseif entry.CanClaim then
+				stateText = "Claim"
+			end
+
+			setButtonText(button, stateText)
+			button.Active = entry.CanClaim == true
+			button.AutoButtonColor = entry.CanClaim == true
+			button:SetAttribute("AchievementId", entry.Id)
+			button:SetAttribute("AchievementCanClaim", entry.CanClaim == true)
+			button:SetAttribute("AchievementClaimed", entry.Claimed == true)
+		end
+
+		local function getMaxDescendantZIndex(root)
+			local maxZIndex = root.ZIndex
+			for _, node in ipairs(root:GetDescendants()) do
+				if node:IsA("GuiObject") then
+					maxZIndex = math.max(maxZIndex, node.ZIndex)
+				end
+			end
+			return maxZIndex
+		end
+
+		local function applyAchievementUnavailableMask(item, entry)
+			if not item or not item:IsA("GuiObject") then return end
+
+			local shouldMask = entry.CanClaim ~= true
+			local mask = item:FindFirstChild("LockedOverlay")
+			if not mask then
+				mask = Instance.new("Frame")
+				mask.Name = "LockedOverlay"
+				mask.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+				mask.BorderSizePixel = 0
+				mask.AnchorPoint = Vector2.new(0.5, 0.5)
+				mask.Position = UDim2.fromScale(0.5, 0.5)
+				mask.Size = UDim2.fromScale(1, 1)
+				mask.Active = false
+				mask.Parent = item
+			end
+
+			mask.Visible = shouldMask
+			mask.BackgroundTransparency = entry.Claimed and 0.42 or 0.5
+			mask.ZIndex = getMaxDescendantZIndex(item) + 1
+		end
+
+		local function fillAchievementItem(item, entry, layoutOrder)
+			item:SetAttribute("AchievementGenerated", true)
+			item:SetAttribute("AchievementId", entry.Id)
+			item.LayoutOrder = layoutOrder or entry.SortOrder or 0
+			item.Visible = true
+
+			local descriptionText = item:FindFirstChild("DescriptionText", true)
+			if descriptionText and descriptionText:IsA("TextLabel") then
+				descriptionText.Text = entry.Title or ""
+			end
+
+			local detailsText = item:FindFirstChild("DetailsText", true)
+			if detailsText and detailsText:IsA("TextLabel") then
+				detailsText.Text = entry.Details or ""
+			end
+
+			local progressBarImage = item:FindFirstChild("ProgressBarImage", true)
+			local fill = progressBarImage and progressBarImage:FindFirstChild("Fill", true)
+			if fill and fill:IsA("GuiObject") then
+				local progress = math.clamp(tonumber(entry.Progress) or 0, 0, 1)
+				fill.Size = UDim2.new(progress, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+			end
+
+			local progressText = progressBarImage and progressBarImage:FindFirstChild("TextLabel", true)
+			if progressText and progressText:IsA("TextLabel") then
+				progressText.Text = entry.ProgressText or ""
+			end
+
+			local reward1 = item:FindFirstChild("Reward_1", true)
+			if reward1 then
+				local viewport = reward1:FindFirstChildWhichIsA("ViewportFrame", true)
+				renderEggReward(viewport)
+
+				local amountText = reward1:FindFirstChild("TextLabel", true)
+				if amountText and amountText:IsA("TextLabel") then
+					amountText.Text = "x" .. tostring(entry.RewardTickets or 0)
+				end
+			end
+
+			local reward2 = item:FindFirstChild("Reward_2", true)
+			if reward2 then
+				local amountText = reward2:FindFirstChild("TextLabel", true)
+				if amountText and amountText:IsA("TextLabel") then
+					local formatNumber = Controllers.Config.FormatNumber or tostring
+					amountText.Text = "x" .. formatNumber(entry.RewardCoins or 0)
+				end
+			end
+
+			local claimButton = item:FindFirstChild("ClaimBattle", true)
+			if claimButton and claimButton:IsA("GuiButton") then
+				setClaimButtonState(claimButton, entry)
+				applySimpleHover(claimButton, "AchievementClaimHoverBound", "AchievementClaimHoverScale", 1.06)
+
+				claimButton.Activated:Connect(function()
+					if claimButton:GetAttribute("AchievementCanClaim") ~= true then return end
+					claimButton:SetAttribute("AchievementCanClaim", false)
+					claimButton.Active = false
+
+					local result = claimAchievement:InvokeServer(entry.Id)
+					if result and result.Snapshot then
+						renderAchievementSnapshot(result.Snapshot)
+					else
+						refreshAchievements()
+					end
+				end)
+			end
+
+			applyAchievementUnavailableMask(item, entry)
+		end
+
+		renderAchievementSnapshot = function(snapshot)
+			clearGeneratedAchievementItems()
+			local entries = snapshot and snapshot.Achievements
+			if type(entries) ~= "table" then
+				return
+			end
+
+			for index, entry in ipairs(entries) do
+				local item = itemTemplate:Clone()
+				item.Parent = achievePage
+				fillAchievementItem(item, entry, index)
+			end
+
+			if achievePage:IsA("ScrollingFrame") then
+				achievePage.CanvasPosition = Vector2.zero
+			end
+		end
+
+		refreshAchievements = function()
+			local success, snapshot = pcall(function()
+				return getAchievements:InvokeServer()
+			end)
+
+			if not success then
+				warn("[UIController] Failed to refresh achievements:", snapshot)
+				return
+			end
+
+			renderAchievementSnapshot(snapshot)
+		end
+
+		local isApplyingAchieveVisible = false
+		local function setAchievementOpen(isOpen)
+			if isOpen == achievePanel.Visible then
+				player:SetAttribute("IsAchieveOpen", isOpen)
+				tweenAchievementBlur(isOpen)
+				tweenAchievementCamera(isOpen)
+				return
+			end
+
+			player:SetAttribute("IsAchieveOpen", isOpen)
+			isApplyingAchieveVisible = true
+			achievePanel.Visible = isOpen
+			tweenAchievementBlur(isOpen)
+			tweenAchievementCamera(isOpen)
+			isApplyingAchieveVisible = false
+
+			if isOpen then
+				refreshAchievements()
+			end
+		end
+
+		if closeButton and closeButton:IsA("GuiButton") then
+			applySimpleHover(closeButton, "AchievementCloseHoverBound", "AchievementCloseHoverScale", petBagConfig.CloseButtonHoverScale or 1.06)
+			closeButton.Activated:Connect(function()
+				setAchievementOpen(false)
+			end)
+		end
+
+		if openButton:IsA("GuiButton") then
+			applySimpleHover(
+				openButton,
+				"AchievementOpenHoverBound",
+				"AchievementOpenHoverScale",
+				petBagConfig.OpenButtonHoverScale or petBagConfig.CloseButtonHoverScale or 1.06
+			)
+			openButton.Activated:Connect(function()
+				setAchievementOpen(not achievePanel.Visible)
+			end)
+		end
+
+		achievePanel:GetPropertyChangedSignal("Visible"):Connect(function()
+			if isApplyingAchieveVisible then return end
+			player:SetAttribute("IsAchieveOpen", achievePanel.Visible)
+			tweenAchievementBlur(achievePanel.Visible)
+			tweenAchievementCamera(achievePanel.Visible)
+			if achievePanel.Visible then
+				refreshAchievements()
+			end
+		end)
+
+		for _, attrName in ipairs({ "BestDistance", "PetDrawTickets", "Coins", "ClaimedAchievements_JSON" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				if achievePanel.Visible then
+					refreshAchievements()
+				end
+			end)
+		end
+	end
+
 	local function setupPetHatching()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
 		
-		-- 等待美术做好的全屏抽卡界面
-		local hatchScreen = mainUI:WaitForChild("HatchScreen", 5)
+		-- 新抽蛋 UI 结构：MainUI.Hatch_Pet_Egg.HatchScreen
+		local hatchPetEgg = mainUI:WaitForChild("Hatch_Pet_Egg", 5)
+		if not hatchPetEgg then return end
+
+		local hatchScreen = hatchPetEgg:WaitForChild("HatchScreen", 5)
 		if not hatchScreen then return end
-		
+
 		local viewport = hatchScreen:WaitForChild("PetViewport")
 		local clickArea = hatchScreen:WaitForChild("BtnClickArea")
 		local tipText = hatchScreen:WaitForChild("TipText")
+		local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+		local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
 		
 		local ReplicatedStorage = game:GetService("ReplicatedStorage")
 		local petModels = ReplicatedStorage:WaitForChild("Model"):WaitForChild("Pets")
 		local hatchBlurTween = nil
 		local isApplyingHatchVisible = false
+		local noticeSerial = 0
+
+		local function showNotice(text, seconds)
+			seconds = seconds or 3
+			if not noticeUI or not noticeUI:IsA("GuiObject") then
+				warn("[UIController] Notice_UI 不存在，提示内容:", text)
+				return
+			end
+
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "")
+			end
+
+			noticeSerial += 1
+			local currentSerial = noticeSerial
+			noticeUI.Visible = true
+			task.delay(seconds, function()
+				if currentSerial == noticeSerial and noticeUI then
+					noticeUI.Visible = false
+				end
+			end)
+		end
+
+		local function updateHatchPetEggCards()
+			if not hatchPetEgg then return end
+			local equip1 = hatchPetEgg:FindFirstChild("Equip_1", true)
+			local cards = equip1 and equip1:FindFirstChild("Cards", true)
+			if cards and (cards:IsA("TextLabel") or cards:IsA("TextButton")) then
+				cards.Text = "x" .. tostring(math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0)))
+			end
+		end
+
+		local renderIdleEgg
+		local setHatchPetEggOpen
+		local closeHatchScreen
+
+		local function findFirstGuiButton(root, names)
+			if not root then return nil end
+			for _, name in ipairs(names) do
+				local node = root:FindFirstChild(name, true)
+				if node and node:IsA("GuiButton") then
+					return node
+				end
+				if node then
+					local nestedButton = node:FindFirstChildWhichIsA("GuiButton", true)
+					if nestedButton then
+						return nestedButton
+					end
+				end
+			end
+			return nil
+		end
 
 		-- 获取或创建抽宠专用毛玻璃；放在 Lighting 下作为本地后处理，不会模糊 HatchScreen 本身。
 		local function getHatchBlur()
@@ -2106,8 +2810,11 @@ function UIController.Start()
 		
 		local clickCount = 0
 		local isHatching = false
+		local isShowingResult = false
 		local current3DModel = nil
 		local spinConnection = nil 
+		local currentResultPetId = nil
+		local currentResultPetLevel = nil
 		
 		local function clearViewport()
 			if current3DModel then current3DModel:Destroy() end
@@ -2138,14 +2845,63 @@ function UIController.Start()
 			return false
 		end
 
+		local function renderEggModel()
+			local eggTemplate = petModels:FindFirstChild("Egg")
+			if not eggTemplate then
+				warn("[UIController] ReplicatedStorage.Model.Pets 中没有找到 Egg 模型。")
+				return false
+			end
+
+			current3DModel = eggTemplate:Clone()
+			if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
+				current3DModel.Parent = viewport
+				camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -6), Vector3.new(0, 0, 0))
+				return true
+			end
+
+			current3DModel:Destroy()
+			current3DModel = nil
+			return false
+		end
+
+		renderIdleEgg = function()
+			clearViewport()
+			clickCount = 0
+			isShowingResult = false
+			currentResultPetId = nil
+			currentResultPetLevel = nil
+			renderEggModel()
+			tipText.Text = "Tap BtnClickArea to hatch the egg!"
+			tipText.TextColor3 = Color3.new(1, 1, 1)
+		end
+
 		-- 结束抽宠展示并恢复交互状态；任何异常路径都走这里，避免界面卡住。
-		local function closeHatchScreen()
+		closeHatchScreen = function()
 			isApplyingHatchVisible = true
 			hatchScreen.Visible = false
 			isApplyingHatchVisible = false
 			tweenHatchBlur(false)
 			isHatching = false
+			isShowingResult = false
 			clearViewport()
+		end
+
+		setHatchPetEggOpen = function(isOpen)
+			if hatchPetEgg and hatchPetEgg:IsA("GuiObject") then
+				hatchPetEgg.Visible = isOpen
+				if isOpen then
+					updateHatchPetEggCards()
+					isApplyingHatchVisible = true
+					hatchScreen.Visible = true
+					isApplyingHatchVisible = false
+					tweenHatchBlur(true)
+					if not isHatching then
+						renderIdleEgg()
+					end
+				else
+					closeHatchScreen()
+				end
+			end
 		end
 
 		-- 兜底处理其他代码直接改 HatchScreen.Visible 的情况，避免毛玻璃残留。
@@ -2154,50 +2910,56 @@ function UIController.Start()
 			tweenHatchBlur(hatchScreen.Visible)
 		end)
 
-		-- 获取可以承载 ProximityPrompt 的部件；宠物蛋如果是 Model，就挂到其中一个 BasePart 上。
-		local function getPromptParent(target)
-			if target:IsA("BasePart") then
-				return target
-			end
-			return target:FindFirstChildWhichIsA("BasePart", true)
-		end
-
-		-- 宠物蛋交互逻辑；Prompt 可能因 Streaming/重生时序重新出现，所以绑定函数要可重复安全调用。
-		local function handlePetEggTriggered(triggeringPlayer)
-			if triggeringPlayer ~= player or isHatching then return end
+		-- 真正开始抽宠展示；入口由 Hatch_Pet_Egg.HatchScreen.BtnClickArea 触发。
+		local function beginPetDraw()
+			if isHatching or isShowingResult then return end
 
          -- 玩家响应了引导点击抽卡，清除光束！
 			player:SetAttribute("NeedsGuide", false)
 			Controllers.VFX.ClearGuide()
 
-			local coins = player:GetAttribute("Coins") or 0
-			if coins < Controllers.Config.PET_GACHA_COST then
-				print("Not enough coins!"); return
+			local tickets = player:GetAttribute("PetDrawTickets") or 0
+			local ticketCost = math.max(1, math.floor(Controllers.Config.PET_DRAW_TICKET_COST or 1))
+			if tickets < ticketCost then
+				showNotice("缺少抽奖次数", 3)
+				return
 			end
 			
 			isHatching = true
+			isShowingResult = false
 			clearViewport()
 			
 			local remotes = ReplicatedStorage:WaitForChild("Remotes")
-			local resultPetId = remotes:WaitForChild("RollPet"):InvokeServer()
-			if not resultPetId then
+			local ok, resultPet = pcall(function()
+				return remotes:WaitForChild("RollPet"):InvokeServer()
+			end)
+			if not ok then
+				warn("[UIController] 宠物抽取 RemoteFunction 调用失败:", resultPet)
+				showNotice("抽奖失败，请稍后再试", 3)
+				isHatching = false
+				renderIdleEgg()
+				return
+			end
+
+			if not resultPet then
 				warn("[UIController] 宠物抽取失败，未收到有效宠物 ID。")
-				closeHatchScreen()
+				showNotice("缺少抽奖次数", 3)
+				isHatching = false
+				renderIdleEgg()
+				return
+			end
+			currentResultPetId = type(resultPet) == "table" and resultPet.Id or resultPet
+			currentResultPetLevel = type(resultPet) == "table" and resultPet.Level or (Controllers.Config.PET_LEVEL_MIN or 1)
+			if type(currentResultPetId) ~= "string" then
+				warn("[UIController] 宠物抽取失败，返回数据缺少 Id。")
+				showNotice("抽奖失败，请稍后再试", 3)
+				isHatching = false
+				renderIdleEgg()
 				return
 			end
 			
 			-- 挂载 3D 蛋模型
-			local eggTemplate = petModels:FindFirstChild("Egg")
-			if eggTemplate then
-				current3DModel = eggTemplate:Clone()
-				if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
-					current3DModel.Parent = viewport
-					camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -6), Vector3.new(0, 0, 0))
-				else
-					current3DModel:Destroy()
-					current3DModel = nil
-				end
-			end
+			renderEggModel()
 			
 			isApplyingHatchVisible = true
 			hatchScreen.Visible = true
@@ -2206,78 +2968,132 @@ function UIController.Start()
 			clickCount = 0
 			tipText.Text = "Tap quickly to crack the egg!"
 			tipText.TextColor3 = Color3.new(1,1,1)
-			
-			local clickConn
-			clickConn = clickArea.Activated:Connect(function()
-				local ok, err = pcall(function()
-				clickCount = clickCount + 1
-				
-				-- 1. 呼叫 VFX 模块处理物理晃动反馈
-				Controllers.VFX.PlayEggShakeVFX(current3DModel)
-				
-				-- 2. 破壳！
-				if clickCount >= 5 then
-					clickConn:Disconnect() 
-					clearViewport()
-					
-					if resultPetId then
-						local petTemplate = petModels:FindFirstChild(resultPetId)
-						local petData = Controllers.Config.PETS[resultPetId]
-						
-						if petTemplate and petData then
-							current3DModel = petTemplate:Clone()
-							if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
-								current3DModel.Parent = viewport
-							else
-								current3DModel:Destroy()
-								current3DModel = nil
-							end
-							
-							tipText.Text = string.format("You got %s (%s)", petData.Name, petData.Rarity)
-							tipText.TextColor3 = petData.Color
-							
-							-- 3. 呼叫 VFX 模块接管匀速自转动画，并把循环指针存起来以便清理
-							if current3DModel then
-								spinConnection = Controllers.VFX.StartPetSpinVFX(current3DModel)
-							end
-						end
-					end
-					
-					task.wait(3) 
-					closeHatchScreen()
-				end
-				end)
+		end
 
-				if not ok then
-					warn("[UIController] 抽宠展示流程异常，已关闭抽取界面:", err)
-					if clickConn then clickConn:Disconnect() end
+		local function revealPetResult()
+			if isShowingResult then return end
+			isShowingResult = true
+			isHatching = false
+			clearViewport()
+
+			if currentResultPetId then
+				local petTemplate = petModels:FindFirstChild(currentResultPetId)
+				local petData = Controllers.Config.PETS[currentResultPetId]
+				if petTemplate and petData then
+					current3DModel = petTemplate:Clone()
+					if placeViewportModel(current3DModel, CFrame.new(0, 0, 0)) then
+						current3DModel.Parent = viewport
+					else
+						current3DModel:Destroy()
+						current3DModel = nil
+					end
+
+					local finalAtk = Controllers.Config.GetPetAttack and Controllers.Config.GetPetAttack(currentResultPetId, currentResultPetLevel) or (petData.ATK or 0)
+					tipText.Text = string.format("You got %s Lv.%d (%s) ATK:%s", petData.Name, currentResultPetLevel, petData.Rarity, Controllers.Config.FormatNumber(finalAtk))
+					tipText.TextColor3 = petData.Color
+
+					if current3DModel then
+						spinConnection = Controllers.VFX.StartPetSpinVFX(current3DModel)
+					end
+				end
+			end
+
+			updateHatchPetEggCards()
+			task.delay(3, function()
+				if hatchPetEgg.Visible and hatchScreen.Visible then
+					renderIdleEgg()
+				else
 					closeHatchScreen()
 				end
 			end)
 		end
 
-		-- 持续补绑宠物蛋 Prompt；目标重新加载或 Prompt 被清掉时会自动恢复。
-		local function bindPetEggPrompt(target)
-			if not target then return end
-			local promptParent = getPromptParent(target)
-			if not promptParent then return end
-
-			local prompt = promptParent:FindFirstChildOfClass("ProximityPrompt")
-			if not prompt then
-				prompt = Instance.new("ProximityPrompt")
-				prompt.Parent = promptParent
+		local function handleHatchClick()
+			if isShowingResult then return end
+			if not isHatching then
+				beginPetDraw()
+				return
 			end
 
-			prompt.ObjectText = "Pet Egg"
-			prompt.ActionText = "Spend " .. Controllers.Config.FormatNumber(Controllers.Config.PET_GACHA_COST) .. " to draw a pet"
-			prompt.HoldDuration = 0.2
-			prompt.RequiresLineOfSight = false
-			prompt.MaxActivationDistance = 12
-			prompt.Enabled = true
+			clickCount += 1
+			Controllers.VFX.PlayEggShakeVFX(current3DModel)
+			if clickCount >= 5 then
+				revealPetResult()
+			end
+		end
+
+		-- 宠物蛋 ProximityPrompt 只负责打开 Hatch_Pet_Egg，不直接抽卡。
+		local function handlePetEggTriggered(triggeringPlayer)
+			if triggeringPlayer ~= player or isHatching then return end
+			setHatchPetEggOpen(true)
+		end
+
+		local function bindPetEggPrompt(target)
+			if not target then return end
+			local prompt = target:IsA("ProximityPrompt") and target or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+			if not prompt then return end
 
 			if prompt:GetAttribute("ClientPetEggPromptBound") then return end
 			prompt:SetAttribute("ClientPetEggPromptBound", true)
 			prompt.Triggered:Connect(handlePetEggTriggered)
+		end
+
+		player:GetAttributeChangedSignal("PetDrawTickets"):Connect(function()
+			updateHatchPetEggCards()
+		end)
+
+		if hatchPetEgg then
+			updateHatchPetEggCards()
+			if hatchPetEgg:IsA("GuiObject") and hatchPetEgg.Visible and not isHatching then
+				hatchScreen.Visible = true
+				renderIdleEgg()
+			end
+
+			local equip1 = findFirstGuiButton(hatchPetEgg, {"Equip_1"})
+			if equip1 and equip1:IsA("GuiButton") and not equip1:GetAttribute("BuyPetDrawTicketBound") then
+				equip1:SetAttribute("BuyPetDrawTicketBound", true)
+				equip1.Activated:Connect(function()
+					local remotes = ReplicatedStorage:WaitForChild("Remotes")
+					local buyPetDrawTicket = remotes:WaitForChild("BuyPetDrawTicket")
+					local ok, result = pcall(function()
+						return buyPetDrawTicket:InvokeServer()
+					end)
+					if not ok then
+						warn("[UIController] 购买抽奖次数失败:", result)
+						showNotice("购买失败，请稍后再试", 3)
+						return
+					end
+
+					if type(result) == "table" and result.Success then
+						updateHatchPetEggCards()
+						showNotice("购买成功，抽奖次数+1", 3)
+					else
+						showNotice("钱币不足", 3)
+					end
+				end)
+			end
+
+			if clickArea:IsA("GuiButton") and not clickArea:GetAttribute("PetDrawClickAreaBound") then
+				clickArea:SetAttribute("PetDrawClickAreaBound", true)
+				clickArea.Activated:Connect(function()
+					local ok, err = pcall(handleHatchClick)
+					if not ok then
+						warn("[UIController] 抽宠点击流程异常:", err)
+						showNotice("抽奖失败，请稍后再试", 3)
+						isHatching = false
+						isShowingResult = false
+						renderIdleEgg()
+					end
+				end)
+			end
+
+			local closeButton = findFirstGuiButton(hatchPetEgg, {"CloseButton", "Close", "ExitButton", "BtnClose"})
+			if closeButton and not closeButton:GetAttribute("HatchPetEggCloseBound") then
+				closeButton:SetAttribute("HatchPetEggCloseBound", true)
+				closeButton.Activated:Connect(function()
+					setHatchPetEggOpen(false)
+				end)
+			end
 		end
 
 		Workspace.DescendantAdded:Connect(function(descendant)
@@ -2332,6 +3148,7 @@ function UIController.Start()
 		setupLevelUpUI() 
 		setupShopUI() 
       setupPetBagUI()
+      setupAchievementUI()
       setupPetHatching()
 	end)
 

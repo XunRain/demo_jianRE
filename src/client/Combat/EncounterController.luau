@@ -26,6 +26,13 @@ local DROP_MODEL_CANDIDATES = {
 local gateZones = {}
 local enemyZones = {}
 local activeStageZones = {}
+local DEBUG_ENCOUNTER_FLOW = true
+
+local function debugEncounter(...)
+	if DEBUG_ENCOUNTER_FLOW then
+		print("[Debug][EncounterFlow]", ...)
+	end
+end
 
 -- 清理已经远离玩家的门/怪占位区，避免占位表无限增长。
 local function CleanupZones(currentStartZ)
@@ -274,6 +281,39 @@ local function applyGateVisualText(visual, displayName, amountText, fullText)
 	return false
 end
 
+-- 查找属性门模型里的贴地锚点；美术可放透明 Part 来指定模型真正贴地的位置。
+local function findGateGroundAnchor(visual)
+	if not visual then return nil end
+
+	for _, name in ipairs({ "GroundAnchor", "GroundPart", "GroundMarker", "GateGround", "GateGroundAnchor" }) do
+		local node = visual:FindFirstChild(name, true)
+		if node and node:IsA("BasePart") then
+			return node
+		end
+	end
+
+	return nil
+end
+
+-- 计算属性门视觉模型当前用于贴地的 Y 坐标；优先使用 GroundAnchor 底部，兜底用模型包围盒底部。
+local function getGateVisualGroundY(visual)
+	if not visual then return 0 end
+
+	if visual:IsA("Model") then
+		local anchor = findGateGroundAnchor(visual)
+		if anchor then
+			return anchor.Position.Y - (anchor.Size.Y / 2)
+		end
+
+		local boundsCFrame, boundsSize = visual:GetBoundingBox()
+		return boundsCFrame.Position.Y - (boundsSize.Y / 2)
+	elseif visual:IsA("BasePart") then
+		return visual.Position.Y - (visual.Size.Y / 2)
+	end
+
+	return 0
+end
+
 -- 将属性门美术模型摆放到判定盒位置；判定盒负责吃门逻辑，模型只负责视觉表现。
 local function attachBuffGateVisual(hitbox, isBuff, displayName, amountText, fullText)
 	local template = getBuffGateTemplate()
@@ -312,21 +352,19 @@ local function attachBuffGateVisual(hitbox, isBuff, displayName, amountText, ful
 			return false, false
 		end
 
-		local _, boundsSize = visual:GetBoundingBox()
-		local scaleByWidth = hitbox.Size.X / math.max(boundsSize.X, 0.01)
-		local scaleByHeight = hitbox.Size.Y / math.max(boundsSize.Y, 0.01)
-		local scale = math.min(scaleByWidth, scaleByHeight)
-		if scale > 0 and scale < math.huge then
-			visual:ScaleTo(scale)
-		end
-
-		local boundsCFrame, scaledBoundsSize = visual:GetBoundingBox()
+		-- 属性门视觉模型使用 Studio 中的原始尺寸；代码只负责摆放，不再按判定盒自动缩放。
+		local boundsCFrame, boundsSize = visual:GetBoundingBox()
 		local targetCFrame = CFrame.new(
 			hitbox.Position.X,
-			hitbox.Position.Y - hitbox.Size.Y / 2 + scaledBoundsSize.Y / 2,
+			hitbox.Position.Y - hitbox.Size.Y / 2 + boundsSize.Y / 2,
 			hitbox.Position.Z
 		)
 		visual:PivotTo(targetCFrame * (boundsCFrame - boundsCFrame.Position))
+
+		-- 如果模型内有 GroundAnchor，就以锚点底部贴到跑道表面；没有则保持包围盒贴地的旧表现。
+		local targetGroundY = hitbox.Position.Y - (hitbox.Size.Y / 2)
+		local currentGroundY = getGateVisualGroundY(visual)
+		visual:PivotTo(visual:GetPivot() + Vector3.new(0, targetGroundY - currentGroundY, 0))
 		return true, hasVisualText
 	end
 
@@ -477,6 +515,40 @@ local function findEnemyGroundMarker(visual)
 	return nil
 end
 
+-- 查找怪物模型中的中心标记；Boss 这类大模型 Pivot 偏移时，用它来对齐隐藏碰撞盒中心。
+local function findEnemyCenterMarker(visual)
+	if not visual or not visual:IsA("Model") then return nil end
+
+	local partNames = {"CenterAnchor", "CenterPart", "RootPart", "FakeRootPart", "HumanoidRootPart"}
+	for _, name in ipairs(partNames) do
+		local marker = visual:FindFirstChild(name, true)
+		if marker and marker:IsA("BasePart") then
+			return marker
+		end
+	end
+
+	return nil
+end
+
+-- 计算怪物展示模型当前的视觉中心；优先使用美术放置的中心标记，兜底使用模型包围盒中心。
+local function getEnemyVisualCenter(visual)
+	if not visual then return Vector3.zero end
+
+	if visual:IsA("Model") then
+		local marker = findEnemyCenterMarker(visual)
+		if marker then
+			return marker.Position
+		end
+
+		local boundsCFrame = visual:GetBoundingBox()
+		return boundsCFrame.Position
+	elseif visual:IsA("BasePart") then
+		return visual.Position
+	end
+
+	return Vector3.zero
+end
+
 -- 计算怪物模型当前用于贴地的 Y 坐标。
 local function getEnemyGroundY(visual)
 	if not visual then return 0 end
@@ -507,6 +579,14 @@ local function pivotEnemyVisualToHitbox(visual, hitbox, trackSurfaceY)
 	if visual:IsA("Model") then
 		local templateRotation = visual:GetPivot().Rotation
 		visual:PivotTo(CFrame.new(hitbox.Position) * templateRotation)
+
+		local visualCenter = getEnemyVisualCenter(visual)
+		visual:PivotTo(visual:GetPivot() + Vector3.new(
+			hitbox.Position.X - visualCenter.X,
+			0,
+			hitbox.Position.Z - visualCenter.Z
+		))
+
 		local groundY = getEnemyGroundY(visual)
 		visual:PivotTo(visual:GetPivot() + Vector3.new(0, trackSurfaceY - groundY, 0))
 	elseif visual:IsA("BasePart") then
@@ -633,12 +713,23 @@ end
 -- 在指定跑道区间内生成 Boss、属性门、精英怪和普通怪。
 function EncounterController.SpawnEncountersInBlock(startZ, endZ, trackStartX, trackSurfaceY)
 	local Config = Controllers.Config
+	if not stageConfig then
+		warn("[Debug][EncounterFlow] SpawnEncountersInBlock aborted: stageConfig nil", startZ, endZ)
+		return
+	end
+
+	local spawnedBoss = 0
+	local spawnedGateGroups = 0
+	local spawnedElites = 0
+	local spawnedBasics = 0
+	debugEncounter("SpawnEncountersInBlock start", "startZ=", startZ, "endZ=", endZ, "stage=", currentStage, "stageEndZ=", stageEndZ, "nextGateZ=", nextGateZ, "nextMobZ=", nextMobZ, "bossZ=", bossZ)
 
 	CleanupZones(startZ)
 
 if bossZ and bossZ <= startZ and bossZ > endZ then
 		local finalZ = bossZ
 		CreateEnemy("Boss", 0, finalZ, trackStartX, trackSurfaceY)
+		spawnedBoss += 1
 		registerEnemyZone(finalZ, 40)
 		bossZ = nil
 	end
@@ -672,6 +763,7 @@ local currentStageConfig = stageConfig
 			local rightGate = CreateGate(rightOffset, gateWidth, finalZ, trackStartX, trackSurfaceY, rightIsBuff)
 
 			table.insert(EncounterController.ActiveGateGroups, { left = leftGate, right = rightGate, z = finalZ })
+			spawnedGateGroups += 1
 			registerGateZone(finalZ)
 		end
 		nextGateZ = nextGateZ - stageConfig.GateInterval
@@ -683,6 +775,7 @@ for i = #elitePositions, 1, -1 do
 			local finalZ = FindEnemyZInGateGap(ez, 30, startZ, endZ)
 			if finalZ then
 				CreateEnemy("Elite", 0, finalZ, trackStartX, trackSurfaceY)
+				spawnedElites += 1
 			end
 			table.remove(elitePositions, i)
 		end
@@ -711,6 +804,7 @@ while nextMobZ <= startZ and nextMobZ > endZ do
 					local jitterZ = math.random(-2, 2)
 
 					CreateEnemy("Basic", offsetX + jitterX, finalZ + jitterZ, trackStartX, trackSurfaceY)
+					spawnedBasics += 1
 				end
 			end
 		end
@@ -718,6 +812,7 @@ while nextMobZ <= startZ and nextMobZ > endZ do
 	end
 
 	if endZ < stageEndZ then
+		debugEncounter("Stage boundary crossed", "endZ=", endZ, "stageEndZ=", stageEndZ, "nextStage=", currentStage + 1)
 		currentStage = currentStage + 1
 		local nextStageStartZ = stageEndZ - 100
 		LoadStageConfig(currentStage, nextStageStartZ)
@@ -726,6 +821,7 @@ while nextMobZ <= startZ and nextMobZ > endZ do
 			EncounterController.SpawnEncountersInBlock(nextStageStartZ, endZ, trackStartX, trackSurfaceY)
 		end
 	end
+	debugEncounter("SpawnEncountersInBlock summary", "stage=", currentStage, "boss=", spawnedBoss, "gateGroups=", spawnedGateGroups, "elites=", spawnedElites, "basics=", spawnedBasics, "activeEnemies=", #EncounterController.ActiveEnemies, "activeGateGroups=", #EncounterController.ActiveGateGroups, "nextGateZ=", nextGateZ, "nextMobZ=", nextMobZ)
 end
 
 -- 获取掉落物模型模板；优先查找 Drops，其次兼容 Loot/Pickups 文件夹。

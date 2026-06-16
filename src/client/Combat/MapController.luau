@@ -12,6 +12,13 @@ MapController.TrackStartX = 0          -- 跑道中心线的 X 坐标 (暴漏给
 local trackStartY = 0                  -- 跑道模型 Pivot 的 Y 坐标；真实路面高度会用标记或配置偏移单独计算
 local nextTrackZ = 0                   -- 下一块跑道需要拼接的 Z 坐标
 local activeTracks = {}                -- 存储当前地图上存活的跑道板块 (包含地面和两侧墙壁的 Model/Part)
+local DEBUG_MAP_FLOW = true
+
+local function debugMap(...)
+	if DEBUG_MAP_FLOW then
+		print("[Debug][MapFlow]", ...)
+	end
+end
 
 function MapController.Init(deps)
 	Controllers = deps
@@ -69,7 +76,9 @@ function MapController.SpawnTrackBlock()
 	local blockStartZ = nextTrackZ
 	local blockEndZ = nextTrackZ - Config.TRACK_LENGTH
 	local trackSurfaceY = getTrackSurfaceY(block)
+	debugMap("SpawnTrackBlock", "blockStartZ=", blockStartZ, "blockEndZ=", blockEndZ, "trackX=", MapController.TrackStartX, "surfaceY=", trackSurfaceY)
 	Controllers.Encounter.SpawnEncountersInBlock(blockStartZ, blockEndZ, MapController.TrackStartX, trackSurfaceY)
+	debugMap("SpawnTrackBlock encounters done", "blockEndZ=", blockEndZ)
 	
 	-- 5. 推进指针，为下一块地板做准备
 	nextTrackZ = blockEndZ
@@ -86,6 +95,7 @@ end
 -- 游戏开局初始化：计算跑道原点，并瞬间铺满视野
 function MapController.ResetTrack(startPartCFrame)
 	local Config = Controllers.Config
+	debugMap("ResetTrack called", "startCFramePos=", startPartCFrame and startPartCFrame.Position)
 	
 	-- 先清理上一局的遗留跑道
 	MapController.ClearTracks()
@@ -95,19 +105,23 @@ function MapController.ResetTrack(startPartCFrame)
 	MapController.TrackStartX = startPos.X
 	trackStartY = startPos.Y
 	nextTrackZ = startPos.Z
+	debugMap("ResetTrack startPos", startPos, "trackLength=", Config.TRACK_LENGTH, "spawnAhead=", Config.SPAWN_AHEAD)
 	
 	-- 必须先通知 EncounterController 初始化它自己的刷怪指针，否则怪的位置会错乱
 	Controllers.Encounter.ResetPointers(startPos.Z)
 	
 	-- 开局瞬间生成足够的跑道铺满前方视野，防止玩家看到虚空
 	local initialBlocksNeeded = math.ceil(Config.SPAWN_AHEAD / Config.TRACK_LENGTH) + 1
+	debugMap("ResetTrack initial blocks", initialBlocksNeeded)
 	for i = 1, initialBlocksNeeded do
+		debugMap("ResetTrack spawning block", i, "/", initialBlocksNeeded)
 		MapController.SpawnTrackBlock()
 		-- 初始铺路包含模型克隆和遭遇生成，分帧执行可以避免踩 START 后客户端明显卡住。
 		if i < initialBlocksNeeded then
 			task.wait()
 		end
 	end
+	debugMap("ResetTrack finished", "activeTracks=", #activeTracks)
 end
 
 -- 玩家奔跑时，动态拼接前方跑道，并销毁身后的过期跑道

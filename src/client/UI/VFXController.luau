@@ -375,30 +375,33 @@ local function placeVfxInstance(instance, prefab, position)
 end
 
 -- 创建从玩家指向目标的引导光束和提示文字。
-function VFXController.CreateGuide(targetPart, text)
+function VFXController.CreateGuide(targetPart, text, options)
 	VFXController.ClearGuide()
+	options = options or {}
+	local showBeam = options.ShowBeam ~= false
 
 	local character = Players.LocalPlayer.Character
-	if not character then return end
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart or not targetPart then return end
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not targetPart then return end
 
-	currentGuideAtt0 = Instance.new("Attachment", rootPart)
-	currentGuideAtt1 = Instance.new("Attachment", targetPart)
+	if showBeam and rootPart then
+		currentGuideAtt0 = Instance.new("Attachment", rootPart)
+		currentGuideAtt1 = Instance.new("Attachment", targetPart)
 
-	currentGuideBeam = Instance.new("Beam")
-	currentGuideBeam.Attachment0 = currentGuideAtt1
-	currentGuideBeam.Attachment1 = currentGuideAtt0
-	currentGuideBeam.FaceCamera = true
-	currentGuideBeam.Width0 = 2
-	currentGuideBeam.Width1 = 2
-	currentGuideBeam.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-	currentGuideBeam.Texture = "rbxassetid://9006027964"
-	currentGuideBeam.TextureMode = Enum.TextureMode.Wrap
-	currentGuideBeam.TextureSpeed = -3
-	currentGuideBeam.TextureLength = 4
-	currentGuideBeam.LightEmission = 1
-	currentGuideBeam.Parent = rootPart
+		currentGuideBeam = Instance.new("Beam")
+		currentGuideBeam.Attachment0 = currentGuideAtt1
+		currentGuideBeam.Attachment1 = currentGuideAtt0
+		currentGuideBeam.FaceCamera = true
+		currentGuideBeam.Width0 = 2
+		currentGuideBeam.Width1 = 2
+		currentGuideBeam.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+		currentGuideBeam.Texture = "rbxassetid://9006027964"
+		currentGuideBeam.TextureMode = Enum.TextureMode.Wrap
+		currentGuideBeam.TextureSpeed = -3
+		currentGuideBeam.TextureLength = 4
+		currentGuideBeam.LightEmission = 1
+		currentGuideBeam.Parent = rootPart
+	end
 
 	currentGuideLabel = VFXController.CreateBillboard(targetPart, "Need help? " .. text, Color3.fromRGB(255, 255, 100), 4)
 end
