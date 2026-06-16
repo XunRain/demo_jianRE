@@ -33,14 +33,14 @@ local function debugCombatThrottled(key, interval, ...)
 		return
 	end
 	lastDebugAtByKey[key] = now
-	print("[Debug][CombatFlow]", ...)
+	-- print("[Debug][CombatFlow]", ...)
 end
 
 -- 同步本地跑酷状态给服务端头顶进度 UI；服务端展示给所有玩家看。
 -- 计算当前主武器攻击力，用于同步给服务端头顶 UI；和战斗伤害公式保持一致。
 local function getCurrentAttackForDisplay()
 	local config = Controllers and Controllers.Config
-	local baseAtk = (config and config.BASE_ATK) or player:GetAttribute("ATK") or 0
+	local baseAtk = player:GetAttribute("ATK") or (config and config.BASE_ATK) or 0
 	local atkBonus = player:GetAttribute("ATK_Bonus") or 0
 	return math.floor(baseAtk * (1 + (atkBonus / 100)))
 end
@@ -532,11 +532,14 @@ function GameController.ResetPlayerStats()
 	player:SetAttribute("SPD_Bonus", 0)
 	player:SetAttribute("RNG_Bonus", 0)
 	player:SetAttribute("LateralSpeed_Bonus", 0)
-	player:SetAttribute("EXP_Gain_Bonus", 0)
+	player:SetAttribute("LateralSpeed_FlatBonus", startingStats.LateralSpeed_FlatBonus or 0)
+	player:SetAttribute("EXP_Gain_Bonus", startingStats.EXP_Gain_Bonus or 0)
+	player:SetAttribute("Luck_Bonus", startingStats.Luck_Bonus or 0)
 	player:SetAttribute("MaxHP_Bonus", 0)
 	player:SetAttribute("MultiShot", Config.BASE_MULTISHOT or 1)
 	player:SetAttribute("MaxHP", startingStats.MaxHP)
 	player:SetAttribute("HP", startingStats.MaxHP)
+	player:SetAttribute("ATK", startingStats.ATK or Config.BASE_ATK)
 	player:SetAttribute("ATK_Bonus", startingStats.ATK_Bonus)
 	player:SetAttribute("ASPD_Bonus", startingStats.ASPD_Bonus)
 	player:SetAttribute("Level", Config.BASE_LEVEL)

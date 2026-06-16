@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local player = Players.LocalPlayer
@@ -26,6 +28,27 @@ local function getMainButtonRoot(mainUI)
 end
 
 -- 查找 Studio 模板里可能存在的文字节点，兼容不同命名，避免代码强制重建 UI。
+local function updateMainButtonRootVisibility(mainUI)
+	local buttonRoot = getMainButtonRoot(mainUI)
+	if not buttonRoot or not buttonRoot:IsA("GuiObject") then
+		return
+	end
+
+	local hiddenByPanel = buttonRoot:GetAttribute("HiddenByShopPanel") == true
+		or buttonRoot:GetAttribute("HiddenByHatchPanel") == true
+	buttonRoot.Visible = player:GetAttribute("InCombat") ~= true and not hiddenByPanel
+end
+
+local function setMainButtonRootHiddenByPanel(mainUI, panelKey, isHidden)
+	local buttonRoot = getMainButtonRoot(mainUI)
+	if not buttonRoot or not buttonRoot:IsA("GuiObject") then
+		return
+	end
+
+	buttonRoot:SetAttribute("HiddenBy" .. panelKey .. "Panel", isHidden == true)
+	updateMainButtonRootVisibility(mainUI)
+end
+
 local function findTextNode(root, names)
 	for _, name in ipairs(names) do
 		local node = root:FindFirstChild(name, true)
@@ -221,7 +244,6 @@ function UIController.Start()
 
 		-- 1. 刷新屏幕 UI 控制
 		if mainUI then
-			local buttonRoot = getMainButtonRoot(mainUI)
 
 			-- 金币常驻常显
 			local coinContainer = mainUI:FindFirstChild("CoinContainer")
@@ -246,9 +268,7 @@ function UIController.Start()
 			end
 
 			-- 大厅底部按钮整体容器：正式开始游戏后隐藏 MainUI_1，回大厅后显示。
-			if buttonRoot and buttonRoot:IsA("GuiObject") then
-				buttonRoot.Visible = not inCombat
-			end
+			updateMainButtonRootVisibility(mainUI)
 			
 			-- 2. 如果玩家开着背包直接冲进了跑道门，强制关掉面板
 			local petBagPanel = mainUI:FindFirstChild("PetBagPanel")
@@ -262,6 +282,11 @@ function UIController.Start()
 			end
 
 			-- 关卡 HUD 使用 Studio 里的图片容器；代码只控制显隐并填充关卡文本。
+			local rebirthPanel = mainUI:FindFirstChild("RebirthPanel")
+			if rebirthPanel and inCombat then
+				rebirthPanel.Visible = false
+			end
+
 			local stageHud = findStageHud(mainUI)
 			if stageHud then
 				local showStage = inCombat and not player:GetAttribute("IsLevelingUp")
@@ -1083,15 +1108,17 @@ function UIController.Start()
 		local function applyShopHoverScale(guiObject, attrName, scaleName, targetScale)
 			if not guiObject or not guiObject:IsA("GuiObject") then return end
 
-			for _, descendant in ipairs(guiObject:GetDescendants()) do
-				if descendant:IsA("UIScale") and descendant.Name == scaleName and descendant.Parent ~= guiObject then
-					descendant:Destroy()
-				end
-			end
-
 			local existingScale = guiObject:FindFirstChild(scaleName)
 			if existingScale and not existingScale:IsA("UIScale") then
 				existingScale = nil
+			end
+			if not existingScale then
+				for _, child in ipairs(guiObject:GetChildren()) do
+					if child:IsA("UIScale") then
+						existingScale = child
+						break
+					end
+				end
 			end
 			if guiObject:GetAttribute(attrName) and existingScale and existingScale:IsA("UIScale") then return end
 			guiObject:SetAttribute(attrName, true)
@@ -1102,8 +1129,11 @@ function UIController.Start()
 				hoverScale.Name = scaleName
 				hoverScale.Parent = guiObject
 			end
+			guiObject:SetAttribute("ShopHoverScaleNameDebug", hoverScale.Name)
+			guiObject:SetAttribute("ShopHoverScaleParentDebug", hoverScale.Parent and hoverScale.Parent:GetFullName() or "")
 
 			local normalScale = hoverScale.Scale
+			local hoverTargetScale = normalScale * targetScale
 			local tweenInfo = TweenInfo.new(
 				shopConfig.HoverTweenTime or petBagConfig.HoverTweenTime or 0.12,
 				Enum.EasingStyle.Quad,
@@ -1114,8 +1144,49 @@ function UIController.Start()
 				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
 			end
 
+			if attrName == "ShopCardHoverBoundV2" then
+				local isHovered = false
+				local connection
+				connection = RunService.RenderStepped:Connect(function()
+					if not guiObject.Parent then
+						connection:Disconnect()
+						return
+					end
+
+					local inset = GuiService:GetGuiInset()
+					local mousePos = UserInputService:GetMouseLocation() - inset
+					local pos = guiObject.AbsolutePosition
+					local size = guiObject.AbsoluteSize
+					local inside = mousePos.X >= pos.X
+						and mousePos.X <= pos.X + size.X
+						and mousePos.Y >= pos.Y
+						and mousePos.Y <= pos.Y + size.Y
+					guiObject:SetAttribute(
+						"ShopHoverBoundsDebug",
+						string.format(
+							"inside=%s mouse=(%.0f,%.0f) pos=(%.0f,%.0f) size=(%.0f,%.0f)",
+							tostring(inside),
+							mousePos.X,
+							mousePos.Y,
+							pos.X,
+							pos.Y,
+							size.X,
+							size.Y
+						)
+					)
+
+					if inside == isHovered then
+						return
+					end
+
+					isHovered = inside
+					playScaleTween(isHovered and hoverTargetScale or normalScale)
+				end)
+				return
+			end
+
 			guiObject.MouseEnter:Connect(function()
-				playScaleTween(targetScale)
+				playScaleTween(hoverTargetScale)
 			end)
 
 			guiObject.MouseLeave:Connect(function()
@@ -1127,6 +1198,32 @@ function UIController.Start()
 					playScaleTween(normalScale)
 				end)
 			end
+		end
+
+		local function bindShopCardInteraction(card, talentId)
+			if not card or not card:IsA("GuiButton") then
+				warn("[UIController][Shop] Shop item root must be a GuiButton/ImageButton for click binding:", card and card:GetFullName())
+				return
+			end
+
+			card:SetAttribute("TalentId", talentId)
+			applyShopHoverScale(
+				card,
+				"ShopCardHoverBoundV2",
+				"ShopCardHoverScale",
+				shopConfig.CardHoverScale or petBagConfig.OpenButtonHoverScale or 1.06
+			)
+
+			if card:GetAttribute("ShopCardPurchaseBound") then
+				return
+			end
+			card:SetAttribute("ShopCardPurchaseBound", true)
+
+			card.Activated:Connect(function()
+				local currentTalentId = card:GetAttribute("TalentId") or talentId
+				local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+				remotes:WaitForChild("BuyTalent"):FireServer(currentTalentId)
+			end)
 		end
 
 		local refreshShopUI
@@ -1142,6 +1239,7 @@ function UIController.Start()
 			isApplyingShopVisible = false
 			tweenShopBlur(isOpen)
 			tweenShopCamera(isOpen)
+			setMainButtonRootHiddenByPanel(mainUI, "Shop", isOpen)
 
 			if isOpen and refreshShopUI then
 				refreshShopUI()
@@ -1190,30 +1288,50 @@ function UIController.Start()
 				Rare = {"Rare", "All", "Gold", "Yellow"},
 			}
 
-			local function applyLayerVisibility(node, layerKey)
-				node.Visible = isShopLayerActive(layerKey, activeCategory)
-				node:SetAttribute("ShopCardLayerActive", node.Visible)
+			local layerCandidates = {}
+			local layerCandidateMap = {}
+			local hasActiveLayer = false
+			local function addLayerCandidate(node, layerKey)
+				local isActive = isShopLayerActive(layerKey, activeCategory)
+				if layerCandidateMap[node] == nil then
+					table.insert(layerCandidates, node)
+					layerCandidateMap[node] = isActive
+				else
+					layerCandidateMap[node] = layerCandidateMap[node] or isActive
+				end
+				hasActiveLayer = hasActiveLayer or isActive
 			end
 
 			for _, node in ipairs(card:GetDescendants()) do
 				if node:IsA("GuiObject") then
 					local attrCategory = node:GetAttribute("CardArtCategory") or node:GetAttribute("ShopCardCategory")
 					if attrCategory then
-						applyLayerVisibility(node, tostring(attrCategory))
+						addLayerCandidate(node, tostring(attrCategory))
 					end
 
 					for category, aliases in pairs(layerAliases) do
 						if node.Name == "CategoryLayer_" .. category or node.Name == "CardArt_" .. category then
-							applyLayerVisibility(node, category)
+							addLayerCandidate(node, category)
 						end
 
 						for _, alias in ipairs(aliases) do
 							if node.Name == "CategoryLayer_" .. alias or node.Name == "CardArt_" .. alias then
-								applyLayerVisibility(node, alias)
+								addLayerCandidate(node, alias)
 							end
 						end
 					end
 				end
+			end
+
+			card:SetAttribute("ShopCardCategoryLayerFound", hasActiveLayer)
+			if not hasActiveLayer then
+				return
+			end
+
+			for _, node in ipairs(layerCandidates) do
+				local isActive = layerCandidateMap[node] == true
+				node.Visible = isActive
+				node:SetAttribute("ShopCardLayerActive", isActive)
 			end
 		end
 
@@ -1275,26 +1393,36 @@ function UIController.Start()
 
 		-- 填充商店天赋卡；优先写入美术拆好的 TextLabel，没有拆分时回退到模板原文本。
 		local function applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
-			local displayText = talentData.Name .. " Lv." .. currentLevel .. "\nCoins: " .. Config.FormatNumber(cost)
-			local effectText = "Effect: +" .. tostring(talentData.StatIncrease or 0)
+			local isMaxLevel = talentData.MaxLevel and currentLevel >= talentData.MaxLevel
+			local priceDisplay = isMaxLevel and "Max" or Config.FormatNumber(cost)
+			local displayText = talentData.Name .. " Lv." .. currentLevel .. "\nCoins: " .. priceDisplay
+			local effectText = (Config.GetTalentEffectText and Config.GetTalentEffectText(talentId)) or ("Effect: +" .. tostring(talentData.StatIncrease or 0))
 			local titleText = findTextNode(btn, {"TitleText", "NameText", "TalentNameText"})
 			local levelText = findTextNode(btn, {"LevelText", "LevelLabel"})
 			local priceText = findTextNode(btn, {"PriceText", "CostText", "CoinText", "AmountText"})
 			local effectLabel = findTextNode(btn, {"EffectText", "DescText", "DescriptionText", "NoteText"})
-			local hasSplitLabels = titleText or levelText or priceText or effectLabel
+			local productIdText = findTextNode(btn, {"ProductIdText", "IdText", "GoodsIdText"})
+			local hasSplitLabels = titleText or levelText or priceText or effectLabel or productIdText
 			local coins = player:GetAttribute("Coins") or 0
+			local productId = talentData.ProductId
 
 			btn:SetAttribute("TalentId", talentId)
+			if productId then
+				btn:SetAttribute("ProductId", productId)
+			else
+				btn:SetAttribute("ProductId", nil)
+			end
 			btn:SetAttribute("TalentLevel", currentLevel)
-			btn:SetAttribute("TalentCost", cost)
-			btn:SetAttribute("CanAfford", coins >= cost)
+			btn:SetAttribute("TalentCost", cost == math.huge and -1 or cost)
+			btn:SetAttribute("CanAfford", (not isMaxLevel) and cost ~= math.huge and coins >= cost)
 
 			applyShopCardArt(btn, talentId, talentData)
 
 			if titleText then titleText.Text = talentData.Name end
 			if levelText then levelText.Text = "Lv." .. tostring(currentLevel) end
-			if priceText then priceText.Text = Config.FormatNumber(cost) end
+			if priceText then priceText.Text = priceDisplay end
 			if effectLabel then effectLabel.Text = effectText end
+			if productIdText and productId then productIdText.Text = "ID: " .. tostring(productId) end
 
 			if btn:IsA("TextButton") then
 				btn.Text = hasSplitLabels and "" or displayText
@@ -1304,6 +1432,7 @@ function UIController.Start()
 					textLabel.Text = displayText
 				end
 			end
+
 		end
 
 		-- 刷新商店文本显示 (支持滑动列表的智能增量更新)
@@ -1329,28 +1458,11 @@ function UIController.Start()
 					btn.Visible = true 
 					btn.Parent = shopList
 					btn:SetAttribute("ShopGenerated", true)
-					applyShopHoverScale(
-						btn,
-						"ShopCardHoverBound",
-						"ShopCardHoverScale",
-						shopConfig.CardHoverScale or petBagConfig.OpenButtonHoverScale or 1.06
-					)
-					
-					-- 绑定购买事件
-					btn.Activated:Connect(function()
-						local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-						remotes:WaitForChild("BuyTalent"):FireServer(talentId)
-					end)
 				end
 
 				if btn:IsA("GuiObject") then
 					btn.LayoutOrder = layoutOrder
-					applyShopHoverScale(
-						btn,
-						"ShopCardHoverBound",
-						"ShopCardHoverScale",
-						shopConfig.CardHoverScale or petBagConfig.OpenButtonHoverScale or 1.06
-					)
+					bindShopCardInteraction(btn, talentId)
 				end
 				
 				applyShopItemDisplay(btn, talentId, talentData, currentLevel, cost)
@@ -1368,6 +1480,7 @@ function UIController.Start()
 					renderTalent(talentId, fallbackOrder)
 				end
 			end
+
 		end
 
 		-- 当玩家金币或者局外天赋等级变动时，实时计算并刷新商店界面价格
@@ -1388,6 +1501,7 @@ function UIController.Start()
 
 			tweenShopBlur(shopPanel.Visible)
 			tweenShopCamera(shopPanel.Visible)
+			setMainButtonRootHiddenByPanel(mainUI, "Shop", shopPanel.Visible)
 			if shopPanel.Visible then
 				refreshShopUI()
 			end
@@ -1406,6 +1520,8 @@ function UIController.Start()
 				player:SetAttribute("IsShopOpen", false)
 			end)
 		end
+
+		setMainButtonRootHiddenByPanel(mainUI, "Shop", shopPanel.Visible)
 	end
 
 
@@ -1429,11 +1545,10 @@ function UIController.Start()
 		-- 当前宠物界面已改为 Studio 直接摆放；按钮只负责开关 PetBagPanel。
 		-- 不再等待旧版 EquippedContainer / StandbyContainer / PetItemTemplate，避免初始化卡死导致 BtnOpenPetBag 无法绑定。
 		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
-		local MAX_EQUIP_SLOTS = petBagConfig.MaxEquipSlots or 1
 		local petBagBlurTween = nil
 		local petBagCameraTween = nil
 		local petBagSavedFOV = nil
-		print("[UIController][PetBag] setup start. Panel visible:", bagPanel.Visible, "Close button found:", closeBtn ~= nil)
+		-- print("[UIController][PetBag] setup start. Panel visible:", bagPanel.Visible, "Close button found:", closeBtn ~= nil)
 
 		-- 获取或创建背包专用毛玻璃；只在本地客户端生效，不影响服务器和其他玩家。
 		local function getPetBagBlur()
@@ -1586,6 +1701,8 @@ function UIController.Start()
 		local petList = bagPanel:FindFirstChild("PetList", true)
 		local equippedContainer = bagPanel:FindFirstChild("EquippedContainer", true)
 		local detailButton = equippedContainer and equippedContainer:FindFirstChild("PetButton_1", true)
+		local bagHeader = bagPanel:FindFirstChild("Header", true)
+		local equippedCountText = bagHeader and bagHeader:FindFirstChild("Count", true)
 		local selectedPetUid = nil
 		local pendingSelectedPetUidAfterRemove = nil
 		local petTemplateByQuality = {}
@@ -1632,7 +1749,49 @@ function UIController.Start()
 			return owned
 		end
 
+		local function decodeEquippedPetUids()
+			local success, decoded = pcall(function()
+				return HttpService:JSONDecode(player:GetAttribute("EquippedPets_JSON") or "[]")
+			end)
+
+			local equippedUids = {}
+			local equippedMap = {}
+			if success and type(decoded) == "table" then
+				for _, uid in ipairs(decoded) do
+					if type(uid) == "string" and uid ~= "" and not equippedMap[uid] then
+						equippedMap[uid] = true
+						table.insert(equippedUids, uid)
+					end
+				end
+			end
+
+			local legacyUid = player:GetAttribute("EquippedPetUid") or ""
+			if #equippedUids == 0 and legacyUid ~= "" then
+				equippedMap[legacyUid] = true
+				table.insert(equippedUids, legacyUid)
+			end
+
+			local legacyPetId = player:GetAttribute("EquippedPet") or ""
+			if #equippedUids == 0 and legacyPetId ~= "" then
+				equippedMap[legacyPetId] = true
+				table.insert(equippedUids, legacyPetId)
+			end
+
+			return equippedUids, equippedMap
+		end
+
 		-- 将宠物实例按配置 SortOrder、等级、名称排序，保证背包每次刷新顺序稳定。
+		local function updateEquippedCountText()
+			if not equippedCountText or not equippedCountText:IsA("TextLabel") then
+				return
+			end
+
+			local equippedUids = decodeEquippedPetUids()
+			local slotUpgradeLevel = math.max(0, math.floor(tonumber(player:GetAttribute("Talent_PET_SLOT")) or 0))
+			local maxEquipSlots = 1 + slotUpgradeLevel
+			equippedCountText.Text = tostring(#equippedUids) .. "/" .. tostring(maxEquipSlots)
+		end
+
 		local function getSortedPetEntries(ownedPets)
 			table.sort(ownedPets, function(a, b)
 				local sortA = Controllers.Config.GetPetSortValue and Controllers.Config.GetPetSortValue(a.Id) or math.huge
@@ -2008,7 +2167,8 @@ function UIController.Start()
 				return
 			end
 
-			local isEquipped = player:GetAttribute("EquippedPetUid") == petEntry.Uid
+			local _, equippedMap = decodeEquippedPetUids()
+			local isEquipped = equippedMap[petEntry.Uid] == true or equippedMap[petEntry.Id] == true
 			applyPetButtonDisplay(detailButton, petEntry, isEquipped and "Equipped" or "", equippedContainer)
 			setEquipButtonVisual(isEquipped)
 		end
@@ -2022,7 +2182,7 @@ function UIController.Start()
 				return
 			end
 			detailButton:SetAttribute("PetBagEquipBound", true)
-			print("[UIController][PetBag] Equip button bound:", equipButton:GetFullName())
+			-- print("[UIController][PetBag] Equip button bound:", equipButton:GetFullName())
 
 			equipButton.Activated:Connect(function()
 				local petUid = detailButton:GetAttribute("PetUid")
@@ -2038,13 +2198,8 @@ function UIController.Start()
 					return
 				end
 
-				if player:GetAttribute("EquippedPetUid") == petUid then
-					print("[UIController][PetBag] Unequip pet request:", petUid)
-					equipPetEvent:FireServer("")
-				else
-					print("[UIController][PetBag] Equip pet request:", petUid, detailButton:GetAttribute("PetId"))
-					equipPetEvent:FireServer(petUid)
-				end
+				print("[UIController][PetBag] Toggle equip pet request:", petUid, detailButton:GetAttribute("PetId"))
+				equipPetEvent:FireServer(petUid)
 			end)
 		end
 
@@ -2087,7 +2242,7 @@ function UIController.Start()
 			end
 
 			detailButton:SetAttribute("PetBagRemoveBound", true)
-			print("[UIController][PetBag] Remove-pet button bound:", removeButton:GetFullName())
+			-- print("[UIController][PetBag] Remove-pet button bound:", removeButton:GetFullName())
 
 			removeButton.Activated:Connect(function()
 				local petUid = detailButton:GetAttribute("PetUid")
@@ -2119,7 +2274,8 @@ function UIController.Start()
 
 			clearGeneratedBagItems(petList)
 			local ownedPets = getSortedPetEntries(decodeOwnedPets())
-			local equippedUid = player:GetAttribute("EquippedPetUid") or ""
+			local _, equippedMap = decodeEquippedPetUids()
+			updateEquippedCountText()
 			if pendingSelectedPetUidAfterRemove then
 				selectedPetUid = pendingSelectedPetUidAfterRemove
 				pendingSelectedPetUidAfterRemove = nil
@@ -2135,7 +2291,7 @@ function UIController.Start()
 
 			if not selectedEntry then
 				for _, petEntry in ipairs(ownedPets) do
-					if petEntry.Uid == equippedUid then
+					if equippedMap[petEntry.Uid] or equippedMap[petEntry.Id] then
 						selectedEntry = petEntry
 						break
 					end
@@ -2149,7 +2305,7 @@ function UIController.Start()
 				local quality = Controllers.Config.GetPetQuality and Controllers.Config.GetPetQuality(petEntry.Id) or 1
 				local item = createPetButton(petList, index, quality)
 				if item then
-					local isEquipped = equippedUid ~= "" and petEntry.Uid == equippedUid
+					local isEquipped = equippedMap[petEntry.Uid] == true or equippedMap[petEntry.Id] == true
 					applyPetButtonDisplay(item, petEntry, isEquipped and "Equipped" or "")
 					setSelectedStroke(item, isEquipped)
 					applyPetItemHover(item)
@@ -2226,7 +2382,7 @@ function UIController.Start()
 		else
 			warn("[UIController][PetBag] Close button not found; BtnOpenPetBag can still toggle PetBagPanel.")
 		end
-		print("[UIController][PetBag] BtnOpenPetBag bound successfully.")
+		-- print("[UIController][PetBag] BtnOpenPetBag bound successfully.")
 		
 		-- 装备发生变动、或者刚好抽到新宠物时，实时刷新面板
 		player:GetAttributeChangedSignal("EquippedPet"):Connect(function()
@@ -2236,6 +2392,12 @@ function UIController.Start()
 			if bagPanel.Visible then refreshBag() end
 		end)
 		player:GetAttributeChangedSignal("EquippedPetLevel"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+		player:GetAttributeChangedSignal("EquippedPets_JSON"):Connect(function()
+			if bagPanel.Visible then refreshBag() end
+		end)
+		player:GetAttributeChangedSignal("Talent_PET_SLOT"):Connect(function()
 			if bagPanel.Visible then refreshBag() end
 		end)
 		player:GetAttributeChangedSignal("OwnedPets_JSON"):Connect(function()
@@ -2693,6 +2855,210 @@ function UIController.Start()
 		end
 	end
 
+	local function setupRebirthUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+
+		local buttonRoot = getMainButtonRoot(mainUI)
+		local openButton = buttonRoot and buttonRoot:FindFirstChild("BtnRebirth")
+		local rebirthPanel = mainUI:FindFirstChild("RebirthPanel")
+		if not openButton or not openButton:IsA("GuiButton") or not rebirthPanel or not rebirthPanel:IsA("GuiObject") then
+			warn("[UIController] Rebirth UI missing: MainUI/MainUI_1/BtnRebirth or MainUI/RebirthPanel.")
+			return
+		end
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local rebirthRemote = remotes and remotes:WaitForChild("Rebirth", 5)
+		if not rebirthRemote or not rebirthRemote:IsA("RemoteFunction") then
+			warn("[UIController] Rebirth RemoteFunction is not ready.")
+			return
+		end
+
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+		local closeButton = rebirthPanel:FindFirstChild("BtnClose", true)
+		local confirmButton = rebirthPanel:FindFirstChild("BtnConfirm", true)
+		local cancelButton = rebirthPanel:FindFirstChild("BtnCancel", true)
+
+		local function applySimpleHover(guiObject, attributeName, scaleName, targetScale)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute(attributeName) then return end
+			guiObject:SetAttribute(attributeName, true)
+
+			local hoverScale = guiObject:FindFirstChild(scaleName)
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = scaleName
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+			local function playScale(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				playScale(targetScale or 1.06)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				playScale(normalScale)
+			end)
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					playScale(normalScale)
+				end)
+			end
+		end
+
+		local function setText(labelName, text)
+			local label = findTextNode(rebirthPanel, { labelName })
+			if label then
+				label.Text = text
+			end
+		end
+
+		local function setButtonText(button, text)
+			if not button then return end
+			if button:IsA("TextButton") then
+				button.Text = text
+			end
+
+			local label = button:FindFirstChildWhichIsA("TextLabel", true)
+			if label then
+				label.Text = text
+			end
+		end
+
+		local function formatPercent(value)
+			return string.format("+%d%%", math.floor((tonumber(value) or 0) * 100 + 0.5))
+		end
+
+		local function getRebirthSnapshot()
+			local rebirthCount = math.max(0, math.floor(tonumber(player:GetAttribute("RebirthCount")) or 0))
+			local coinGainBonus = tonumber(player:GetAttribute("CoinGainBonus"))
+				or Controllers.Config.GetRebirthCoinGainBonus(rebirthCount)
+			local cost = Controllers.Config.GetRebirthCost(rebirthCount)
+			local nextCoinGainBonus = Controllers.Config.GetRebirthCoinGainBonus(rebirthCount + 1)
+			return rebirthCount, cost, coinGainBonus, nextCoinGainBonus
+		end
+
+		local function refreshRebirthUI()
+			local rebirthCount, cost, coinGainBonus, nextCoinGainBonus = getRebirthSnapshot()
+			local coins = math.max(0, math.floor(tonumber(player:GetAttribute("Coins")) or 0))
+			local formatNumber = Controllers.Config.FormatNumber or tostring
+			local canRebirth = coins >= cost
+
+			setText("TitleText", "Rebirth")
+			setText("RebirthCountText", "Rebirths: " .. tostring(rebirthCount))
+			setText("CostText", "Cost: " .. formatNumber(cost) .. " Coins")
+			setText("CurrentMultiplierText", "Current Coin Bonus: " .. formatPercent(coinGainBonus))
+			setText("NextMultiplierText", "After Rebirth: " .. formatPercent(nextCoinGainBonus))
+			setText("ResetNoticeText", "Resets shop upgrades except Pet Slots.")
+
+			if confirmButton and confirmButton:IsA("GuiButton") then
+				confirmButton:SetAttribute("CanRebirth", canRebirth)
+				confirmButton.AutoButtonColor = canRebirth
+				setButtonText(confirmButton, canRebirth and "Rebirth" or "Need Coins")
+			end
+			if cancelButton then
+				setButtonText(cancelButton, "Cancel")
+			end
+			if closeButton and closeButton:IsA("TextButton") then
+				closeButton.Text = "X"
+			end
+		end
+
+		local isApplyingRebirthVisible = false
+		local function setRebirthOpen(isOpen)
+			if isOpen == rebirthPanel.Visible then
+				if isOpen then
+					refreshRebirthUI()
+				end
+				return
+			end
+
+			isApplyingRebirthVisible = true
+			rebirthPanel.Visible = isOpen
+			isApplyingRebirthVisible = false
+
+			if isOpen then
+				refreshRebirthUI()
+			end
+		end
+
+		rebirthPanel.Visible = false
+		refreshRebirthUI()
+
+		applySimpleHover(openButton, "RebirthOpenHoverBound", "RebirthOpenHoverScale", petBagConfig.OpenButtonHoverScale or 1.06)
+		openButton.Activated:Connect(function()
+			setRebirthOpen(true)
+		end)
+
+		if closeButton and closeButton:IsA("GuiButton") then
+			applySimpleHover(closeButton, "RebirthCloseHoverBound", "RebirthCloseHoverScale", petBagConfig.CloseButtonHoverScale or 1.06)
+			closeButton.Activated:Connect(function()
+				setRebirthOpen(false)
+			end)
+		end
+
+		if cancelButton and cancelButton:IsA("GuiButton") then
+			applySimpleHover(cancelButton, "RebirthCancelHoverBound", "RebirthCancelHoverScale", petBagConfig.CloseButtonHoverScale or 1.06)
+			cancelButton.Activated:Connect(function()
+				setRebirthOpen(false)
+			end)
+		end
+
+		if confirmButton and confirmButton:IsA("GuiButton") then
+			applySimpleHover(confirmButton, "RebirthConfirmHoverBound", "RebirthConfirmHoverScale", 1.06)
+			confirmButton.Activated:Connect(function()
+				if confirmButton:GetAttribute("CanRebirth") ~= true then
+					refreshRebirthUI()
+					return
+				end
+
+				confirmButton:SetAttribute("CanRebirth", false)
+				setButtonText(confirmButton, "Working...")
+				local success, result = pcall(function()
+					return rebirthRemote:InvokeServer()
+				end)
+
+				if not success then
+					warn("[UIController] Rebirth request failed:", result)
+					setButtonText(confirmButton, "Failed")
+					task.delay(0.8, refreshRebirthUI)
+					return
+				end
+
+				if type(result) == "table" and result.Success == true then
+					refreshRebirthUI()
+				else
+					setButtonText(confirmButton, "Need Coins")
+					task.delay(0.8, refreshRebirthUI)
+				end
+			end)
+		end
+
+		rebirthPanel:GetPropertyChangedSignal("Visible"):Connect(function()
+			if isApplyingRebirthVisible then return end
+			if rebirthPanel.Visible then
+				refreshRebirthUI()
+			end
+		end)
+
+		for _, attrName in ipairs({ "Coins", "RebirthCount", "CoinGainBonus" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				if rebirthPanel.Visible then
+					refreshRebirthUI()
+				end
+			end)
+		end
+	end
+
 	local function setupPetHatching()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
@@ -2881,6 +3247,7 @@ function UIController.Start()
 			hatchScreen.Visible = false
 			isApplyingHatchVisible = false
 			tweenHatchBlur(false)
+			setMainButtonRootHiddenByPanel(mainUI, "Hatch", false)
 			isHatching = false
 			isShowingResult = false
 			clearViewport()
@@ -2895,6 +3262,7 @@ function UIController.Start()
 					hatchScreen.Visible = true
 					isApplyingHatchVisible = false
 					tweenHatchBlur(true)
+					setMainButtonRootHiddenByPanel(mainUI, "Hatch", true)
 					if not isHatching then
 						renderIdleEgg()
 					end
@@ -2908,6 +3276,7 @@ function UIController.Start()
 		hatchScreen:GetPropertyChangedSignal("Visible"):Connect(function()
 			if isApplyingHatchVisible then return end
 			tweenHatchBlur(hatchScreen.Visible)
+			setMainButtonRootHiddenByPanel(mainUI, "Hatch", hatchScreen.Visible)
 		end)
 
 		-- 真正开始抽宠展示；入口由 Hatch_Pet_Egg.HatchScreen.BtnClickArea 触发。
@@ -2965,6 +3334,7 @@ function UIController.Start()
 			hatchScreen.Visible = true
 			isApplyingHatchVisible = false
 			tweenHatchBlur(true)
+			setMainButtonRootHiddenByPanel(mainUI, "Hatch", true)
 			clickCount = 0
 			tipText.Text = "Tap quickly to crack the egg!"
 			tipText.TextColor3 = Color3.new(1,1,1)
@@ -3046,6 +3416,7 @@ function UIController.Start()
 			updateHatchPetEggCards()
 			if hatchPetEgg:IsA("GuiObject") and hatchPetEgg.Visible and not isHatching then
 				hatchScreen.Visible = true
+				setMainButtonRootHiddenByPanel(mainUI, "Hatch", true)
 				renderIdleEgg()
 			end
 
@@ -3149,6 +3520,7 @@ function UIController.Start()
 		setupShopUI() 
       setupPetBagUI()
       setupAchievementUI()
+      setupRebirthUI()
       setupPetHatching()
 	end)
 

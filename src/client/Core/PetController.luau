@@ -6,12 +6,13 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 local Controllers
 
-local currentPetModel = nil
+local currentPetModels = {}
 
 -- 获取 Part 或 Model 中第一个可用于定位的 BasePart。
 local function getFirstBasePart(instance)
@@ -216,6 +217,90 @@ local function getPetFormationCFrame(rootPart, petIndex, totalCount, inCombat)
 	return rootPart.CFrame * CFrame.new(xOffset, height, zOffset)
 end
 
+local function decodeOwnedPets()
+	if not Controllers or not Controllers.Config then
+		return {}
+	end
+
+	local success, decoded = pcall(function()
+		return HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
+	end)
+
+	if not success or type(decoded) ~= "table" then
+		return {}
+	end
+
+	local owned = {}
+	for index, petEntry in ipairs(decoded) do
+		if type(petEntry) == "string" and Controllers.Config.PETS[petEntry] then
+			table.insert(owned, {
+				Uid = "legacy_client_" .. tostring(index) .. "_" .. petEntry,
+				Id = petEntry,
+				Level = Controllers.Config.PET_LEVEL_MIN or 1,
+			})
+		elseif type(petEntry) == "table" and type(petEntry.Id) == "string" and Controllers.Config.PETS[petEntry.Id] then
+			local normalizeLevel = Controllers.Config.NormalizePetLevel
+			local level = normalizeLevel and normalizeLevel(petEntry.Level) or math.max(1, math.floor(tonumber(petEntry.Level) or 1))
+			table.insert(owned, {
+				Uid = type(petEntry.Uid) == "string" and petEntry.Uid or ("pet_client_" .. tostring(index) .. "_" .. petEntry.Id),
+				Id = petEntry.Id,
+				Level = level,
+			})
+		end
+	end
+
+	return owned
+end
+
+local function decodeEquippedPetUids()
+	local success, decoded = pcall(function()
+		return HttpService:JSONDecode(player:GetAttribute("EquippedPets_JSON") or "[]")
+	end)
+
+	local equippedUids = {}
+	local seen = {}
+	if success and type(decoded) == "table" then
+		for _, uid in ipairs(decoded) do
+			if type(uid) == "string" and uid ~= "" and not seen[uid] then
+				seen[uid] = true
+				table.insert(equippedUids, uid)
+			end
+		end
+	end
+
+	local legacyUid = player:GetAttribute("EquippedPetUid") or ""
+	if #equippedUids == 0 and legacyUid ~= "" then
+		table.insert(equippedUids, legacyUid)
+	end
+
+	local legacyPetId = player:GetAttribute("EquippedPet") or ""
+	if #equippedUids == 0 and legacyPetId ~= "" then
+		table.insert(equippedUids, legacyPetId)
+	end
+
+	return equippedUids
+end
+
+local function getEquippedPetEntries()
+	local ownedPets = decodeOwnedPets()
+	local equippedUids = decodeEquippedPetUids()
+	local ownedByUid = {}
+	for _, petEntry in ipairs(ownedPets) do
+		ownedByUid[petEntry.Uid] = petEntry
+		ownedByUid[petEntry.Id] = ownedByUid[petEntry.Id] or petEntry
+	end
+
+	local equippedEntries = {}
+	for _, uid in ipairs(equippedUids) do
+		local petEntry = ownedByUid[uid]
+		if petEntry then
+			table.insert(equippedEntries, petEntry)
+		end
+	end
+
+	return equippedEntries
+end
+
 function PetController.Init(deps)
 	Controllers = deps
 end
@@ -223,6 +308,10 @@ end
 -- 启动宠物系统：监听装备变化、驱动宠物跟随，并在战斗中按节奏触发宠物攻击。
 function PetController.Start()
 	player:GetAttributeChangedSignal("EquippedPet"):Connect(PetController.RefreshPetModel)
+	player:GetAttributeChangedSignal("EquippedPetUid"):Connect(PetController.RefreshPetModel)
+	player:GetAttributeChangedSignal("EquippedPets_JSON"):Connect(PetController.RefreshPetModel)
+	player:GetAttributeChangedSignal("OwnedPets_JSON"):Connect(PetController.RefreshPetModel)
+	player:GetAttributeChangedSignal("Pet_Count"):Connect(PetController.RefreshPetModel)
 	player.CharacterAdded:Connect(function()
 		-- 等角色骨架和 HumanoidRootPart 完成创建后再刷新宠物。
 		task.wait(0.1)
@@ -232,27 +321,24 @@ function PetController.Start()
 
 	-- 每帧更新宠物位置，让宠物在战斗中跟随在玩家前侧，非战斗时回到待机位置。
 	RunService.RenderStepped:Connect(function(dt)
-		if not currentPetModel or not player.Character then return end
+		if #currentPetModels == 0 or not player.Character then return end
 		local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
 		if not rootPart then return end
 
-		local petCount = player:GetAttribute("Pet_Count") or 1
-		local targetCFrame = getPetFormationCFrame(rootPart, 1, petCount, Controllers.Game.IsCombatActive)
-
-		local currentPivot = currentPetModel:GetPivot()
-		currentPetModel:PivotTo(currentPivot:Lerp(targetCFrame, dt * 5))
+		local totalCount = #currentPetModels
+		for index, petModel in ipairs(currentPetModels) do
+			if petModel and petModel.Parent then
+				local targetCFrame = getPetFormationCFrame(rootPart, index, totalCount, Controllers.Game.IsCombatActive)
+				local currentPivot = petModel:GetPivot()
+				petModel:PivotTo(currentPivot:Lerp(targetCFrame, dt * 5))
+			end
+		end
 	end)
 
 	-- 战斗循环：按宠物攻速与分身数量依次触发开火，并对多宠物发射做轻微错峰。
 	task.spawn(function()
 		while true do
 			if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") then
-				local equippedPet = player:GetAttribute("EquippedPet")
-				if not equippedPet or equippedPet == "" then task.wait(1); continue end
-
-				local petConfig = Controllers.Config.PETS and Controllers.Config.PETS[equippedPet]
-				if not petConfig then task.wait(1); continue end
-
 				local character = player.Character
 				if not character then task.wait(1); continue end
 
@@ -260,24 +346,38 @@ function PetController.Start()
 				if #activePets == 0 then task.wait(1); continue end
 
 				local aspdBonus = player:GetAttribute("Pet_ASPD_Bonus") or 0
-				local baseCooldown = petConfig.Cooldown or 2
-				local actualCooldown = baseCooldown / (1 + (aspdBonus / 100))
-				local castCount = petConfig.CastCount or 1
+				local actualCooldown = math.huge
+				local maxCastCount = 1
+				for _, pModel in ipairs(activePets) do
+					local petId = pModel:GetAttribute("PetId")
+					local petConfig = petId and Controllers.Config.PETS and Controllers.Config.PETS[petId]
+					if petConfig then
+						actualCooldown = math.min(actualCooldown, (petConfig.Cooldown or 2) / (1 + (aspdBonus / 100)))
+						maxCastCount = math.max(maxCastCount, petConfig.CastCount or 1)
+					end
+				end
+				if actualCooldown == math.huge then task.wait(1); continue end
+
 				local petStaggerDelay = Controllers.Config.PET_FIRE_STAGGER_DELAY or 0.12
 				local castStaggerDelay = Controllers.Config.PET_CAST_STAGGER_DELAY or 0.15
 
-				for i = 1, castCount do
+				for i = 1, maxCastCount do
 					if not Controllers.Game.IsCombatActive then break end
 
 					for petIndex, pModel in ipairs(activePets) do
 						if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then break end
-						PetController.ShootProjectile(petConfig, pModel, equippedPet)
+						local petId = pModel:GetAttribute("PetId")
+						local petConfig = petId and Controllers.Config.PETS and Controllers.Config.PETS[petId]
+						local petCastCount = petConfig and (petConfig.CastCount or 1) or 0
+						if petConfig and i <= petCastCount then
+							PetController.ShootProjectile(petConfig, pModel, petId, pModel:GetAttribute("PetLevel"))
+						end
 						if petIndex < #activePets then
 							task.wait(petStaggerDelay)
 						end
 					end
 
-					if i < castCount then
+					if i < maxCastCount then
 						task.wait(castStaggerDelay)
 					end
 				end
@@ -294,44 +394,64 @@ end
 
 -- 刷新当前出战宠物模型；优先使用 Studio 资源，缺失时回退到白模 Part。
 function PetController.RefreshPetModel()
-	if currentPetModel then currentPetModel:Destroy() end
-	local equipped = player:GetAttribute("EquippedPet")
-	if not equipped or equipped == "" then return end
-
-	local petConfig = Controllers.Config.PETS[equipped]
-	if not petConfig then return end
-
 	local character = player.Character
 	if not character then return end
 
-	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
-	local petModels = modelFolder and modelFolder:FindFirstChild("Pets")
-	local petTemplate = petModels and petModels:FindFirstChild(equipped)
+	for _, petModel in ipairs(currentPetModels) do
+		if petModel and petModel.Parent then
+			petModel:Destroy()
+		end
+	end
+	currentPetModels = {}
 
-	if petTemplate then
-		currentPetModel = petTemplate:Clone()
-		prepareMovableModel(currentPetModel)
-		currentPetModel.Parent = Workspace
-	else
-		currentPetModel = Instance.new("Part")
-		currentPetModel.Size = Vector3.new(2, 2, 2)
-		currentPetModel.Color = petConfig.Color or Color3.fromRGB(255, 255, 255)
-		currentPetModel.Anchored = true
-		currentPetModel.CanCollide = false
-		currentPetModel.Material = Enum.Material.Neon
-		currentPetModel.Parent = Workspace
+	for _, child in ipairs(character:GetChildren()) do
+		if child.Name == "ActivePet" or string.match(child.Name, "^ActivePet_Clone") then
+			child:Destroy()
+		end
 	end
 
-	currentPetModel.Name = "ActivePet"
-	currentPetModel.Parent = character
+	local equippedEntries = getEquippedPetEntries()
+	if #equippedEntries == 0 then
+		return
+	end
 
-	if Controllers.Pet and Controllers.Pet.UpdatePetClones then
-		Controllers.Pet.UpdatePetClones()
+	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+	local petModels = modelFolder and modelFolder:FindFirstChild("Pets")
+
+	local combatPetCount = math.max(1, math.floor(player:GetAttribute("Pet_Count") or 1))
+	local targetCount = math.max(#equippedEntries, combatPetCount)
+
+	for index = 1, targetCount do
+		local petEntry = equippedEntries[((index - 1) % #equippedEntries) + 1]
+		local petConfig = Controllers.Config.PETS[petEntry.Id]
+		if petConfig then
+			local petTemplate = petModels and petModels:FindFirstChild(petEntry.Id)
+			local petModel
+
+			if petTemplate then
+				petModel = petTemplate:Clone()
+				prepareMovableModel(petModel)
+			else
+				petModel = Instance.new("Part")
+				petModel.Size = Vector3.new(2, 2, 2)
+				petModel.Color = petConfig.Color or Color3.fromRGB(255, 255, 255)
+				petModel.Anchored = true
+				petModel.CanCollide = false
+				petModel.Material = Enum.Material.Neon
+			end
+
+			petModel.Name = index == 1 and "ActivePet" or ("ActivePet_Clone_" .. tostring(index))
+			petModel:SetAttribute("PetId", petEntry.Id)
+			petModel:SetAttribute("PetLevel", petEntry.Level)
+			petModel:SetAttribute("SourcePetUid", petEntry.Uid)
+			petModel.Parent = character
+			table.insert(currentPetModels, petModel)
+		end
 	end
 end
 
 -- 发射宠物子弹/技能：负责索敌、生成预制体或白模，并把命中数据注册到战斗系统。
-function PetController.ShootProjectile(petConfig, petModel, petId)
+function PetController.ShootProjectile(petConfig, petModel, petId, petLevel)
 	local petPos = petModel:GetPivot().Position
 	local playerPos = player.Character and player.Character.PrimaryPart and player.Character.PrimaryPart.Position or petPos
 	local spawnPos = playerPos + Vector3.new(0, 0, -2)
@@ -341,7 +461,7 @@ function PetController.ShootProjectile(petConfig, petModel, petId)
 	local actualLifetime = currentRng / currentSpd
 
 	local atkBonus = player:GetAttribute("Pet_ATK_Bonus") or 0
-	local equippedPetLevel = player:GetAttribute("EquippedPetLevel") or 1
+	local equippedPetLevel = petLevel or petModel:GetAttribute("PetLevel") or player:GetAttribute("EquippedPetLevel") or 1
 	local basePetDmg = (Controllers.Config.GetPetAttack and petId) and Controllers.Config.GetPetAttack(petId, equippedPetLevel) or (petConfig.ATK or 10)
 	local petDmg = basePetDmg * (1 + (atkBonus / 100))
 	local skillType = petConfig.SkillType or "WindBlade"
@@ -549,41 +669,7 @@ end
 
 -- 根据当前宠物数量刷新分身，并让分身以固定偏移跟随玩家。
 function PetController.UpdatePetClones()
-	local character = player.Character
-	if not character then return end
-
-	local mainPet = character:FindFirstChild("ActivePet")
-	if not mainPet then return end
-
-	local targetCount = player:GetAttribute("Pet_Count") or 1
-
-	-- 先清理旧分身，避免数量变化后残留。
-	for _, child in ipairs(character:GetChildren()) do
-		if string.match(child.Name, "^ActivePet_Clone") then
-			child:Destroy()
-		end
-	end
-
-	for i = 2, targetCount do
-		local clone = mainPet:Clone()
-		clone.Name = "ActivePet_Clone_" .. i
-		clone.Parent = character
-
-		task.spawn(function()
-			local connection
-			connection = RunService.Heartbeat:Connect(function(dt)
-				if not clone or not clone.Parent or not character or not character.PrimaryPart then
-					connection:Disconnect()
-					return
-				end
-
-				local targetCountNow = player:GetAttribute("Pet_Count") or targetCount
-				local targetCFrame = getPetFormationCFrame(character.PrimaryPart, i, targetCountNow, Controllers.Game.IsCombatActive)
-
-				clone:PivotTo(clone:GetPivot():Lerp(targetCFrame, 8 * dt))
-			end)
-		end)
-	end
+	PetController.RefreshPetModel()
 end
 
 return PetController

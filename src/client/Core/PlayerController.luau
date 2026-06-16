@@ -181,7 +181,9 @@ function PlayerController.OnRenderStepped(dt)
 	local currentRunSpeed = Config.GetRunSpeed(currentStage)
 	-- 横向移动速度支持局内属性门百分比加成，并用配置表的最大横移速度封顶。
 	local lateralSpeedBonus = player:GetAttribute("LateralSpeed_Bonus") or 0
-	local currentLateralSpeed = math.min(Config.LATERAL_SPEED * (1 + (lateralSpeedBonus / 100)), Config.MAX_LATERAL_SPEED or Config.LATERAL_SPEED)
+	local lateralFlatBonus = player:GetAttribute("LateralSpeed_FlatBonus") or 0
+	local baseLateralSpeed = Config.LATERAL_SPEED + lateralFlatBonus
+	local currentLateralSpeed = math.min(baseLateralSpeed * (1 + (lateralSpeedBonus / 100)), Config.MAX_LATERAL_SPEED or baseLateralSpeed)
 	
 	-- 计算最终想要移动的速度向量 (侧向移动 + 动态向前奔跑速度)
 	local desiredVelocity = Vector3.new(effectiveMoveDirection * currentLateralSpeed, 0, -currentRunSpeed)

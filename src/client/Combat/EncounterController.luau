@@ -995,8 +995,10 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 					remotes.AddCoin:FireServer(drop.value)
 				end
 
+				local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
+				local displayedCoinValue = math.max(1, math.floor(drop.value * (1 + coinGainBonus) + 0.5))
 				local coinIconId = "rbxassetid://127099213486402"
-				local cleanText = "+" .. Config.FormatNumber(drop.value)
+				local cleanText = "+" .. Config.FormatNumber(displayedCoinValue)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(255, 215, 0), coinIconId)
 			elseif drop.type == "Exp" then
 				local actualExp = Controllers.Progression.AddExp(drop.value) or drop.value

@@ -40,7 +40,9 @@ function NetworkManager.Start()
 		
 		-- 验证通过，允许增值
 		local currentCoins = player:GetAttribute("Coins") or 0
-		player:SetAttribute("Coins", currentCoins + amount)
+		local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
+		local finalAmount = math.max(1, math.floor(amount * (1 + coinGainBonus) + 0.5))
+		player:SetAttribute("Coins", currentCoins + finalAmount)
 	end)
 
 
@@ -50,18 +52,26 @@ function NetworkManager.Start()
 
 	-- 监听客户端的购买请求
 	buyTalentEvent.OnServerEvent:Connect(function(player, talentId)
+		if type(talentId) == "number" or (type(talentId) == "string" and string.match(talentId, "^%d+$")) then
+			talentId = GameConfig.GetTalentIdByProductId(talentId)
+		end
+		if not talentId then return end
+
 		-- 从公共配置表校验是否有这个天赋
 		local talentConfig = GameConfig.TALENTS[talentId]
 		if not talentConfig then return end 
 
-		local currentLevel = player:GetAttribute(talentId) or 0
+		local currentLevel = math.max(0, math.floor(player:GetAttribute(talentId) or 0))
 		local currentCoins = player:GetAttribute("Coins") or 0
+		if talentConfig.MaxLevel and currentLevel >= talentConfig.MaxLevel then
+			return
+		end
 
 		-- 统一调用公共配置表里的计费公式
 		local cost = GameConfig.GetTalentCost(talentId, currentLevel)
 
 		-- 钱够就扣钱加级
-		if currentCoins >= cost then
+		if cost ~= math.huge and currentCoins >= cost then
 			player:SetAttribute("Coins", currentCoins - cost)
 			player:SetAttribute(talentId, currentLevel + 1)
 			print(string.format("%s 成功购买 %s Lv.%d (花费: %d)", player.Name, talentConfig.Name, currentLevel + 1, cost))
@@ -73,6 +83,48 @@ function NetworkManager.Start()
     local HttpService = game:GetService("HttpService")
 
 	-- 安全解析玩家宠物背包；坏 JSON 或未知宠物会被过滤掉，避免服务端流程报错
+	local rebirthRF = remotes:FindFirstChild("Rebirth") or Instance.new("RemoteFunction", remotes)
+	rebirthRF.Name = "Rebirth"
+	rebirthRF.OnServerInvoke = function(player)
+		local currentRebirthCount = math.max(0, math.floor(tonumber(player:GetAttribute("RebirthCount")) or 0))
+		local currentCoins = math.max(0, math.floor(tonumber(player:GetAttribute("Coins")) or 0))
+		local currentCoinGainBonus = math.max(
+			0,
+			tonumber(player:GetAttribute("CoinGainBonus")) or GameConfig.GetRebirthCoinGainBonus(currentRebirthCount)
+		)
+		local cost = GameConfig.GetRebirthCost(currentRebirthCount)
+		local nextRebirthCount = currentRebirthCount + 1
+		local nextCoinGainBonus = GameConfig.GetRebirthCoinGainBonus(nextRebirthCount)
+
+		if currentCoins < cost then
+			return {
+				Success = false,
+				Reason = "NotEnoughCoins",
+				Cost = cost,
+				Coins = currentCoins,
+				RebirthCount = currentRebirthCount,
+				CoinGainBonus = currentCoinGainBonus,
+				NextCoinGainBonus = nextCoinGainBonus,
+			}
+		end
+
+		player:SetAttribute("Coins", currentCoins - cost)
+		for _, talentId in ipairs((GameConfig.REBIRTH and GameConfig.REBIRTH.ResetTalents) or {}) do
+			player:SetAttribute(talentId, 0)
+		end
+		player:SetAttribute("RebirthCount", nextRebirthCount)
+		player:SetAttribute("CoinGainBonus", nextCoinGainBonus)
+
+		return {
+			Success = true,
+			Cost = cost,
+			Coins = currentCoins - cost,
+			RebirthCount = nextRebirthCount,
+			CoinGainBonus = nextCoinGainBonus,
+			NextCost = GameConfig.GetRebirthCost(nextRebirthCount),
+		}
+	end
+
 	local function decodeOwnedPets(player)
 		local success, decoded = pcall(function()
 			return HttpService:JSONDecode(player:GetAttribute("OwnedPets_JSON") or "[]")
@@ -121,6 +173,74 @@ function NetworkManager.Start()
 			Id = petId,
 			Level = math.random(minLevel, maxLevel),
 		}
+	end
+
+	local function getMaxEquippedPetSlots(player)
+		return 1 + math.max(0, math.floor(player:GetAttribute("Talent_PET_SLOT") or 0))
+	end
+
+	local function decodeEquippedPetUids(player)
+		local success, decoded = pcall(function()
+			return HttpService:JSONDecode(player:GetAttribute("EquippedPets_JSON") or "[]")
+		end)
+
+		local equipped = {}
+		local seen = {}
+		if success and type(decoded) == "table" then
+			for _, uid in ipairs(decoded) do
+				if type(uid) == "string" and uid ~= "" and not seen[uid] then
+					seen[uid] = true
+					table.insert(equipped, uid)
+				end
+			end
+		end
+
+		local legacyUid = player:GetAttribute("EquippedPetUid") or ""
+		if #equipped == 0 and legacyUid ~= "" then
+			table.insert(equipped, legacyUid)
+		end
+
+		local legacyPetId = player:GetAttribute("EquippedPet") or ""
+		if #equipped == 0 and legacyPetId ~= "" then
+			table.insert(equipped, legacyPetId)
+		end
+
+		return equipped
+	end
+
+	local function findOwnedPetByUidOrId(owned, petUidOrId)
+		for _, petEntry in ipairs(owned) do
+			if petEntry.Uid == petUidOrId or petEntry.Id == petUidOrId then
+				return petEntry
+			end
+		end
+		return nil
+	end
+
+	local function syncEquippedPetAttributes(player, owned, equippedUids)
+		local validUids = {}
+		local firstEntry = nil
+		local maxSlots = getMaxEquippedPetSlots(player)
+
+		for _, uid in ipairs(equippedUids) do
+			if #validUids >= maxSlots then break end
+			local petEntry = findOwnedPetByUidOrId(owned, uid)
+			if petEntry then
+				table.insert(validUids, petEntry.Uid)
+				firstEntry = firstEntry or petEntry
+			end
+		end
+
+		player:SetAttribute("EquippedPets_JSON", HttpService:JSONEncode(validUids))
+		if firstEntry then
+			player:SetAttribute("EquippedPet", firstEntry.Id)
+			player:SetAttribute("EquippedPetUid", firstEntry.Uid)
+			player:SetAttribute("EquippedPetLevel", GameConfig.NormalizePetLevel and GameConfig.NormalizePetLevel(firstEntry.Level) or firstEntry.Level or 1)
+		else
+			player:SetAttribute("EquippedPet", "")
+			player:SetAttribute("EquippedPetUid", "")
+			player:SetAttribute("EquippedPetLevel", 1)
+		end
 	end
 
 	-- 1. 抽卡请求 (使用 RemoteFunction，因为需要向客户端返回抽到了什么)
@@ -189,28 +309,37 @@ function NetworkManager.Start()
 	equipPetEvent.Name = "EquipPet"
 	
 	equipPetEvent.OnServerEvent:Connect(function(player, petUidOrId)
-		-- 如果传过来的是空字符串，说明玩家点击了卸下宠物
-		if petUidOrId == "" then
-			player:SetAttribute("EquippedPet", "")
-			player:SetAttribute("EquippedPetUid", "")
-			player:SetAttribute("EquippedPetLevel", 1)
-			return
-		end
-
 		if type(petUidOrId) ~= "string" then
 			return
 		end
 
 		local owned = decodeOwnedPets(player)
-		-- 优先按唯一实例 ID 装备；兼容旧客户端传 petId 时选择第一只同 ID 宠物。
-		for _, petEntry in ipairs(owned) do
-			if petEntry.Uid == petUidOrId or petEntry.Id == petUidOrId then
-				player:SetAttribute("EquippedPet", petEntry.Id)
-				player:SetAttribute("EquippedPetUid", petEntry.Uid)
-				player:SetAttribute("EquippedPetLevel", GameConfig.NormalizePetLevel and GameConfig.NormalizePetLevel(petEntry.Level) or petEntry.Level or 1)
+
+		if petUidOrId == "" then
+			syncEquippedPetAttributes(player, owned, {})
+			return
+		end
+
+		local petEntry = findOwnedPetByUidOrId(owned, petUidOrId)
+		if not petEntry then
+			return
+		end
+
+		local equippedUids = decodeEquippedPetUids(player)
+		for index, uid in ipairs(equippedUids) do
+			if uid == petEntry.Uid then
+				table.remove(equippedUids, index)
+				syncEquippedPetAttributes(player, owned, equippedUids)
 				return
 			end
 		end
+
+		if #equippedUids >= getMaxEquippedPetSlots(player) then
+			return
+		end
+
+		table.insert(equippedUids, petEntry.Uid)
+		syncEquippedPetAttributes(player, owned, equippedUids)
 	end)
 
 	-- 2.5 删除宠物请求：只能删除玩家自己背包里存在的宠物实例。
@@ -238,20 +367,14 @@ function NetworkManager.Start()
 		end
 
 		player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
-
-		-- 如果删除的是当前装备宠物，清空装备状态，避免后续战斗引用不存在的宠物实例。
-		-- 新存档按 Uid 精确判断；只有旧存档没有 EquippedPetUid 时才按宠物 Id 兼容。
-		local equippedUid = player:GetAttribute("EquippedPetUid") or ""
-		local removedEquippedPet = equippedUid ~= "" and equippedUid == removedEntry.Uid
-		if not removedEquippedPet and equippedUid == "" then
-			removedEquippedPet = player:GetAttribute("EquippedPet") == removedEntry.Id
+		local equippedUids = decodeEquippedPetUids(player)
+		local filteredEquippedUids = {}
+		for _, uid in ipairs(equippedUids) do
+			if uid ~= removedEntry.Uid then
+				table.insert(filteredEquippedUids, uid)
+			end
 		end
-
-		if removedEquippedPet then
-			player:SetAttribute("EquippedPet", "")
-			player:SetAttribute("EquippedPetUid", "")
-			player:SetAttribute("EquippedPetLevel", 1)
-		end
+		syncEquippedPetAttributes(player, owned, filteredEquippedUids)
 	end)
 
     -- 注册并监听第二关引导标记的写入请求

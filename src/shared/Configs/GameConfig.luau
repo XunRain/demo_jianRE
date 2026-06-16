@@ -330,53 +330,116 @@ local GameConfig = {
 
     -- 8. 局外天赋商店配置
 	TALENTS = {
-		Talent_HP = {
-			Name = "HP Boost",
-			BaseCost = 50,
-			CostMulti = 1.5,
-			StatIncrease = 20,
-			CostFormula = function(x)--购买升级每次升级所需钱币
-				return 50* x + 50 * x ^ 2
+		Talent_EXP = {
+			ProductId = 1001,
+			Name = "EXP Boost",
+			StatIncrease = 5,
+			EffectText = "EXP Gain +5%",
+			CostFormula = function(x)
+				return 300 * (1.2 ^ math.max(0, x - 1))
 			end,
 		},
 		Talent_ATK = {
+			ProductId = 1002,
 			Name = "Attack Boost",
-			BaseCost = 100,
-			CostMulti = 2.0,
-			StatIncrease = 5,
+			StatIncrease = 1,
+			EffectText = "Base ATK +1",
 			CostFormula = function(x)
-				return  100* x + 80 * x ^ 2
+				return 500 * (1.2 ^ math.max(0, x - 1))
 			end,
 		},
 		Talent_ASPD = {
+			ProductId = 1003,
 			Name = "Attack Speed Boost",
-			BaseCost = 150,
-			CostMulti = 2.5,
-			StatIncrease = 0.15,
+			StatIncrease = 5,
+			EffectText = "Attack Speed +5%",
 			CostFormula = function(x)
-				return 200 * x + 100 * x ^ 2
+				return 200 * (1.2 ^ math.max(0, x - 1))
 			end,
-		}
+		},
+		Talent_HP = {
+			ProductId = 1004,
+			Name = "HP Boost",
+			StatIncrease = 10,
+			EffectText = "Max HP +10",
+			CostFormula = function(x)
+				return 200 * (1.2 ^ math.max(0, x - 1))
+			end,
+		},
+		Talent_LUCK = {
+			ProductId = 1005,
+			Name = "Luck Boost",
+			StatIncrease = 1,
+			EffectText = "Luck +1%",
+			CostFormula = function(x)
+				return 10000 * (1.2 ^ math.max(0, x - 1))
+			end,
+		},
+		Talent_MOVE = {
+			ProductId = 1006,
+			Name = "Move Speed Boost",
+			StatIncrease = 1,
+			EffectText = "Move Speed +1",
+			CostFormula = function(x)
+				return 5000 * (1.2 ^ math.max(0, x - 1))
+			end,
+		},
+		Talent_PET_SLOT = {
+			ProductId = 1007,
+			Name = "Pet Slot",
+			StatIncrease = 1,
+			EffectText = "Equip Pet Slot +1",
+			MaxLevel = 5,
+			CostList = {
+				50000,
+				5000000,
+				100000000000,
+				1000000000000,
+				10000000000000000,
+			},
+		},
 	},
 
 	-- 商店天赋显示顺序；不要用 pairs 遍历，避免每次刷新时卡片顺序不稳定。
 	SHOP_TALENT_ORDER = {
+		"Talent_EXP",
 		"Talent_ATK",
 		"Talent_ASPD",
 		"Talent_HP",
+		"Talent_LUCK",
+		"Talent_MOVE",
+		"Talent_PET_SLOT",
 	},
 
 	-- 商店卡片复用升级卡美术分类；代码只切换 Studio 里对应的 CategoryLayer_* 图层。
 	SHOP_TALENT_CARD_ART = {
+		Talent_EXP = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "EXP", BadgeSource = "EXP_Gain_Bonus" },
 		Talent_ATK = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack", BadgeSource = "ATK_Bonus" },
 		Talent_ASPD = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Attack Speed", BadgeSource = "ASPD_Bonus" },
 		Talent_HP = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "HP", BadgeSource = "MaxHP_Bonus" },
+		Talent_LUCK = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Luck", BadgeSource = "Rare" },
+		Talent_MOVE = { Category = "PlayerStats", CategoryName = "Player Stats", Badge = "Move", BadgeSource = "LateralSpeed_Bonus" },
+		Talent_PET_SLOT = { Category = "Pet", CategoryName = "Pet", Badge = "Slot", BadgeSource = "PetSlot" },
 	},
 
     -- 9. 宠物与抽卡系统配置
+	REBIRTH = {
+		BaseCost = 20000,
+		CostMultiplier = 2,
+		CoinBonusPerRebirth = 0.5,
+		ResetTalents = {
+			"Talent_EXP",
+			"Talent_ATK",
+			"Talent_ASPD",
+			"Talent_HP",
+			"Talent_LUCK",
+			"Talent_MOVE",
+		},
+	},
+
 	PET_GACHA_COST = 2000,
 	PET_DRAW_TICKET_COST = 1,
-	PET_DRAW_BUY_COST = 10000, -- Hatch_Pet_Egg.Equip_1 购买 1 次抽宠次数需要的金币
+	PET_DRAW_BUY_COST = 10000, -- 原配置10000，Hatch_Pet_Egg.Equip_1 购买 1 次抽宠次数需要的金币
 	PET_LEVEL_MIN = 1, -- 抽到宠物的最低等级；ATK 字段代表 1 级基础攻击力
 	PET_LEVEL_MAX = 100, -- 抽到宠物的最高等级
 	PET_LEVEL_ATK_STEP = 0.5, -- 每提升 1 级，攻击倍率额外增加 0.5；1级=1x，2级=1.5x
@@ -595,6 +658,7 @@ local GameConfig = {
         MagnetRadius_Bonus = "rbxassetid://111822385402148", -- 磁力.png
         EXP_Gain_Bonus = "rbxassetid://131151921339029", -- 经验.png
         MultiShot = "rbxassetid://86684340290458", -- 弹道.png
+        PetSlot = "rbxassetid://85923690685775", -- 宠物.png
         Pet_Count = "rbxassetid://85923690685775", -- 宠物.png
         Pet_ASPD_Bonus = "rbxassetid://85923690685775", -- 宠物.png
         Pet_ATK_Bonus = "rbxassetid://85923690685775", -- 宠物.png
@@ -718,6 +782,30 @@ local GameConfig = {
 }
 
 -- 商品计算价格方法，全局共享
+function GameConfig.GetTalentIdByProductId(productId)
+	local normalizedProductId = tonumber(productId)
+	if not normalizedProductId then
+		return nil
+	end
+
+	for talentId, talent in pairs(GameConfig.TALENTS or {}) do
+		if tonumber(talent.ProductId) == normalizedProductId then
+			return talentId
+		end
+	end
+
+	return nil
+end
+
+function GameConfig.GetTalentByProductId(productId)
+	local talentId = GameConfig.GetTalentIdByProductId(productId)
+	if not talentId then
+		return nil, nil
+	end
+
+	return GameConfig.TALENTS[talentId], talentId
+end
+
 function GameConfig.GetTalentCost(talentId, currentLevel)
 	local talent = GameConfig.TALENTS[talentId]
 	if not talent then return math.huge end -- 如果查不到配置，返回无限大价格防止被刷
@@ -725,6 +813,18 @@ function GameConfig.GetTalentCost(talentId, currentLevel)
 	-- 商店天赋价格公式里的 x 表示“即将购买的目标等级”；当前 0 级时，第一次购买传入 x = 1。
 	local level = math.max(0, math.floor(tonumber(currentLevel) or 0))
 	local x = level + 1
+
+	if talent.MaxLevel and level >= talent.MaxLevel then
+		return math.huge
+	end
+
+	if type(talent.CostList) == "table" then
+		local listedCost = talent.CostList[x]
+		if listedCost then
+			return math.max(1, math.floor(tonumber(listedCost) or math.huge))
+		end
+		return math.huge
+	end
 
 	if type(talent.CostFormula) == "function" then
 		return math.max(1, math.floor(talent.CostFormula(x) + 0.5))
@@ -734,8 +834,32 @@ function GameConfig.GetTalentCost(talentId, currentLevel)
 	return math.max(1, math.floor((talent.BaseCost or 1) * ((talent.CostMulti or 1) ^ level)))
 end
 
+function GameConfig.GetTalentEffectText(talentId)
+	local talent = GameConfig.TALENTS[talentId]
+	if not talent then return "" end
+	if type(talent.EffectText) == "string" then
+		return talent.EffectText
+	end
+	return "Effect: +" .. tostring(talent.StatIncrease or 0)
+end
+
 -- 解析升级经验公式的等级范围。
 -- 支持："1-10"、"11-30"、"31-"。
+function GameConfig.GetRebirthCost(rebirthCount)
+	local config = GameConfig.REBIRTH or {}
+	local count = math.max(0, math.floor(tonumber(rebirthCount) or 0))
+	local baseCost = math.max(1, tonumber(config.BaseCost) or 20000)
+	local multiplier = math.max(1, tonumber(config.CostMultiplier) or 2)
+	return math.max(1, math.floor(baseCost * (multiplier ^ count) + 0.5))
+end
+
+function GameConfig.GetRebirthCoinGainBonus(rebirthCount)
+	local config = GameConfig.REBIRTH or {}
+	local count = math.max(0, math.floor(tonumber(rebirthCount) or 0))
+	local perRebirth = math.max(0, tonumber(config.CoinBonusPerRebirth) or 0.5)
+	return count * perRebirth
+end
+
 local function parseLevelRange(rangeText)
 	if type(rangeText) ~= "string" then return nil, nil end
 
@@ -796,6 +920,7 @@ function GameConfig.FormatNumber(value)
 	end
 
 	local suffixes = {
+		{ Value = 1000000000000000, Suffix = "Qa" },
 		{ Value = 1000000000000, Suffix = "T" },
 		{ Value = 1000000000, Suffix = "B" },
 		{ Value = 1000000, Suffix = "M" },

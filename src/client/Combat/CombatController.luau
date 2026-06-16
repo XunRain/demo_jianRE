@@ -76,7 +76,7 @@ function CombatController.ShootProjectile()
 
 	local actualLifetime = finalRng / currentSpd
 
-	local baseAtk = Controllers.Config.BASE_ATK
+	local baseAtk = player:GetAttribute("ATK") or Controllers.Config.BASE_ATK
 	local atkBonus = player:GetAttribute("ATK_Bonus") or 0
 	local critMultiplier = 1
 	local finalDmg = math.floor(baseAtk * (1 + (atkBonus / 100)) * critMultiplier)

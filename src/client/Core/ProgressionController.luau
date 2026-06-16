@@ -12,7 +12,7 @@ local Controllers -- 全局依赖指针
 -- 计算当前主武器攻击力，用于同步服务端头顶 UI；与 CombatController 的基础攻击公式保持一致。
 local function getCurrentAttackForDisplay()
 	local config = Controllers and Controllers.Config
-	local baseAtk = (config and config.BASE_ATK) or player:GetAttribute("ATK") or 0
+	local baseAtk = player:GetAttribute("ATK") or (config and config.BASE_ATK) or 0
 	local atkBonus = player:GetAttribute("ATK_Bonus") or 0
 	return math.floor(baseAtk * (1 + (atkBonus / 100)))
 end
@@ -80,15 +80,22 @@ function ProgressionController.CalculateStartingStats()
 	
 	-- 从 Config 读取每级的成长加成系数
 	local extraHp = (player:GetAttribute("Talent_HP") or 0) * Config.TALENTS.Talent_HP.StatIncrease
+	local baseAtk = Config.BASE_ATK + ((player:GetAttribute("Talent_ATK") or 0) * Config.TALENTS.Talent_ATK.StatIncrease)
+	local expGainBonus = (player:GetAttribute("Talent_EXP") or 0) * Config.TALENTS.Talent_EXP.StatIncrease
+	local lateralSpeedFlatBonus = (player:GetAttribute("Talent_MOVE") or 0) * Config.TALENTS.Talent_MOVE.StatIncrease
+	local luckBonus = (player:GetAttribute("Talent_LUCK") or 0) * Config.TALENTS.Talent_LUCK.StatIncrease
 	-- 【修改】：局外的天赋也转化为加成百分比 (例如每级天赋加 5% 攻击)
-	local atkBonus = (player:GetAttribute("Talent_ATK") or 0) * Config.TALENTS.Talent_ATK.StatIncrease 
 	local aspdBonus = (player:GetAttribute("Talent_ASPD") or 0) * Config.TALENTS.Talent_ASPD.StatIncrease
 	
 	-- 基础值 + 局外天赋加成 = 本局开局最终属性
 	return {
 		MaxHP = Config.BASE_HP + extraHp,
-		ATK_Bonus = atkBonus,
+		ATK = baseAtk,
+		ATK_Bonus = 0,
 		ASPD_Bonus = aspdBonus, 
+		EXP_Gain_Bonus = expGainBonus,
+		LateralSpeed_FlatBonus = lateralSpeedFlatBonus,
+		Luck_Bonus = luckBonus,
 	}
 end
 

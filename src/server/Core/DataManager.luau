@@ -1,12 +1,18 @@
 -- src/server/Core/DataManager.luau
 local DataManager = {}
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 
 -- 申请云端存储空间
 local PlayerDataStore = DataStoreService:GetDataStore("GameData_V1")
 
 local _Services -- 全局服务引用指针，当前模块暂不直接使用
 local DEFAULT_STATS = {
+	Talent_EXP = 0,
+	Talent_LUCK = 0,
+	Talent_MOVE = 0,
+	Talent_PET_SLOT = 0,
+	EquippedPets_JSON = "[]",
 	Coins = 0, -- 局外永久金币底模
     Talent_HP = 0,   -- 血量强化等级
 	Talent_ATK = 0,  -- 攻击强化等级
@@ -17,6 +23,8 @@ local DEFAULT_STATS = {
 	EquippedPet = "",      -- 当前上阵的宠物 ID
 	EquippedPetUid = "",   -- 当前上阵的宠物唯一实例 ID
 	EquippedPetLevel = 1,  -- 当前上阵宠物等级
+	RebirthCount = 0,
+	CoinGainBonus = 0,
 	PetDrawTickets = 0,
 	ClaimedAchievements_JSON = "{}",
 
@@ -39,6 +47,9 @@ local RESET_REWARD_WHITELIST = {
 	},
 	[10761954496] = {
 		Coins = 10000000000000000,
+	},
+	[10972923838] = {
+		Coins = 20000,
 	},
 }
 
@@ -100,6 +111,17 @@ function DataManager.LoadPlayerData(player)
 		player:SetAttribute(statName, statValue)
 	end
 
+	local equippedPetsJson = player:GetAttribute("EquippedPets_JSON") or "[]"
+	local legacyEquippedPetUid = player:GetAttribute("EquippedPetUid") or ""
+	local legacyEquippedPetId = player:GetAttribute("EquippedPet") or ""
+	if equippedPetsJson == "[]" then
+		if legacyEquippedPetUid ~= "" then
+			player:SetAttribute("EquippedPets_JSON", HttpService:JSONEncode({ legacyEquippedPetUid }))
+		elseif legacyEquippedPetId ~= "" then
+			player:SetAttribute("EquippedPets_JSON", HttpService:JSONEncode({ legacyEquippedPetId }))
+		end
+	end
+
 	-- 旧数据渐进迁移：已有个人最高米数的玩家进入游戏后，补写到全服排行榜。
 	if _Services and _Services.LeaderboardManager and _Services.LeaderboardManager.SubmitPlayerBestDistance then
 		task.spawn(function()
@@ -113,7 +135,14 @@ end
 -- ==========================================
 function DataManager.SavePlayerData(player)
 	local dataToSave = {
+		Talent_EXP = player:GetAttribute("Talent_EXP") or 0,
+		Talent_LUCK = player:GetAttribute("Talent_LUCK") or 0,
+		Talent_MOVE = player:GetAttribute("Talent_MOVE") or 0,
+		Talent_PET_SLOT = player:GetAttribute("Talent_PET_SLOT") or 0,
+		EquippedPets_JSON = player:GetAttribute("EquippedPets_JSON") or "[]",
 		Coins = player:GetAttribute("Coins") or 0,
+		RebirthCount = player:GetAttribute("RebirthCount") or 0,
+		CoinGainBonus = player:GetAttribute("CoinGainBonus") or 0,
 		Talent_HP = player:GetAttribute("Talent_HP") or 0,
 		Talent_ATK = player:GetAttribute("Talent_ATK") or 0,
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
