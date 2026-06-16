@@ -24,6 +24,9 @@ local GameConfig = {
     CAMERA_OFFSET = Vector3.new(0, 28, 40),
     -- 相机视线：让相机视线看向玩家前方更远的地方，给上方留出足够的视野看清前方的门和怪
     CAMERA_LOOK_OFFSET = Vector3.new(0, 7, -4),
+    LOBBY_CAMERA_ZOOM_ENABLED = true,
+    LOBBY_CAMERA_MIN_ZOOM_DISTANCE = 1,
+    LOBBY_CAMERA_MAX_ZOOM_DISTANCE = 35,
 
     -- 3. 地图与跑道生成配置
     TRACK_LENGTH = 360,       -- 单块跑道长度
@@ -96,6 +99,50 @@ local GameConfig = {
         SelfRankScanLimit = 200,
         MissingWarnDelay = 10,
     },
+
+	MONETIZATION = {
+		Revive = {
+			ProductId = 3604948644,
+			PriceRobux = 19,
+			OfferSeconds = 8,
+			ReviveHPPercent = 1,
+			InvulnerabilitySeconds = 2,
+			RespawnBackOffset = 8,
+			Unlimited = true,
+		},
+		InstantCoins = {
+			Enabled = true,
+			MinimumBasisCoins = 10000,
+			Tiers = {
+				{
+					Key = "Low",
+					UiName = "Instant-1",
+					ProductId = 3604956253,
+					Multiplier = 1,
+				},
+				{
+					Key = "Medium",
+					UiName = "Instant-2",
+					ProductId = 3604956282,
+					Multiplier = 50,
+				},
+				{
+					Key = "High",
+					UiName = "Instant-3",
+					ProductId = 3604956322,
+					Multiplier = 500,
+				},
+			},
+		},
+		StarterPack = {
+			ProductId = 0,
+			RewardCoins = 5000,
+			RewardPetRarity = "Rare",
+			RewardPetLevel = 50,
+			RewardRebirthCount = 1,
+			OneTime = true,
+		},
+	},
 
 	ACHIEVEMENTS = {
 		{
@@ -174,7 +221,7 @@ local GameConfig = {
     STAGES = {
         [1] = {
             Length = 1000,
-            GateInterval = 150,
+            GateInterval = 300,
             MobInterval = 100,
             MobsPerGroup = {2, 3},
             EliteCount = 1,
@@ -196,7 +243,7 @@ local GameConfig = {
         },
         [2] = {
             Length = 1000,
-            GateInterval = 120,
+            GateInterval = 300,
             MobInterval = 80,
             MobsPerGroup = {3, 4},
             EliteCount = 2,
@@ -218,7 +265,7 @@ local GameConfig = {
         },
         [3] = {
             Length = 1000,
-            GateInterval = 100,
+            GateInterval = 300,
             MobInterval = 70,
             MobsPerGroup = {4, 5},
             EliteCount = 2,
@@ -239,7 +286,7 @@ local GameConfig = {
         },
         [4] = {
             Length = 1000,
-            GateInterval = 100,
+            GateInterval = 300,
             MobInterval = 60,
             MobsPerGroup = {4, 5},
             EliteCount = 3,
@@ -260,7 +307,7 @@ local GameConfig = {
         },
         [5] = {
             Length = 1000,
-            GateInterval = 90,
+            GateInterval = 300,
             MobInterval = 50,
             MobsPerGroup = {4, 5},
             EliteCount = 3,

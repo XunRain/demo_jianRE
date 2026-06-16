@@ -12,6 +12,22 @@ function NetworkManager.Init(deps)
 	_Services = deps
 end
 
+local function scheduleSave(player, delaySeconds)
+	if not player or not _Services or not _Services.DataManager then
+		return
+	end
+
+	if _Services.DataManager.ScheduleSavePlayerData then
+		_Services.DataManager.ScheduleSavePlayerData(player, delaySeconds)
+	elseif _Services.DataManager.SavePlayerData then
+		task.delay(math.max(0, tonumber(delaySeconds) or 5), function()
+			if player.Parent then
+				_Services.DataManager.SavePlayerData(player)
+			end
+		end)
+	end
+end
+
 function NetworkManager.Start()
 	-- 1. 自动化建立前后端通信文件夹
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -32,6 +48,11 @@ function NetworkManager.Start()
 	-- 网络监听协议族
 	-- 协议 A：处理客户端发来的拾取金币请求
 	addCoinEvent.OnServerEvent:Connect(function(player, amount)
+		if player:GetAttribute("RunInCombat") ~= true then
+			warn("[NetworkManager] Blocked AddCoin outside combat from", player.Name)
+			return
+		end
+
 		-- 安全网闸：过滤各种非法数值，防止作弊刷钱
 		if type(amount) ~= "number" or amount <= 0 or amount > 500 then 
 			warn("⚠️ 拦截到来自玩家 " .. player.Name .. " 的异常加钱请求！")
@@ -40,9 +61,8 @@ function NetworkManager.Start()
 		
 		-- 验证通过，允许增值
 		local currentCoins = player:GetAttribute("Coins") or 0
-		local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
-		local finalAmount = math.max(1, math.floor(amount * (1 + coinGainBonus) + 0.5))
-		player:SetAttribute("Coins", currentCoins + finalAmount)
+		player:SetAttribute("Coins", currentCoins + math.max(1, math.floor(amount + 0.5)))
+		scheduleSave(player, 30)
 	end)
 
 
@@ -74,6 +94,7 @@ function NetworkManager.Start()
 		if cost ~= math.huge and currentCoins >= cost then
 			player:SetAttribute("Coins", currentCoins - cost)
 			player:SetAttribute(talentId, currentLevel + 1)
+			scheduleSave(player, 3)
 			print(string.format("%s 成功购买 %s Lv.%d (花费: %d)", player.Name, talentConfig.Name, currentLevel + 1, cost))
 		end
 	end)
@@ -114,6 +135,7 @@ function NetworkManager.Start()
 		end
 		player:SetAttribute("RebirthCount", nextRebirthCount)
 		player:SetAttribute("CoinGainBonus", nextCoinGainBonus)
+		scheduleSave(player, 1)
 
 		return {
 			Success = true,
@@ -269,6 +291,7 @@ function NetworkManager.Start()
 		local petInstance = createPetInstance(player, resultId)
 		table.insert(owned, petInstance)
 		player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
+		scheduleSave(player, 1)
 
 		print(string.format("%s 抽中了宠物: %s Lv.%d", player.Name, resultId, petInstance.Level))
 		return petInstance -- 将抽奖结果返回给客户端用于展示特效
@@ -295,6 +318,7 @@ function NetworkManager.Start()
 		local newTickets = tickets + 1
 		player:SetAttribute("Coins", currentCoins - cost)
 		player:SetAttribute("PetDrawTickets", newTickets)
+		scheduleSave(player, 1)
 
 		return {
 			Success = true,
@@ -317,6 +341,7 @@ function NetworkManager.Start()
 
 		if petUidOrId == "" then
 			syncEquippedPetAttributes(player, owned, {})
+			scheduleSave(player, 3)
 			return
 		end
 
@@ -330,6 +355,7 @@ function NetworkManager.Start()
 			if uid == petEntry.Uid then
 				table.remove(equippedUids, index)
 				syncEquippedPetAttributes(player, owned, equippedUids)
+				scheduleSave(player, 3)
 				return
 			end
 		end
@@ -340,6 +366,7 @@ function NetworkManager.Start()
 
 		table.insert(equippedUids, petEntry.Uid)
 		syncEquippedPetAttributes(player, owned, equippedUids)
+		scheduleSave(player, 3)
 	end)
 
 	-- 2.5 删除宠物请求：只能删除玩家自己背包里存在的宠物实例。
@@ -375,6 +402,7 @@ function NetworkManager.Start()
 			end
 		end
 		syncEquippedPetAttributes(player, owned, filteredEquippedUids)
+		scheduleSave(player, 3)
 	end)
 
     -- 注册并监听第二关引导标记的写入请求
@@ -384,6 +412,7 @@ function NetworkManager.Start()
 	markGuideEvent.OnServerEvent:Connect(function(player)
 		-- 在服务端写下标记，Roblox 底层会自动将这个 Attribute 同步回客户端
 		player:SetAttribute("HasSeenStage2Guide", true)
+		scheduleSave(player, 3)
 		print(player.Name .. " 已触发过第二关引导，打上永久防打扰思想钢印。")
 	end)
 end

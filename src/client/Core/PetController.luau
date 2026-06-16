@@ -14,6 +14,10 @@ local Controllers
 
 local currentPetModels = {}
 
+local function isCombatPaused()
+	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+end
+
 -- 获取 Part 或 Model 中第一个可用于定位的 BasePart。
 local function getFirstBasePart(instance)
 	if not instance then return nil end
@@ -338,7 +342,7 @@ function PetController.Start()
 	-- 战斗循环：按宠物攻速与分身数量依次触发开火，并对多宠物发射做轻微错峰。
 	task.spawn(function()
 		while true do
-			if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") then
+			if Controllers.Game.IsCombatActive and not isCombatPaused() then
 				local character = player.Character
 				if not character then task.wait(1); continue end
 
@@ -365,7 +369,7 @@ function PetController.Start()
 					if not Controllers.Game.IsCombatActive then break end
 
 					for petIndex, pModel in ipairs(activePets) do
-						if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then break end
+						if not Controllers.Game.IsCombatActive or isCombatPaused() then break end
 						local petId = pModel:GetAttribute("PetId")
 						local petConfig = petId and Controllers.Config.PETS and Controllers.Config.PETS[petId]
 						local petCastCount = petConfig and (petConfig.CastCount or 1) or 0

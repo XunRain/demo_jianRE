@@ -11,6 +11,7 @@ local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
+local MarketplaceService = game:GetService("MarketplaceService")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 
@@ -239,6 +240,7 @@ function UIController.Start()
 		local exp = player:GetAttribute("EXP") or 0
 		local requiredExp = player:GetAttribute("RequiredEXP") or Controllers.Config.GetRequiredExp(lvl)
 		local inCombat = player:GetAttribute("InCombat") == true
+		local isCombatPaused = player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
       	local currentStage = player:GetAttribute("CurrentStage") or 1
 		local formatNumber = Controllers.Config.FormatNumber
 
@@ -257,14 +259,14 @@ function UIController.Start()
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
 				applyExitButtonHoverScale(exitButton)
-				exitButton.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
+				exitButton.Visible = inCombat and not isCombatPaused
 			end
 
 			-- 手机端滑动控制提示层：UI 由 Studio 设计，代码只负责按设备和战斗状态控制显隐。
 			local mobileControls = mainUI:FindFirstChild("MobileControls", true)
 			if mobileControls and mobileControls:IsA("GuiObject") then
 				local useNativeJoystick = Controllers.Config.MOBILE_USE_NATIVE_JOYSTICK ~= false
-				mobileControls.Visible = (not useNativeJoystick) and isMobileOnlyDevice() and inCombat and not player:GetAttribute("IsLevelingUp")
+				mobileControls.Visible = (not useNativeJoystick) and isMobileOnlyDevice() and inCombat and not isCombatPaused
 			end
 
 			-- 大厅底部按钮整体容器：正式开始游戏后隐藏 MainUI_1，回大厅后显示。
@@ -289,7 +291,7 @@ function UIController.Start()
 
 			local stageHud = findStageHud(mainUI)
 			if stageHud then
-				local showStage = inCombat and not player:GetAttribute("IsLevelingUp")
+				local showStage = inCombat and not isCombatPaused
 				stageHud.Visible = showStage
 
 				local stageText = nil
@@ -308,7 +310,7 @@ function UIController.Start()
 			local combatHub = mainUI:FindFirstChild("CombatHub")
 			if combatHub and combatHub:IsA("Frame") then
 				-- 只有进入战斗且不在升级选择时，显示底部状态条
-				combatHub.Visible = inCombat and not player:GetAttribute("IsLevelingUp")
+				combatHub.Visible = inCombat and not isCombatPaused
 				
 				if combatHub.Visible then
 					-- 血条比例并更新 Size
@@ -715,6 +717,7 @@ function UIController.Start()
 			if card and card:IsA("GuiButton") then
 				card.Activated:Connect(function()
 					if not player:GetAttribute("IsLevelingUp") then return end
+					if player:GetAttribute("IsRevivePending") then return end
 					
 					local attr = card:GetAttribute("BuffAttr")
 					local amount = card:GetAttribute("BuffAmount")
@@ -807,8 +810,9 @@ function UIController.Start()
 			local isLeveling = player:GetAttribute("IsLevelingUp")
 			
 			if isLeveling then
-				levelUpPanel.Visible = true
-				if Controllers.Sound then
+				local shouldShowLevelUp = player:GetAttribute("IsRevivePending") ~= true
+				levelUpPanel.Visible = shouldShowLevelUp
+				if shouldShowLevelUp and Controllers.Sound then
 					Controllers.Sound.PlayUpgrade()
 				end
 				
@@ -993,6 +997,14 @@ function UIController.Start()
 			else
 				levelUpPanel.Visible = false
 				player:SetAttribute("LevelUpRewardMode", "Normal")
+			end
+		end)
+
+		player:GetAttributeChangedSignal("IsRevivePending"):Connect(function()
+			if player:GetAttribute("IsRevivePending") then
+				levelUpPanel.Visible = false
+			elseif player:GetAttribute("IsLevelingUp") then
+				levelUpPanel.Visible = true
 			end
 		end)
 	end
@@ -3059,6 +3071,357 @@ function UIController.Start()
 		end
 	end
 
+	local function setupInstantCoinsUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+
+		local instantCoins = mainUI:FindFirstChild("InstantCoins")
+		if not instantCoins or not instantCoins:IsA("GuiObject") then
+			warn("[UIController] Instant coin UI missing: MainUI/InstantCoins.")
+			return
+		end
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local getInstantCoinProducts = remotes and remotes:WaitForChild("GetInstantCoinProducts", 5)
+		if not getInstantCoinProducts or not getInstantCoinProducts:IsA("RemoteFunction") then
+			warn("[UIController] GetInstantCoinProducts RemoteFunction is not ready.")
+			return
+		end
+
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+		local productsByUiName = {}
+		local promptInProgress = false
+
+		local function applyHover(guiObject)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute("InstantCoinHoverBound") then return end
+			guiObject:SetAttribute("InstantCoinHoverBound", true)
+
+			local hoverScale = guiObject:FindFirstChild("InstantCoinHoverScale")
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = "InstantCoinHoverScale"
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local targetScale = petBagConfig.OpenButtonHoverScale or 1.06
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function play(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				play(targetScale)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				play(normalScale)
+			end)
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					play(normalScale)
+				end)
+			end
+		end
+
+		local function setInstantCoinsVisible()
+			instantCoins.Visible = player:GetAttribute("InCombat") ~= true
+		end
+
+		local function refreshInstantCoinProducts()
+			local ok, snapshot = pcall(function()
+				return getInstantCoinProducts:InvokeServer()
+			end)
+			if not ok or type(snapshot) ~= "table" or type(snapshot.Products) ~= "table" then
+				warn("[UIController] Failed to load instant coin products:", snapshot)
+				return
+			end
+
+			productsByUiName = {}
+			for _, product in ipairs(snapshot.Products) do
+				if type(product) == "table" and type(product.UiName) == "string" then
+					productsByUiName[product.UiName] = product
+				end
+			end
+
+			local formatNumber = Controllers.Config.FormatNumber or tostring
+			for index = 1, 3 do
+				local item = instantCoins:FindFirstChild("Instant-" .. tostring(index))
+				if item and item:IsA("GuiObject") then
+					local product = productsByUiName[item.Name]
+					local buyButton = item:FindFirstChild("Buy", true)
+					local priceText = findTextNode(item, { "Price" })
+					local amount = product and math.max(0, math.floor(tonumber(product.Amount) or 0)) or 0
+					local productId = product and math.floor(tonumber(product.ProductId) or 0) or 0
+
+					item:SetAttribute("ProductId", productId)
+					item:SetAttribute("CoinAmount", amount)
+					if buyButton then
+						buyButton:SetAttribute("ProductId", productId)
+						buyButton:SetAttribute("CoinAmount", amount)
+					end
+					if priceText then
+						priceText.Text = "+$" .. formatNumber(amount)
+					end
+					if buyButton and buyButton:IsA("GuiButton") then
+						buyButton.AutoButtonColor = productId > 0
+						applyHover(buyButton)
+					end
+				end
+			end
+		end
+
+		for index = 1, 3 do
+			local item = instantCoins:FindFirstChild("Instant-" .. tostring(index))
+			local buyButton = item and item:FindFirstChild("Buy", true)
+			if buyButton and buyButton:IsA("GuiButton") then
+				buyButton.Activated:Connect(function()
+					if promptInProgress then return end
+
+					local productId = math.floor(tonumber(buyButton:GetAttribute("ProductId")) or 0)
+					if productId <= 0 then
+						warn("[UIController] Instant coin ProductId is not configured for", item and item.Name or "unknown")
+						return
+					end
+
+					promptInProgress = true
+					MarketplaceService:PromptProductPurchase(player, productId)
+					task.delay(1, function()
+						promptInProgress = false
+					end)
+				end)
+			end
+		end
+
+		MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId)
+			if userId ~= player.UserId then return end
+			promptInProgress = false
+			task.delay(0.5, refreshInstantCoinProducts)
+		end)
+
+		setInstantCoinsVisible()
+		refreshInstantCoinProducts()
+
+		player:GetAttributeChangedSignal("InCombat"):Connect(setInstantCoinsVisible)
+		for _, attrName in ipairs({ "Coins", "MaxCoinsHeld" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				refreshInstantCoinProducts()
+			end)
+		end
+	end
+
+	local function setupStarterPackUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+
+		local buttonRoot = mainUI:FindFirstChild("MainUI_2")
+		local openButton = buttonRoot and buttonRoot:FindFirstChild("BtnStarterPack")
+		local starterPackPanel = mainUI:FindFirstChild("StarterPackPanel")
+		if not openButton or not openButton:IsA("GuiButton") or not starterPackPanel or not starterPackPanel:IsA("GuiObject") then
+			warn("[UIController] Starter Pack UI missing: MainUI/MainUI_2/BtnStarterPack or MainUI/StarterPackPanel.")
+			return
+		end
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local getStarterPackStatus = remotes and remotes:WaitForChild("GetStarterPackStatus", 5)
+		if not getStarterPackStatus or not getStarterPackStatus:IsA("RemoteFunction") then
+			warn("[UIController] GetStarterPackStatus RemoteFunction is not ready.")
+			return
+		end
+
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+		local promptInProgress = false
+		local lastStatus = nil
+
+		local function applyHover(guiObject, attributeName, scaleName, targetScale)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute(attributeName) then return end
+			guiObject:SetAttribute(attributeName, true)
+
+			local hoverScale = guiObject:FindFirstChild(scaleName)
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = scaleName
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function play(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				play(targetScale or 1.06)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				play(normalScale)
+			end)
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					play(normalScale)
+				end)
+			end
+		end
+
+		local function setTextIn(root, names, text)
+			if not root then return end
+			local label = findTextNode(root, names)
+			if label then
+				label.Text = text
+			end
+		end
+
+		local function setButtonText(button, text)
+			if not button then return end
+			if button:IsA("TextButton") then
+				button.Text = text
+			end
+			setTextIn(button, { "TextLabel", "Label", "TitleText" }, text)
+		end
+
+		local function setRewardText(containerName, title, detail)
+			local content = starterPackPanel:FindFirstChild("Content")
+			local container = content and content:FindFirstChild(containerName)
+			if not container then
+				container = starterPackPanel:FindFirstChild(containerName, true)
+			end
+			if not container then return end
+
+			setTextIn(container, { "TitleText" }, title)
+			setTextIn(container, { "DetailText" }, detail)
+		end
+
+		local function setStarterPackVisible()
+			openButton.Visible = player:GetAttribute("InCombat") ~= true
+			if player:GetAttribute("InCombat") == true then
+				starterPackPanel.Visible = false
+			end
+		end
+
+		local buyButton = starterPackPanel:FindFirstChild("BtnBuy", true)
+		local closeButton = starterPackPanel:FindFirstChild("BtnClose", true)
+		local ownedText = findTextNode(starterPackPanel, { "OwnedText" })
+
+		local function refreshStarterPackStatus()
+			local success, status = pcall(function()
+				return getStarterPackStatus:InvokeServer()
+			end)
+			if not success or type(status) ~= "table" then
+				warn("[UIController] Failed to load starter pack status:", status)
+				return
+			end
+
+			lastStatus = status
+			local formatNumber = Controllers.Config.FormatNumber or tostring
+			local productId = math.max(0, math.floor(tonumber(status.ProductId) or 0))
+			local dataLoaded = status.DataLoaded == true
+			local purchased = status.Purchased == true
+			local canBuy = dataLoaded and productId > 0 and not purchased
+			local rewardCoins = math.max(0, math.floor(tonumber(status.RewardCoins) or 5000))
+			local rewardPetRarity = tostring(status.RewardPetRarity or "Rare")
+			local rewardPetLevel = math.max(1, math.floor(tonumber(status.RewardPetLevel) or 50))
+			local rewardRebirthCount = math.max(0, math.floor(tonumber(status.RewardRebirthCount) or 1))
+
+			setTextIn(starterPackPanel:FindFirstChild("Header") or starterPackPanel, { "TitleText" }, "Starter Pack")
+			setRewardText("PetReward", "Rare Pet", rewardPetRarity .. " Pet Lv." .. tostring(rewardPetLevel) .. " x1")
+			setRewardText("CoinReward", "Coins", "Coins x" .. formatNumber(rewardCoins))
+			setRewardText("RebirthReward", "Rebirth", "Rebirth x" .. tostring(rewardRebirthCount))
+
+			if ownedText then
+				ownedText.Text = purchased and "Already purchased." or ""
+				ownedText.Visible = purchased
+			end
+
+			if buyButton and buyButton:IsA("GuiButton") then
+				buyButton:SetAttribute("ProductId", productId)
+				buyButton:SetAttribute("StarterPackCanBuy", canBuy)
+				buyButton.AutoButtonColor = canBuy
+				local buttonText = "Loading..."
+				if dataLoaded then
+					buttonText = purchased and "Purchased" or (productId > 0 and "Buy" or "Unavailable")
+				end
+				setButtonText(buyButton, buttonText)
+			end
+		end
+
+		local function setStarterPackOpen(isOpen)
+			starterPackPanel.Visible = isOpen
+			if isOpen then
+				refreshStarterPackStatus()
+			end
+		end
+
+		starterPackPanel.Visible = false
+		setStarterPackVisible()
+		refreshStarterPackStatus()
+
+		applyHover(openButton, "StarterPackOpenHoverBound", "StarterPackOpenHoverScale", petBagConfig.OpenButtonHoverScale or 1.06)
+		openButton.Activated:Connect(function()
+			setStarterPackOpen(true)
+		end)
+
+		if closeButton and closeButton:IsA("GuiButton") then
+			applyHover(closeButton, "StarterPackCloseHoverBound", "StarterPackCloseHoverScale", petBagConfig.CloseButtonHoverScale or 1.06)
+			closeButton.Activated:Connect(function()
+				setStarterPackOpen(false)
+			end)
+		end
+
+		if buyButton and buyButton:IsA("GuiButton") then
+			applyHover(buyButton, "StarterPackBuyHoverBound", "StarterPackBuyHoverScale", 1.06)
+			buyButton.Activated:Connect(function()
+				if promptInProgress then return end
+				if not lastStatus then
+					refreshStarterPackStatus()
+				end
+
+				local productId = math.max(0, math.floor(tonumber(buyButton:GetAttribute("ProductId")) or 0))
+				if buyButton:GetAttribute("StarterPackCanBuy") ~= true or productId <= 0 then
+					refreshStarterPackStatus()
+					return
+				end
+
+				promptInProgress = true
+				MarketplaceService:PromptProductPurchase(player, productId)
+				task.delay(1, function()
+					promptInProgress = false
+				end)
+			end)
+		end
+
+		MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId)
+			if userId ~= player.UserId then return end
+			promptInProgress = false
+			task.delay(0.6, function()
+				if starterPackPanel.Visible then
+					refreshStarterPackStatus()
+				end
+			end)
+		end)
+
+		player:GetAttributeChangedSignal("InCombat"):Connect(setStarterPackVisible)
+		for _, attrName in ipairs({ "PlayerDataLoaded", "StarterPackPurchased", "Coins", "OwnedPets_JSON", "RebirthCount", "CoinGainBonus" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				if starterPackPanel.Visible then
+					refreshStarterPackStatus()
+				end
+			end)
+		end
+	end
+
 	local function setupPetHatching()
 		local playerGui = player:WaitForChild("PlayerGui")
 		local mainUI = playerGui:WaitForChild("MainUI")
@@ -3521,6 +3884,8 @@ function UIController.Start()
       setupPetBagUI()
       setupAchievementUI()
       setupRebirthUI()
+      setupInstantCoinsUI()
+      setupStarterPackUI()
       setupPetHatching()
 	end)
 

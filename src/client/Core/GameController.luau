@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera 
 
@@ -19,6 +20,16 @@ local lightingTween = nil
 local SHOP_GUIDE_ARROW_DEATHS = 2
 local DEBUG_COMBAT_FLOW = true
 local lastDebugAtByKey = {}
+local revivePending = false
+local reviveToken = 0
+local pendingReviveCFrame = nil
+local currentReviveProductId = 0
+local revivePromptInProgress = false
+local revivePurchaseAwaitingReceipt = false
+local reviveOfferDeadline = 0
+local reviveGrantedConnected = false
+local defaultCameraMinZoomDistance = nil
+local defaultCameraMaxZoomDistance = nil
 
 local function debugCombat(...)
 	if DEBUG_COMBAT_FLOW then
@@ -332,16 +343,397 @@ local function safePlaySound(actionName)
 end
 
 -- 模块生命周期启动入口：绑定事件及全局生命周期监听
+local function captureDefaultCameraZoomDistance()
+	if defaultCameraMinZoomDistance == nil then
+		defaultCameraMinZoomDistance = player.CameraMinZoomDistance
+	end
+	if defaultCameraMaxZoomDistance == nil then
+		defaultCameraMaxZoomDistance = player.CameraMaxZoomDistance
+	end
+end
+
+local function applyCameraZoomLimit(inCombat)
+	captureDefaultCameraZoomDistance()
+
+	local Config = Controllers and Controllers.Config
+	if inCombat or (Config and Config.LOBBY_CAMERA_ZOOM_ENABLED == false) then
+		if defaultCameraMinZoomDistance ~= nil then
+			player.CameraMinZoomDistance = defaultCameraMinZoomDistance
+		end
+		if defaultCameraMaxZoomDistance ~= nil then
+			player.CameraMaxZoomDistance = defaultCameraMaxZoomDistance
+		end
+		return
+	end
+
+	local minZoom = tonumber(Config and Config.LOBBY_CAMERA_MIN_ZOOM_DISTANCE) or defaultCameraMinZoomDistance or 0.5
+	local maxZoom = tonumber(Config and Config.LOBBY_CAMERA_MAX_ZOOM_DISTANCE) or defaultCameraMaxZoomDistance or 42
+	minZoom = math.max(0.5, minZoom)
+	maxZoom = math.max(minZoom, maxZoom)
+
+	if player.CameraMaxZoomDistance < minZoom then
+		player.CameraMaxZoomDistance = minZoom
+	end
+	player.CameraMinZoomDistance = minZoom
+	player.CameraMaxZoomDistance = maxZoom
+end
+
+local function getReviveConfig()
+	local monetization = Controllers and Controllers.Config and Controllers.Config.MONETIZATION
+	return (monetization and monetization.Revive) or {}
+end
+
+local function findTextNode(root, names)
+	if not root then return nil end
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and (node:IsA("TextLabel") or node:IsA("TextButton")) then
+			return node
+		end
+	end
+	return nil
+end
+
+local function findGuiButton(root, names)
+	if not root then return nil end
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and node:IsA("GuiButton") then
+			return node
+		end
+	end
+	return nil
+end
+
+local function setButtonText(button, text)
+	if not button then return end
+	if button:IsA("TextButton") then
+		button.Text = text
+	end
+
+	local label = button:FindFirstChildWhichIsA("TextLabel", true)
+	if label then
+		label.Text = text
+	end
+end
+
+local function getRevivePanel()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
+	local panel = mainUI and mainUI:FindFirstChild("RevivePanel")
+	if panel and panel:IsA("GuiObject") then
+		return panel
+	end
+	return nil
+end
+
+local function setRevivePanelText(panel, name, text)
+	local label = findTextNode(panel, { name })
+	if label then
+		label.Text = text
+	end
+end
+
+local function hideRevivePanel()
+	local panel = getRevivePanel()
+	if panel then
+		panel.Visible = false
+	end
+end
+
+local function cancelReviveOfferOnServer()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local cancelEvent = remotes and remotes:FindFirstChild("CancelReviveOffer")
+	if cancelEvent and cancelEvent:IsA("RemoteEvent") then
+		cancelEvent:FireServer()
+	end
+end
+
+local function requestReviveOfferFromServer()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+	local startReviveOffer = remotes and remotes:WaitForChild("StartReviveOffer", 5)
+	if not startReviveOffer or not startReviveOffer:IsA("RemoteFunction") then
+		return {
+			Success = false,
+			Reason = "RemoteMissing",
+		}
+	end
+
+	local ok, result = pcall(function()
+		return startReviveOffer:InvokeServer()
+	end)
+
+	if ok and type(result) == "table" then
+		return result
+	end
+
+	warn("[GameController][Revive] StartReviveOffer failed:", result)
+	return {
+		Success = false,
+		Reason = "InvokeFailed",
+	}
+end
+
+function GameController.CancelReviveOffer()
+	if not revivePending then return end
+	if revivePromptInProgress or revivePurchaseAwaitingReceipt then return end
+
+	reviveToken += 1
+	revivePending = false
+	pendingReviveCFrame = nil
+	currentReviveProductId = 0
+	revivePromptInProgress = false
+	revivePurchaseAwaitingReceipt = false
+	reviveOfferDeadline = 0
+	player:SetAttribute("IsLevelingUp", false)
+	player:SetAttribute("IsRevivePending", false)
+	hideRevivePanel()
+	cancelReviveOfferOnServer()
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		humanoid.Health = 0
+	end
+end
+
+function GameController.CompletePaidRevive()
+	if not revivePending then return end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
+	local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+	if not character or not humanoid or not rootPart or humanoid.Health <= 0 then
+		warn("[GameController][Revive] Cannot revive because character is no longer available.")
+		GameController.CancelReviveOffer()
+		return
+	end
+
+	local reviveConfig = getReviveConfig()
+	local baseHP = (Controllers.Config and Controllers.Config.BASE_HP) or 100
+	local maxHP = math.max(1, math.floor(tonumber(player:GetAttribute("MaxHP")) or baseHP))
+	local hpPercent = math.clamp(tonumber(reviveConfig.ReviveHPPercent) or 1, 0.01, 1)
+	local revivedHP = math.max(1, math.floor(maxHP * hpPercent + 0.5))
+	local backOffset = tonumber(reviveConfig.RespawnBackOffset) or 8
+	local invulnerableSeconds = tonumber(reviveConfig.InvulnerabilitySeconds) or 2
+	local reviveCFrame = pendingReviveCFrame or rootPart.CFrame
+
+	reviveToken += 1
+	revivePending = false
+	pendingReviveCFrame = nil
+	currentReviveProductId = 0
+	revivePromptInProgress = false
+	revivePurchaseAwaitingReceipt = false
+	reviveOfferDeadline = 0
+	hideRevivePanel()
+
+	player:SetAttribute("IsRevivePending", false)
+	player:SetAttribute("HP", revivedHP)
+	player:SetAttribute("ReviveInvulnerableUntil", os.clock() + invulnerableSeconds)
+
+	humanoid.MaxHealth = maxHP
+	humanoid.Health = revivedHP
+	character:PivotTo(reviveCFrame * CFrame.new(0, 0, backOffset))
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+
+	GameController.IsCombatActive = true
+	player:SetAttribute("InCombat", true)
+	reportRunStats(true)
+	applyLightingMode(true)
+	safePlaySound("PlayBattle")
+end
+
+local function bindRevivePanelButtons(panel)
+	if panel:GetAttribute("RevivePanelButtonsBound") then return end
+	panel:SetAttribute("RevivePanelButtonsBound", true)
+
+	local reviveButton = findGuiButton(panel, { "BtnRevive" })
+	if reviveButton then
+		reviveButton.Activated:Connect(function()
+			if not revivePending then return end
+			if currentReviveProductId <= 0 then
+				warn("[GameController][Revive] Revive Developer ProductId is not configured yet.")
+				return
+			end
+			if revivePromptInProgress then return end
+
+			revivePromptInProgress = true
+			revivePurchaseAwaitingReceipt = false
+			MarketplaceService:PromptProductPurchase(player, currentReviveProductId)
+		end)
+	end
+
+	local skipButton = findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
+	if skipButton then
+		skipButton.Activated:Connect(function()
+			GameController.CancelReviveOffer()
+		end)
+	end
+end
+
+local function showRevivePanel(offerInfo, token)
+	local panel = getRevivePanel()
+	if not panel then
+		warn("[GameController][Revive] MainUI/RevivePanel is missing.")
+		return false
+	end
+
+	bindRevivePanelButtons(panel)
+	currentReviveProductId = math.floor(tonumber(offerInfo.ProductId) or 0)
+
+	local priceRobux = tonumber(offerInfo.PriceRobux) or 19
+	local offerSeconds = math.max(1, tonumber(offerInfo.OfferSeconds) or 8)
+	local reviveButton = findGuiButton(panel, { "BtnRevive" })
+	local skipButton = findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
+	local timerFrame = panel:FindFirstChild("Timer", true)
+
+	setRevivePanelText(panel, "TitleText", "Revive?")
+	setRevivePanelText(panel, "MessageText", "Continue this run from here.")
+	setRevivePanelText(panel, "PriceText", tostring(priceRobux) .. " Robux")
+	if timerFrame and timerFrame:IsA("GuiObject") then
+		timerFrame.Visible = true
+	end
+	if reviveButton then
+		reviveButton.AutoButtonColor = currentReviveProductId > 0
+		setButtonText(reviveButton, currentReviveProductId > 0 and "Revive" or "Unavailable")
+	end
+	if skipButton then
+		setButtonText(skipButton, "Give Up")
+	end
+
+	panel.Visible = true
+
+	local deadline = os.clock() + offerSeconds
+	reviveOfferDeadline = deadline
+	task.spawn(function()
+		while revivePending and reviveToken == token do
+			local secondsLeft = math.max(0, math.ceil(deadline - os.clock()))
+			if secondsLeft <= 0 and (revivePromptInProgress or revivePurchaseAwaitingReceipt) then
+				setRevivePanelText(panel, "TimerText", "Processing...")
+			else
+				setRevivePanelText(panel, "TimerText", tostring(secondsLeft) .. "s")
+			end
+			if secondsLeft <= 0 then
+				if not revivePromptInProgress and not revivePurchaseAwaitingReceipt then
+					break
+				end
+			end
+			task.wait(0.1)
+		end
+
+		if revivePending and reviveToken == token then
+			GameController.CancelReviveOffer()
+		end
+	end)
+
+	return true
+end
+
+function GameController.BeginReviveOffer(deathCFrame)
+	if revivePending then return true end
+	if not GameController.IsCombatActive and player:GetAttribute("InCombat") ~= true then
+		return false
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
+	local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+	if not character or not humanoid or not rootPart or humanoid.Health <= 0 then
+		return false
+	end
+
+	reviveToken += 1
+	local token = reviveToken
+	revivePending = true
+	pendingReviveCFrame = deathCFrame or rootPart.CFrame
+	currentReviveProductId = 0
+	revivePromptInProgress = false
+	revivePurchaseAwaitingReceipt = false
+	reviveOfferDeadline = 0
+
+	player:SetAttribute("IsRevivePending", true)
+	player:SetAttribute("HP", 0)
+	humanoid.Health = math.max(1, humanoid.Health)
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	if Controllers and Controllers.Player and Controllers.Player.SetMoveDirection then
+		Controllers.Player.SetMoveDirection(0)
+	end
+
+	task.spawn(function()
+		local offerInfo = requestReviveOfferFromServer()
+		if not revivePending or reviveToken ~= token then
+			return
+		end
+
+		if offerInfo.Success == false then
+			GameController.CancelReviveOffer()
+			return
+		end
+
+		if offerInfo.GrantNow == true then
+			GameController.CompletePaidRevive()
+			return
+		end
+
+		if not showRevivePanel(offerInfo, token) then
+			GameController.CancelReviveOffer()
+		end
+	end)
+
+	return true
+end
+
+local function setupReviveGrantedListener()
+	if reviveGrantedConnected then return end
+	reviveGrantedConnected = true
+
+	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
+		if userId ~= player.UserId or productId ~= currentReviveProductId then
+			return
+		end
+
+		revivePromptInProgress = false
+		revivePurchaseAwaitingReceipt = wasPurchased == true
+
+		local panel = getRevivePanel()
+		if panel and revivePending then
+			if wasPurchased then
+				setRevivePanelText(panel, "TimerText", "Processing...")
+			elseif reviveOfferDeadline > 0 and os.clock() >= reviveOfferDeadline then
+				GameController.CancelReviveOffer()
+			end
+		end
+	end)
+
+	task.spawn(function()
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+		local reviveGranted = remotes and remotes:WaitForChild("ReviveGranted", 10)
+		if not reviveGranted or not reviveGranted:IsA("RemoteEvent") then
+			warn("[GameController][Revive] ReviveGranted RemoteEvent is not ready.")
+			return
+		end
+
+		reviveGranted.OnClientEvent:Connect(function()
+			GameController.CompletePaidRevive()
+		end)
+	end)
+end
+
 function GameController.Start()
 	-- 初始化挂载大厅交互触发器
 	GameController.SetupStartButton()
 	GameController.SetupNPC()
+	setupReviveGrantedListener()
 	captureLobbyLighting()
 	applyLightingMode(false)
 	safePlaySound("PlayBackground")
+	applyCameraZoomLimit(player:GetAttribute("InCombat") == true)
 	player:GetAttributeChangedSignal("InCombat"):Connect(function()
 		local inCombat = player:GetAttribute("InCombat") == true
 		applyLightingMode(inCombat)
+		applyCameraZoomLimit(inCombat)
 		if inCombat then
 			safePlaySound("PlayBattle")
 		else
@@ -358,6 +750,14 @@ function GameController.Start()
 	
 	-- 统一的角色重生/复活处理核心函数（彻底收拢生命周期，防止属性回厅变负数）
 	local function onCharacterAdded(newCharacter)
+		revivePending = false
+		pendingReviveCFrame = nil
+		currentReviveProductId = 0
+		revivePromptInProgress = false
+		revivePurchaseAwaitingReceipt = false
+		reviveOfferDeadline = 0
+		player:SetAttribute("IsRevivePending", false)
+		hideRevivePanel()
 		GameController.IsCombatActive = false
 		player:SetAttribute("InCombat", false)
 		reportRunStats(false)
@@ -373,6 +773,7 @@ function GameController.Start()
 			camera.CameraType = Enum.CameraType.Custom
 			camera.CameraSubject = humanoid
 			camera.FieldOfView = 70
+			applyCameraZoomLimit(false)
 			
 			-- 监听角色死亡事件，执行核心清场
 			humanoid.Died:Connect(function()
@@ -490,6 +891,7 @@ function GameController.Start()
 						camera.CameraType = Enum.CameraType.Custom
 						camera.CameraSubject = player.Character:FindFirstChild("Humanoid")
 						camera.FieldOfView = 70
+						applyCameraZoomLimit(false)
 					end
 					
 					print("画面定格结束，世界实体已彻底卸载清空。")

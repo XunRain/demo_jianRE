@@ -2,18 +2,27 @@
 local DataManager = {}
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 
 -- 申请云端存储空间
 local PlayerDataStore = DataStoreService:GetDataStore("GameData_V1")
 
 local _Services -- 全局服务引用指针，当前模块暂不直接使用
+local RESET_REWARD_WHITELIST_ENABLED = false -- 是否启用测试白名单功能；启用后 RESET_REWARD_WHITELIST 中的玩家进入游戏会被重置存档并获得奖励
+local SAVE_RETRY_COUNT = 3
+local SAVE_RETRY_DELAY = 1
+local AUTOSAVE_INTERVAL = 120
+local scheduledSaves = {}
+
 local DEFAULT_STATS = {
 	Talent_EXP = 0,
 	Talent_LUCK = 0,
 	Talent_MOVE = 0,
 	Talent_PET_SLOT = 0,
 	EquippedPets_JSON = "[]",
+	MaxCoinsHeld = 0,
 	Coins = 0, -- 局外永久金币底模
+	MaxCoinsHeld = 0,
     Talent_HP = 0,   -- 血量强化等级
 	Talent_ATK = 0,  -- 攻击强化等级
 	Talent_ASPD = 0, -- 攻速强化等级
@@ -25,8 +34,10 @@ local DEFAULT_STATS = {
 	EquippedPetLevel = 1,  -- 当前上阵宠物等级
 	RebirthCount = 0,
 	CoinGainBonus = 0,
+	PaidReviveCredits = 0,
 	PetDrawTickets = 0,
 	ClaimedAchievements_JSON = "{}",
+	StarterPackPurchased = false,
 
     -- 记录玩家是否已经看过第二关的引导
 	HasSeenStage2Guide = false,
@@ -49,7 +60,7 @@ local RESET_REWARD_WHITELIST = {
 		Coins = 10000000000000000,
 	},
 	[10972923838] = {
-		Coins = 20000,
+		Coins = 60000,
 	},
 }
 
@@ -62,6 +73,10 @@ local function buildDefaultPlayerData()
 end
 
 local function buildResetRewardData(userId)
+	if not RESET_REWARD_WHITELIST_ENABLED then
+		return nil
+	end
+
 	local rewardConfig = RESET_REWARD_WHITELIST[userId]
 	if not rewardConfig then
 		return nil
@@ -72,11 +87,46 @@ local function buildResetRewardData(userId)
 	return playerData
 end
 
+local function updateMaxCoinsHeld(player)
+	local coins = math.max(0, math.floor(tonumber(player:GetAttribute("Coins")) or 0))
+	local maxCoinsHeld = math.max(0, math.floor(tonumber(player:GetAttribute("MaxCoinsHeld")) or 0))
+	if coins > maxCoinsHeld then
+		player:SetAttribute("MaxCoinsHeld", coins)
+	end
+end
+
+local function bindMaxCoinsHeldTracker(player)
+	if player:GetAttribute("MaxCoinsHeldTrackerBound") == true then
+		return
+	end
+
+	player:SetAttribute("MaxCoinsHeldTrackerBound", true)
+	updateMaxCoinsHeld(player)
+	player:GetAttributeChangedSignal("Coins"):Connect(function()
+		local before = math.max(0, math.floor(tonumber(player:GetAttribute("MaxCoinsHeld")) or 0))
+		updateMaxCoinsHeld(player)
+		local after = math.max(0, math.floor(tonumber(player:GetAttribute("MaxCoinsHeld")) or 0))
+		if after > before and player:GetAttribute("PlayerDataLoaded") == true then
+			DataManager.ScheduleSavePlayerData(player, 15)
+		end
+	end)
+end
+
 function DataManager.Init(deps)
 	_Services = deps
 end
 
 function DataManager.Start()
+	task.spawn(function()
+		while true do
+			task.wait(AUTOSAVE_INTERVAL)
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player:GetAttribute("PlayerDataLoaded") == true then
+					DataManager.ScheduleSavePlayerData(player, 0)
+				end
+			end
+		end
+	end)
 	-- 纯数据读写模块，不需要常驻循环
 end
 
@@ -89,8 +139,12 @@ function DataManager.LoadPlayerData(player)
 	local success, data = pcall(function()
 		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
 	end)
+	if not success then
+		warn("[DataManager] Load failed; this session will not overwrite cloud data for", player.Name, data)
+	end
 
 	local playerData = buildDefaultPlayerData()
+	local dataLoaded = success == true
 	if success and data then
 		for statName, statValue in pairs(data) do
 			playerData[statName] = statValue
@@ -103,6 +157,7 @@ function DataManager.LoadPlayerData(player)
 	local resetRewardData = buildResetRewardData(player.UserId)
 	if resetRewardData then
 		playerData = resetRewardData
+		dataLoaded = true
 		print("🧪 测试白名单生效：已清空玩家 " .. player.Name .. " 的记录，并发放金币:", playerData.Coins)
 	end
 
@@ -110,6 +165,9 @@ function DataManager.LoadPlayerData(player)
 	for statName, statValue in pairs(playerData) do
 		player:SetAttribute(statName, statValue)
 	end
+	player:SetAttribute("PlayerDataLoaded", dataLoaded)
+	player:SetAttribute("PlayerDataLoadFailed", not dataLoaded)
+	bindMaxCoinsHeldTracker(player)
 
 	local equippedPetsJson = player:GetAttribute("EquippedPets_JSON") or "[]"
 	local legacyEquippedPetUid = player:GetAttribute("EquippedPetUid") or ""
@@ -134,6 +192,14 @@ end
 -- 业务接口 2：将数据推向云端
 -- ==========================================
 function DataManager.SavePlayerData(player)
+	if not player then
+		return false
+	end
+	if player:GetAttribute("PlayerDataLoaded") ~= true then
+		warn("[DataManager] Save skipped because player data was not loaded safely:", player.Name)
+		return false
+	end
+
 	local dataToSave = {
 		Talent_EXP = player:GetAttribute("Talent_EXP") or 0,
 		Talent_LUCK = player:GetAttribute("Talent_LUCK") or 0,
@@ -141,8 +207,11 @@ function DataManager.SavePlayerData(player)
 		Talent_PET_SLOT = player:GetAttribute("Talent_PET_SLOT") or 0,
 		EquippedPets_JSON = player:GetAttribute("EquippedPets_JSON") or "[]",
 		Coins = player:GetAttribute("Coins") or 0,
+		MaxCoinsHeld = player:GetAttribute("MaxCoinsHeld") or 0,
 		RebirthCount = player:GetAttribute("RebirthCount") or 0,
 		CoinGainBonus = player:GetAttribute("CoinGainBonus") or 0,
+		PaidReviveCredits = player:GetAttribute("PaidReviveCredits") or 0,
+		StarterPackPurchased = player:GetAttribute("StarterPackPurchased") or false,
 		Talent_HP = player:GetAttribute("Talent_HP") or 0,
 		Talent_ATK = player:GetAttribute("Talent_ATK") or 0,
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,
@@ -160,9 +229,23 @@ function DataManager.SavePlayerData(player)
 		BestLevel = player:GetAttribute("BestLevel") or 1,
 	}
 
-	local success, err = pcall(function()
-		PlayerDataStore:SetAsync("Player_" .. player.UserId, dataToSave)
-	end)
+	local success = false
+	local err = nil
+	for attempt = 1, SAVE_RETRY_COUNT do
+		success, err = pcall(function()
+			PlayerDataStore:UpdateAsync("Player_" .. player.UserId, function(previousData)
+				local mergedData = type(previousData) == "table" and previousData or {}
+				for statName, statValue in pairs(dataToSave) do
+					mergedData[statName] = statValue
+				end
+				return mergedData
+			end)
+		end)
+		if success then
+			break
+		end
+		task.wait(SAVE_RETRY_DELAY * attempt)
+	end
 
 	if success then
 		print("💾 云端同步完毕！安全保存了玩家 " .. player.Name .. " 的资产。金币:", dataToSave.Coins)
@@ -175,6 +258,30 @@ function DataManager.SavePlayerData(player)
 	else
 		warn("❌ 云端同步灾难！玩家 " .. player.Name .. " 存档失败:", err)
 	end
+	return success
+end
+
+function DataManager.ScheduleSavePlayerData(player, delaySeconds)
+	if not player then
+		return
+	end
+	local delayTime = math.max(0, tonumber(delaySeconds) or 5)
+	local dueAt = os.clock() + delayTime
+	if scheduledSaves[player] and scheduledSaves[player] <= dueAt then
+		return
+	end
+
+	scheduledSaves[player] = dueAt
+	task.delay(delayTime, function()
+		if scheduledSaves[player] ~= dueAt then
+			return
+		end
+		scheduledSaves[player] = nil
+		if not player.Parent then
+			return
+		end
+		DataManager.SavePlayerData(player)
+	end)
 end
 
 return DataManager

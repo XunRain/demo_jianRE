@@ -20,10 +20,14 @@ function CombatController.Init(deps)
 end
 
 -- 启动战斗循环：根据当前武器和攻速持续发射主武器子弹。
+local function isCombatPaused()
+	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+end
+
 function CombatController.Start()
 	task.spawn(function()
 		while true do
-			if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") then
+			if Controllers.Game.IsCombatActive and not isCombatPaused() then
 
 				local equippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon"
 				local weaponConfig = Controllers.Config.WEAPONS[equippedWeapon] or Controllers.Config.WEAPONS["DefaultWeapon"]
@@ -213,6 +217,7 @@ local function triggerBossGoldReward(enemyType)
 	if enemyType ~= "Boss" then return end
 	local bossGoldReward = Controllers.Config.BOSS_GOLD_REWARD
 	if bossGoldReward and bossGoldReward.Enabled == false then return end
+	if player:GetAttribute("IsRevivePending") then return end
 
 	player:SetAttribute("LevelUpRewardMode", "BossGold")
 	player:SetAttribute("IsLevelingUp", true)
@@ -225,7 +230,7 @@ local function triggerEliteGoldReward(enemyType)
 	local eliteGoldReward = Controllers.Config.ELITE_GOLD_REWARD
 	if eliteGoldReward and eliteGoldReward.Enabled == false then return end
 	-- 如果当前已经在发奖励，避免同一帧多个精英怪连续覆盖；BossGold 仍由 Boss 逻辑优先覆盖。
-	if player:GetAttribute("IsLevelingUp") then return end
+	if isCombatPaused() then return end
 
 	player:SetAttribute("LevelUpRewardMode", "EliteGoldGuarantee")
 	player:SetAttribute("IsLevelingUp", true)
@@ -424,6 +429,16 @@ function CombatController.CheckCollisions(rootPart)
 		if math.abs(pPos.X - ePos.X) < (eSize.X/2 + 1) and
 		   math.abs(pPos.Z - ePos.Z) < (eSize.Z/2 + 1) then
 
+			local invulnerableUntil = tonumber(player:GetAttribute("ReviveInvulnerableUntil")) or 0
+			if os.clock() < invulnerableUntil then
+				e.part:Destroy()
+				table.remove(activeEnemies, i)
+
+				local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
+				Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
+				continue
+			end
+
 			local damage = e.hp
 			local currentHp = player:GetAttribute("HP") or Controllers.Config.BASE_HP
 			local newHp = currentHp - damage
@@ -437,12 +452,28 @@ function CombatController.CheckCollisions(rootPart)
 			local humanoid = player.Character:FindFirstChild("Humanoid")
 			if humanoid then
 				humanoid.MaxHealth = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
-				humanoid.Health = newHp
+				if newHp > 0 then
+					humanoid.Health = newHp
+				end
 			end
 
 			local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
 			Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 			Controllers.Encounter.TriggerDrops(e.type, ePos)
+
+			if newHp <= 0 and Controllers.Game and type(Controllers.Game.BeginReviveOffer) == "function" then
+				if humanoid then
+					humanoid.Health = 1
+				end
+
+				if Controllers.Game.BeginReviveOffer(rootPart.CFrame) then
+					continue
+				end
+			end
+
+			if newHp <= 0 and humanoid then
+				humanoid.Health = 0
+			end
 		end
 	end
 end
@@ -704,7 +735,7 @@ function CombatController.StartSwordSystem()
 					swordData.state = "Orbiting"
 				end
 			elseif swordData.state == "Attacking" then
-				if player:GetAttribute("IsLevelingUp") or not Controllers.Game.IsCombatActive then
+				if isCombatPaused() or not Controllers.Game.IsCombatActive then
 					clearSwordAttackData(swordData)
 					swordData.state = "Returning"
 					continue
@@ -726,7 +757,7 @@ function CombatController.StartSwordSystem()
 				pivotSwordTo(swordData, getSwordStudioCFrame(swordData, newPos))
 
 				if swordData.attackProgress >= 1 then
-					if Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp") and isSwordTargetAlive(targetEnemy) then
+					if Controllers.Game.IsCombatActive and not isCombatPaused() and isSwordTargetAlive(targetEnemy) then
 						local hitPos = targetEnemy.part.Position
 						targetEnemy.hp = targetEnemy.hp - (swordData.damage or 0)
 						updateEnemyHpLabel(targetEnemy)
@@ -748,8 +779,8 @@ function CombatController.StartSwordSystem()
 	task.spawn(function()
 		local Config = Controllers.Config
 		while true do
-			if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") or (player:GetAttribute("Sword_Unlocked") or 0) <= 0 then
-				task.wait(player:GetAttribute("IsLevelingUp") and 0.1 or 0.5)
+			if not Controllers.Game.IsCombatActive or isCombatPaused() or (player:GetAttribute("Sword_Unlocked") or 0) <= 0 then
+				task.wait(isCombatPaused() and 0.1 or 0.5)
 				continue
 			end
 
@@ -780,7 +811,7 @@ function CombatController.StartSwordSystem()
 
 					for _, swordData in ipairs(orbitingSwords) do
 						if swordData.state == "Orbiting" then
-							if not Controllers.Game.IsCombatActive or player:GetAttribute("IsLevelingUp") then
+							if not Controllers.Game.IsCombatActive or isCombatPaused() then
 								break
 							end
 

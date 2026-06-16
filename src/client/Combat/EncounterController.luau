@@ -961,13 +961,16 @@ function EncounterController.TriggerDrops(enemyType, enemyPos)
     local dropConfig = Config.ENEMY_DROPS[enemyType] or Config.ENEMY_DROPS["Basic"]
     local numDrops = dropConfig.NumDrops
     local totalExp = dropConfig.Exp
-    local totalCoins = dropConfig.Coins
+    local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
+    local totalCoins = math.max(0, math.floor((dropConfig.Coins or 0) * (1 + coinGainBonus) + 0.5))
 
     local expPerDrop = math.ceil(totalExp / numDrops)
-    local coinPerDrop = math.ceil(totalCoins / numDrops)
 
     for i = 1, numDrops do
-        SpawnSingleDrop("Coin", coinPerDrop, enemyPos)
+        local remainingDrops = numDrops - i + 1
+        local coinValue = math.ceil(totalCoins / remainingDrops)
+        totalCoins -= coinValue
+        SpawnSingleDrop("Coin", coinValue, enemyPos)
         SpawnSingleDrop("Exp", expPerDrop, enemyPos)
     end
 end
@@ -995,10 +998,8 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 					remotes.AddCoin:FireServer(drop.value)
 				end
 
-				local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
-				local displayedCoinValue = math.max(1, math.floor(drop.value * (1 + coinGainBonus) + 0.5))
 				local coinIconId = "rbxassetid://127099213486402"
-				local cleanText = "+" .. Config.FormatNumber(displayedCoinValue)
+				local cleanText = "+" .. Config.FormatNumber(drop.value)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(255, 215, 0), coinIconId)
 			elseif drop.type == "Exp" then
 				local actualExp = Controllers.Progression.AddExp(drop.value) or drop.value

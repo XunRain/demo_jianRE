@@ -36,7 +36,10 @@ end
 
 -- 判断当前是否允许战斗输入；升级选卡和非战斗状态下不响应键盘/触控。
 local function canUseCombatInput()
-	return Controllers and Controllers.Game and Controllers.Game.IsCombatActive and not player:GetAttribute("IsLevelingUp")
+	return Controllers and Controllers.Game
+		and Controllers.Game.IsCombatActive
+		and player:GetAttribute("IsLevelingUp") ~= true
+		and player:GetAttribute("IsRevivePending") ~= true
 end
 
 -- 手机端读取 Roblox 原生摇杆产生的横向移动量；只取 X 轴，Z 轴仍由跑酷自动前进控制。
@@ -138,7 +141,7 @@ function PlayerController.OnRenderStepped(dt)
 	end
 
 	-- ─── 阶段 B: 升级暂停状态 ───
-	if player:GetAttribute("IsLevelingUp") then
+	if player:GetAttribute("IsLevelingUp") or player:GetAttribute("IsRevivePending") then
 		clearAllMoveInput()
 		humanoid.WalkSpeed = 0 -- 刹车停住
 		return
