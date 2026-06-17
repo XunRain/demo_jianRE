@@ -10,6 +10,7 @@ local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConf
 
 local Services
 local pendingReviveOffers = {}
+local pendingQuickHealOffers = {}
 local random = Random.new()
 
 function PurchaseManager.Init(deps)
@@ -19,6 +20,16 @@ end
 local function getReviveConfig()
 	local monetization = GameConfig.MONETIZATION or {}
 	return monetization.Revive or {}
+end
+
+local function getQuickHealConfig()
+	local monetization = GameConfig.MONETIZATION or {}
+	return monetization.QuickHeal or {}
+end
+
+local function getPaidRebirthConfig()
+	local monetization = GameConfig.MONETIZATION or {}
+	return monetization.Rebirth or {}
 end
 
 local function getInstantCoinsConfig()
@@ -63,6 +74,14 @@ local function setCreditCount(player, count)
 	player:SetAttribute("PaidReviveCredits", math.max(0, math.floor(tonumber(count) or 0)))
 end
 
+local function getQuickHealCreditCount(player)
+	return math.max(0, math.floor(tonumber(player:GetAttribute("PaidQuickHealCredits")) or 0))
+end
+
+local function setQuickHealCreditCount(player, count)
+	player:SetAttribute("PaidQuickHealCredits", math.max(0, math.floor(tonumber(count) or 0)))
+end
+
 local function grantStoredReviveCredit(player)
 	local previousCredits = getCreditCount(player)
 	setCreditCount(player, previousCredits + 1)
@@ -70,6 +89,19 @@ local function grantStoredReviveCredit(player)
 		local saved = Services.DataManager.SavePlayerData(player)
 		if not saved then
 			setCreditCount(player, previousCredits)
+			return false
+		end
+	end
+	return true
+end
+
+local function grantStoredQuickHealCredit(player)
+	local previousCredits = getQuickHealCreditCount(player)
+	setQuickHealCreditCount(player, previousCredits + 1)
+	if Services and Services.DataManager and Services.DataManager.SavePlayerData then
+		local saved = Services.DataManager.SavePlayerData(player)
+		if not saved then
+			setQuickHealCreditCount(player, previousCredits)
 			return false
 		end
 	end
@@ -98,6 +130,12 @@ local function clearPendingOffer(player)
 	end
 end
 
+local function clearPendingQuickHealOffer(player)
+	if player then
+		pendingQuickHealOffers[player.UserId] = nil
+	end
+end
+
 local function buildReviveOfferPayload(extra)
 	local reviveConfig = getReviveConfig()
 	local payload = {
@@ -105,6 +143,24 @@ local function buildReviveOfferPayload(extra)
 		ProductId = tonumber(reviveConfig.ProductId) or 0,
 		PriceRobux = tonumber(reviveConfig.PriceRobux) or 19,
 		OfferSeconds = tonumber(reviveConfig.OfferSeconds) or 8,
+	}
+
+	if type(extra) == "table" then
+		for key, value in pairs(extra) do
+			payload[key] = value
+		end
+	end
+
+	return payload
+end
+
+local function buildQuickHealOfferPayload(extra)
+	local quickHealConfig = getQuickHealConfig()
+	local payload = {
+		Success = true,
+		ProductId = tonumber(quickHealConfig.ProductId) or 0,
+		PriceRobux = tonumber(quickHealConfig.PriceRobux) or 10,
+		OfferSeconds = tonumber(quickHealConfig.OfferSeconds) or 3,
 	}
 
 	if type(extra) == "table" then
@@ -275,6 +331,51 @@ local function applyStarterPackRebirth(player, rewardRebirthCount)
 	player:SetAttribute("CoinGainBonus", GameConfig.GetRebirthCoinGainBonus(nextRebirthCount))
 end
 
+local function buildPaidRebirthSnapshotNames()
+	local names = {
+		"RebirthCount",
+		"CoinGainBonus",
+	}
+
+	for _, talentId in ipairs((GameConfig.REBIRTH and GameConfig.REBIRTH.ResetTalents) or {}) do
+		table.insert(names, talentId)
+	end
+
+	return names
+end
+
+local function applyPaidRebirth(player)
+	applyStarterPackRebirth(player, 1)
+end
+
+local function processPaidRebirthReceipt(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	if player:GetAttribute("PlayerDataLoaded") ~= true then
+		warn("[PurchaseManager] Paid rebirth receipt delayed until player data is loaded:", player.Name)
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	if not Services or not Services.DataManager or type(Services.DataManager.SavePlayerData) ~= "function" then
+		warn("[PurchaseManager] Paid rebirth cannot save because DataManager is unavailable.")
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local snapshot = snapshotAttributes(player, buildPaidRebirthSnapshotNames())
+	applyPaidRebirth(player)
+
+	local saved = Services.DataManager.SavePlayerData(player)
+	if not saved then
+		restoreAttributes(player, snapshot)
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
 local function processStarterPackReceipt(receiptInfo)
 	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 	if not player then
@@ -333,6 +434,18 @@ local function processStarterPackReceipt(receiptInfo)
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
+	local petConfig = (GameConfig.PETS or {})[rewardPetId] or {}
+	local starterPackGranted = getOrCreateRemote("StarterPackGranted", "RemoteEvent")
+	starterPackGranted:FireClient(player, {
+		PetId = rewardPetId,
+		PetName = petConfig.Name or rewardPetId,
+		PetRarity = petConfig.Rarity or config.RewardPetRarity or "Rare",
+		PetLevel = rewardPetLevel,
+		RewardCoins = rewardCoins,
+		RewardRebirthCount = rewardRebirthCount,
+		PurchaseId = receiptInfo.PurchaseId,
+	})
+
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
@@ -386,6 +499,56 @@ local function processReviveReceipt(receiptInfo)
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
+local function startQuickHealOffer(player)
+	local quickHealConfig = getQuickHealConfig()
+	local offerSeconds = tonumber(quickHealConfig.OfferSeconds) or 3
+	local productId = tonumber(quickHealConfig.ProductId) or 0
+
+	local credits = getQuickHealCreditCount(player)
+	if credits > 0 then
+		setQuickHealCreditCount(player, credits - 1)
+		schedulePlayerSave(player, 1)
+		return buildQuickHealOfferPayload({
+			GrantNow = true,
+			UsedStoredCredit = true,
+		})
+	end
+
+	pendingQuickHealOffers[player.UserId] = {
+		Player = player,
+		ExpiresAt = os.clock() + offerSeconds + 60,
+	}
+
+	if productId <= 0 then
+		warn("[PurchaseManager] QuickHeal Developer ProductId is not configured yet.")
+	end
+
+	return buildQuickHealOfferPayload()
+end
+
+local function processQuickHealReceipt(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local quickHealGranted = getOrCreateRemote("QuickHealGranted", "RemoteEvent")
+	local pendingOffer = pendingQuickHealOffers[player.UserId]
+	if pendingOffer and pendingOffer.Player == player and pendingOffer.ExpiresAt >= os.clock() then
+		pendingQuickHealOffers[player.UserId] = nil
+		quickHealGranted:FireClient(player, {
+			ProductId = receiptInfo.ProductId,
+			PurchaseId = receiptInfo.PurchaseId,
+		})
+	else
+		if not grantStoredQuickHealCredit(player) then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+	end
+
+	return Enum.ProductPurchaseDecision.PurchaseGranted
+end
+
 local function processInstantCoinReceipt(receiptInfo, tier)
 	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 	if not player then
@@ -416,16 +579,24 @@ function PurchaseManager.Start()
 	local startReviveOfferRemote = getOrCreateRemote("StartReviveOffer", "RemoteFunction")
 	startReviveOfferRemote.OnServerInvoke = startReviveOffer
 
+	local startQuickHealOfferRemote = getOrCreateRemote("StartQuickHealOffer", "RemoteFunction")
+	startQuickHealOfferRemote.OnServerInvoke = startQuickHealOffer
+
 	local getInstantCoinProductsRemote = getOrCreateRemote("GetInstantCoinProducts", "RemoteFunction")
 	getInstantCoinProductsRemote.OnServerInvoke = buildInstantCoinProducts
 
 	local getStarterPackStatusRemote = getOrCreateRemote("GetStarterPackStatus", "RemoteFunction")
 	getStarterPackStatusRemote.OnServerInvoke = buildStarterPackStatus
+	getOrCreateRemote("StarterPackGranted", "RemoteEvent")
 
 	local cancelReviveOfferRemote = getOrCreateRemote("CancelReviveOffer", "RemoteEvent")
 	cancelReviveOfferRemote.OnServerEvent:Connect(clearPendingOffer)
 
+	local cancelQuickHealOfferRemote = getOrCreateRemote("CancelQuickHealOffer", "RemoteEvent")
+	cancelQuickHealOfferRemote.OnServerEvent:Connect(clearPendingQuickHealOffer)
+
 	getOrCreateRemote("ReviveGranted", "RemoteEvent")
+	getOrCreateRemote("QuickHealGranted", "RemoteEvent")
 
 	MarketplaceService.ProcessReceipt = function(receiptInfo)
 		local reviveConfig = getReviveConfig()
@@ -433,6 +604,18 @@ function PurchaseManager.Start()
 
 		if reviveProductId > 0 and receiptInfo.ProductId == reviveProductId then
 			return processReviveReceipt(receiptInfo)
+		end
+
+		local quickHealConfig = getQuickHealConfig()
+		local quickHealProductId = tonumber(quickHealConfig.ProductId) or 0
+		if quickHealProductId > 0 and receiptInfo.ProductId == quickHealProductId then
+			return processQuickHealReceipt(receiptInfo)
+		end
+
+		local paidRebirthConfig = getPaidRebirthConfig()
+		local paidRebirthProductId = tonumber(paidRebirthConfig.ProductId) or 0
+		if paidRebirthProductId > 0 and receiptInfo.ProductId == paidRebirthProductId then
+			return processPaidRebirthReceipt(receiptInfo)
 		end
 
 		local starterPackConfig = getStarterPackConfig()
@@ -452,6 +635,7 @@ function PurchaseManager.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		pendingReviveOffers[player.UserId] = nil
+		pendingQuickHealOffers[player.UserId] = nil
 	end)
 end
 

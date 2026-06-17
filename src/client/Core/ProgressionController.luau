@@ -6,6 +6,14 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
+local function reportAnalyticsEvent(eventName, fields)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local event = remotes and remotes:FindFirstChild("ReportAnalyticsEvent")
+	if event and event:IsA("RemoteEvent") then
+		event:FireServer(eventName, fields or {})
+	end
+end
+
 local Controllers -- 全局依赖指针
 
 -- 将当前局内等级同步给服务端头顶 UI；服务端会做上限和类型校验。
@@ -63,6 +71,12 @@ function ProgressionController.AddExp(gainedExp)
 	if didLevelUp then
 		player:SetAttribute("LevelUpRewardMode", "Normal")
 		player:SetAttribute("IsLevelingUp", true)
+		reportAnalyticsEvent("level_up_triggered", {
+			level = currentLevel,
+			exp = currentExp,
+			required_exp = requiredExp,
+			reward_mode = "Normal",
+		})
 		Controllers.Player.SetMoveDirection(0) 
 		print("玩家升级！当前等级: " .. tostring(currentLevel))
 	end

@@ -28,6 +28,25 @@ local function scheduleSave(player, delaySeconds)
 	end
 end
 
+local function trackAnalytics(player, eventName, fields, value)
+	if _Services and _Services.AnalyticsManager and _Services.AnalyticsManager.Track then
+		_Services.AnalyticsManager.Track(player, eventName, fields, value)
+	end
+end
+
+local function markShopBought(player)
+	if _Services and _Services.AnalyticsManager and _Services.AnalyticsManager.MarkShopBought then
+		_Services.AnalyticsManager.MarkShopBought(player)
+	end
+end
+
+local function getTimeSinceJoin(player)
+	if _Services and _Services.AnalyticsManager and _Services.AnalyticsManager.GetTimeSinceJoin then
+		return _Services.AnalyticsManager.GetTimeSinceJoin(player)
+	end
+	return 0
+end
+
 function NetworkManager.Start()
 	-- 1. 自动化建立前后端通信文件夹
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -72,30 +91,78 @@ function NetworkManager.Start()
 
 	-- 监听客户端的购买请求
 	buyTalentEvent.OnServerEvent:Connect(function(player, talentId)
+		local requestedTalentId = talentId
 		if type(talentId) == "number" or (type(talentId) == "string" and string.match(talentId, "^%d+$")) then
 			talentId = GameConfig.GetTalentIdByProductId(talentId)
 		end
-		if not talentId then return end
-
-		-- 从公共配置表校验是否有这个天赋
-		local talentConfig = GameConfig.TALENTS[talentId]
-		if not talentConfig then return end 
-
-		local currentLevel = math.max(0, math.floor(player:GetAttribute(talentId) or 0))
-		local currentCoins = player:GetAttribute("Coins") or 0
-		if talentConfig.MaxLevel and currentLevel >= talentConfig.MaxLevel then
+		if not talentId then
+			trackAnalytics(player, "talent_buy_fail", {
+				talent_id = tostring(requestedTalentId),
+				reason = "invalid_talent",
+				cost = 0,
+				coins_before = player:GetAttribute("Coins") or 0,
+				talent_level_before = 0,
+			})
 			return
 		end
 
-		-- 统一调用公共配置表里的计费公式
-		local cost = GameConfig.GetTalentCost(talentId, currentLevel)
+		local talentConfig = GameConfig.TALENTS[talentId]
+		if not talentConfig then
+			trackAnalytics(player, "talent_buy_fail", {
+				talent_id = tostring(talentId),
+				reason = "invalid_talent",
+				cost = 0,
+				coins_before = player:GetAttribute("Coins") or 0,
+				talent_level_before = 0,
+			})
+			return
+		end
 
-		-- 钱够就扣钱加级
+		local currentLevel = math.max(0, math.floor(player:GetAttribute(talentId) or 0))
+		local currentCoins = player:GetAttribute("Coins") or 0
+		local cost = GameConfig.GetTalentCost(talentId, currentLevel)
+		trackAnalytics(player, "talent_buy_attempt", {
+			talent_id = tostring(talentId),
+			talent_level_before = currentLevel,
+			cost = cost == math.huge and -1 or cost,
+			coins_before = currentCoins,
+			run_index = player:GetAttribute("AnalyticsRunIndex") or 0,
+			death_count = player:GetAttribute("AnalyticsDeathCount") or 0,
+		})
+
+		if talentConfig.MaxLevel and currentLevel >= talentConfig.MaxLevel then
+			trackAnalytics(player, "talent_buy_fail", {
+				talent_id = tostring(talentId),
+				reason = "max_level",
+				cost = cost == math.huge and -1 or cost,
+				coins_before = currentCoins,
+				talent_level_before = currentLevel,
+			})
+			return
+		end
+
 		if cost ~= math.huge and currentCoins >= cost then
 			player:SetAttribute("Coins", currentCoins - cost)
 			player:SetAttribute(talentId, currentLevel + 1)
 			scheduleSave(player, 3)
-			print(string.format("%s 成功购买 %s Lv.%d (花费: %d)", player.Name, talentConfig.Name, currentLevel + 1, cost))
+			markShopBought(player)
+			trackAnalytics(player, "talent_buy_success", {
+				talent_id = tostring(talentId),
+				talent_level_before = currentLevel,
+				talent_level_after = currentLevel + 1,
+				cost = cost,
+				coins_before = currentCoins,
+				coins_after = currentCoins - cost,
+			})
+			print(string.format("[NetworkManager] %s bought %s Lv.%d for %d coins.", player.Name, talentConfig.Name, currentLevel + 1, cost))
+		else
+			trackAnalytics(player, "talent_buy_fail", {
+				talent_id = tostring(talentId),
+				reason = "not_enough_coins",
+				cost = cost == math.huge and -1 or cost,
+				coins_before = currentCoins,
+				talent_level_before = currentLevel,
+			})
 		end
 	end)
 
@@ -272,6 +339,14 @@ function NetworkManager.Start()
 	rollPetRF.OnServerInvoke = function(player)
 		local tickets = math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0))
 		local ticketCost = math.max(1, math.floor(GameConfig.PET_DRAW_TICKET_COST or 1))
+		local ownedBefore = decodeOwnedPets(player)
+		local ownedCountBefore = #ownedBefore
+		trackAnalytics(player, "pet_draw_attempt", {
+			tickets_before = tickets,
+			coins = player:GetAttribute("Coins") or 0,
+			owned_pet_count = ownedCountBefore,
+			has_equipped_pet = (player:GetAttribute("EquippedPetUid") or "") ~= "" or (player:GetAttribute("EquippedPet") or "") ~= "",
+		})
 		if tickets < ticketCost then
 			return nil
 		end
@@ -287,11 +362,26 @@ function NetworkManager.Start()
 		end
 
 		-- 解析 JSON 背包 -> 塞入新宠物 -> 重新压成 JSON 存入玩家属性
-		local owned = decodeOwnedPets(player)
+		local owned = ownedBefore
 		local petInstance = createPetInstance(player, resultId)
 		table.insert(owned, petInstance)
 		player:SetAttribute("OwnedPets_JSON", HttpService:JSONEncode(owned))
 		scheduleSave(player, 1)
+		trackAnalytics(player, "pet_draw_success", {
+			pet_id = petInstance.Id,
+			pet_uid = petInstance.Uid,
+			pet_level = petInstance.Level,
+			tickets_after = math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0)),
+			owned_pet_count_after = #owned,
+		})
+		if ownedCountBefore == 0 then
+			trackAnalytics(player, "first_pet_obtained", {
+				pet_id = petInstance.Id,
+				pet_level = petInstance.Level,
+				time_since_join = getTimeSinceJoin(player),
+				run_index = player:GetAttribute("AnalyticsRunIndex") or 0,
+			})
+		end
 
 		print(string.format("%s 抽中了宠物: %s Lv.%d", player.Name, resultId, petInstance.Level))
 		return petInstance -- 将抽奖结果返回给客户端用于展示特效
@@ -319,6 +409,13 @@ function NetworkManager.Start()
 		player:SetAttribute("Coins", currentCoins - cost)
 		player:SetAttribute("PetDrawTickets", newTickets)
 		scheduleSave(player, 1)
+		trackAnalytics(player, "pet_draw_ticket_buy_success", {
+			cost = cost,
+			coins_before = currentCoins,
+			coins_after = currentCoins - cost,
+			tickets_before = tickets,
+			tickets_after = newTickets,
+		})
 
 		return {
 			Success = true,
@@ -364,9 +461,17 @@ function NetworkManager.Start()
 			return
 		end
 
+		local previousPetId = player:GetAttribute("EquippedPet") or ""
 		table.insert(equippedUids, petEntry.Uid)
 		syncEquippedPetAttributes(player, owned, equippedUids)
 		scheduleSave(player, 3)
+		trackAnalytics(player, "pet_equip", {
+			pet_id = petEntry.Id,
+			pet_uid = petEntry.Uid,
+			pet_level = petEntry.Level,
+			owned_pet_count = #owned,
+			previous_pet_id = previousPetId,
+		})
 	end)
 
 	-- 2.5 删除宠物请求：只能删除玩家自己背包里存在的宠物实例。
@@ -412,6 +517,11 @@ function NetworkManager.Start()
 	markGuideEvent.OnServerEvent:Connect(function(player)
 		-- 在服务端写下标记，Roblox 底层会自动将这个 Attribute 同步回客户端
 		player:SetAttribute("HasSeenStage2Guide", true)
+		trackAnalytics(player, "tutorial_completed", {
+			tutorial_id = "stage2_guide",
+			complete_stage = player:GetAttribute("CurrentStage") or 0,
+			time_since_join = getTimeSinceJoin(player),
+		})
 		scheduleSave(player, 3)
 		print(player.Name .. " 已触发过第二关引导，打上永久防打扰思想钢印。")
 	end)

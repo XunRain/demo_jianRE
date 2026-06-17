@@ -28,6 +28,12 @@ local revivePromptInProgress = false
 local revivePurchaseAwaitingReceipt = false
 local reviveOfferDeadline = 0
 local reviveGrantedConnected = false
+local quickHealPending = false
+local quickHealToken = 0
+local currentQuickHealProductId = 0
+local quickHealPromptInProgress = false
+local quickHealPurchaseAwaitingReceipt = false
+local quickHealRemainingSeconds = 0
 local defaultCameraMinZoomDistance = nil
 local defaultCameraMaxZoomDistance = nil
 
@@ -62,6 +68,20 @@ local function reportRunStats(isInCombat)
 	if reportEvent then
 		reportEvent:FireServer(isInCombat == true, player:GetAttribute("Level") or 1, getCurrentAttackForDisplay())
 	end
+end
+
+local function consumeInviteCoinBonusForRun()
+	local config = Controllers and Controllers.Config and Controllers.Config.INVITE_REWARD or {}
+	local maxRunBonus = math.max(0, tonumber(config.MaxRunBonus) or tonumber(config.CoinBonus) or 0.5)
+	local pending = math.max(0, tonumber(player:GetAttribute("PendingInviteCoinBonus")) or 0)
+	local runBonus = math.min(maxRunBonus, pending)
+
+	player:SetAttribute("RunInviteCoinBonus", runBonus)
+	player:SetAttribute("PendingInviteCoinBonus", 0)
+end
+
+local function clearInviteCoinBonusForRun()
+	player:SetAttribute("RunInviteCoinBonus", 0)
 end
 
 -- 依赖注入：在系统启动时建立与其他模块的调用关系
@@ -383,6 +403,11 @@ local function getReviveConfig()
 	return (monetization and monetization.Revive) or {}
 end
 
+local function getQuickHealConfig()
+	local monetization = Controllers and Controllers.Config and Controllers.Config.MONETIZATION
+	return (monetization and monetization.QuickHeal) or {}
+end
+
 local function findTextNode(root, names)
 	if not root then return nil end
 	for _, name in ipairs(names) do
@@ -419,16 +444,52 @@ end
 
 local function getRevivePanel()
 	local playerGui = player:FindFirstChild("PlayerGui")
-	local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
-	local panel = mainUI and mainUI:FindFirstChild("RevivePanel")
-	if panel and panel:IsA("GuiObject") then
+	if not playerGui then
+		return nil
+	end
+
+	local panel = playerGui:FindFirstChild("RevivePanel")
+	if panel and (panel:IsA("ScreenGui") or panel:IsA("GuiObject")) then
 		return panel
 	end
+
+	local mainUI = playerGui:FindFirstChild("MainUI")
+	panel = mainUI and mainUI:FindFirstChild("RevivePanel")
+	if panel and (panel:IsA("ScreenGui") or panel:IsA("GuiObject")) then
+		return panel
+	end
+
 	return nil
 end
 
+local function getRevivePanelContent(panel)
+	if not panel then return nil end
+
+	local nestedPanel = panel:FindFirstChild("RevivePanel")
+	if nestedPanel and nestedPanel:IsA("GuiObject") then
+		return nestedPanel
+	end
+
+	return panel
+end
+
+local function setRevivePanelVisible(panel, isVisible)
+	if not panel then return end
+
+	if panel:IsA("ScreenGui") then
+		panel.Enabled = isVisible
+	elseif panel:IsA("GuiObject") then
+		panel.Visible = isVisible
+	end
+
+	local content = getRevivePanelContent(panel)
+	if content and content ~= panel and content:IsA("GuiObject") then
+		content.Visible = isVisible
+	end
+end
+
 local function setRevivePanelText(panel, name, text)
-	local label = findTextNode(panel, { name })
+	local label = findTextNode(getRevivePanelContent(panel), { name }) or findTextNode(panel, { name })
 	if label then
 		label.Text = text
 	end
@@ -437,6 +498,30 @@ end
 local function hideRevivePanel()
 	local panel = getRevivePanel()
 	if panel then
+		setRevivePanelVisible(panel, false)
+	end
+end
+
+local function getQuickHealOfferPanel()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
+	local panel = mainUI and mainUI:FindFirstChild("QuickHealOffer")
+	if panel and panel:IsA("GuiObject") then
+		return panel
+	end
+	return nil
+end
+
+local function setQuickHealOfferText(panel, name, text)
+	local label = findTextNode(panel, { name })
+	if label then
+		label.Text = text
+	end
+end
+
+local function hideQuickHealOfferPanel()
+	local panel = getQuickHealOfferPanel()
+	if panel then
 		panel.Visible = false
 	end
 end
@@ -444,6 +529,14 @@ end
 local function cancelReviveOfferOnServer()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local cancelEvent = remotes and remotes:FindFirstChild("CancelReviveOffer")
+	if cancelEvent and cancelEvent:IsA("RemoteEvent") then
+		cancelEvent:FireServer()
+	end
+end
+
+local function cancelQuickHealOfferOnServer()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local cancelEvent = remotes and remotes:FindFirstChild("CancelQuickHealOffer")
 	if cancelEvent and cancelEvent:IsA("RemoteEvent") then
 		cancelEvent:FireServer()
 	end
@@ -474,10 +567,32 @@ local function requestReviveOfferFromServer()
 	}
 end
 
-function GameController.CancelReviveOffer()
-	if not revivePending then return end
-	if revivePromptInProgress or revivePurchaseAwaitingReceipt then return end
+local function requestQuickHealOfferFromServer()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+	local startQuickHealOffer = remotes and remotes:WaitForChild("StartQuickHealOffer", 5)
+	if not startQuickHealOffer or not startQuickHealOffer:IsA("RemoteFunction") then
+		return {
+			Success = false,
+			Reason = "RemoteMissing",
+		}
+	end
 
+	local ok, result = pcall(function()
+		return startQuickHealOffer:InvokeServer()
+	end)
+
+	if ok and type(result) == "table" then
+		return result
+	end
+
+	warn("[GameController][QuickHeal] StartQuickHealOffer failed:", result)
+	return {
+		Success = false,
+		Reason = "InvokeFailed",
+	}
+end
+
+local function clearRevivePendingState(cancelServer)
 	reviveToken += 1
 	revivePending = false
 	pendingReviveCFrame = nil
@@ -485,16 +600,246 @@ function GameController.CancelReviveOffer()
 	revivePromptInProgress = false
 	revivePurchaseAwaitingReceipt = false
 	reviveOfferDeadline = 0
-	player:SetAttribute("IsLevelingUp", false)
 	player:SetAttribute("IsRevivePending", false)
 	hideRevivePanel()
-	cancelReviveOfferOnServer()
+	if cancelServer then
+		cancelReviveOfferOnServer()
+	end
+end
+
+function GameController.CancelReviveOffer()
+	if not revivePending then return end
+	if revivePromptInProgress or revivePurchaseAwaitingReceipt then return end
+
+	player:SetAttribute("IsLevelingUp", false)
+	clearRevivePendingState(true)
 
 	local character = player.Character
 	local humanoid = character and character:FindFirstChild("Humanoid")
 	if humanoid and humanoid.Health > 0 then
 		humanoid.Health = 0
 	end
+end
+
+function GameController.CancelQuickHealOffer(forceCancelServer)
+	if not quickHealPending then
+		hideQuickHealOfferPanel()
+		return
+	end
+	if (quickHealPromptInProgress or quickHealPurchaseAwaitingReceipt) and forceCancelServer ~= true then
+		hideQuickHealOfferPanel()
+		return
+	end
+
+	quickHealToken += 1
+	quickHealPending = false
+	currentQuickHealProductId = 0
+	quickHealPromptInProgress = false
+	quickHealPurchaseAwaitingReceipt = false
+	quickHealRemainingSeconds = 0
+	hideQuickHealOfferPanel()
+	cancelQuickHealOfferOnServer()
+end
+
+local function isQuickHealPaused()
+	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+end
+
+local function canShowQuickHealOffer()
+	if not quickHealPending then return false end
+	if player:GetAttribute("InCombat") ~= true then return false end
+	if isQuickHealPaused() then return false end
+
+	local config = Controllers and Controllers.Config
+	local baseHP = (config and config.BASE_HP) or 100
+	local maxHP = math.max(1, math.floor(tonumber(player:GetAttribute("MaxHP")) or baseHP))
+	local hp = math.floor(tonumber(player:GetAttribute("HP")) or maxHP)
+	return hp > 0 and hp < maxHP
+end
+
+function GameController.CompletePaidQuickHeal()
+	if not revivePending and player:GetAttribute("InCombat") ~= true and not GameController.IsCombatActive then
+		quickHealToken += 1
+		quickHealPending = false
+		currentQuickHealProductId = 0
+		quickHealPromptInProgress = false
+		quickHealPurchaseAwaitingReceipt = false
+		quickHealRemainingSeconds = 0
+		hideQuickHealOfferPanel()
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
+	if not character or not humanoid then
+		warn("[GameController][QuickHeal] Cannot heal because character is no longer available.")
+		GameController.CancelQuickHealOffer()
+		return
+	end
+
+	local quickHealConfig = getQuickHealConfig()
+	local baseHP = (Controllers.Config and Controllers.Config.BASE_HP) or 100
+	local maxHP = math.max(1, math.floor(tonumber(player:GetAttribute("MaxHP")) or baseHP))
+	local healPercent = math.clamp(tonumber(quickHealConfig.HealHPPercent) or 1, 0.01, 1)
+	local healedHP = math.max(1, math.floor(maxHP * healPercent + 0.5))
+
+	quickHealToken += 1
+	quickHealPending = false
+	currentQuickHealProductId = 0
+	quickHealPromptInProgress = false
+	quickHealPurchaseAwaitingReceipt = false
+	quickHealRemainingSeconds = 0
+	hideQuickHealOfferPanel()
+
+	if revivePending then
+		clearRevivePendingState(true)
+	end
+
+	player:SetAttribute("HP", healedHP)
+	humanoid.MaxHealth = maxHP
+	humanoid.Health = healedHP
+
+	GameController.IsCombatActive = true
+	player:SetAttribute("InCombat", true)
+	reportRunStats(true)
+	applyLightingMode(true)
+	safePlaySound("PlayBattle")
+end
+
+local QUICK_HEAL_BUY_BUTTON_NAMES = { "BG", "BG-ImageButton", "BtnBuy", "Buy" }
+
+local function bindQuickHealOfferButtons(panel)
+	if panel:GetAttribute("QuickHealOfferButtonsBound") then return end
+	panel:SetAttribute("QuickHealOfferButtonsBound", true)
+
+	local buyButton = findGuiButton(panel, QUICK_HEAL_BUY_BUTTON_NAMES)
+	if buyButton then
+		buyButton.Activated:Connect(function()
+			if not quickHealPending then return end
+			if currentQuickHealProductId <= 0 then
+				warn("[GameController][QuickHeal] QuickHeal Developer ProductId is not configured yet.")
+				return
+			end
+			if quickHealPromptInProgress then return end
+
+			quickHealPromptInProgress = true
+			quickHealPurchaseAwaitingReceipt = false
+			MarketplaceService:PromptProductPurchase(player, currentQuickHealProductId)
+		end)
+	else
+		warn("[GameController][QuickHeal] QuickHealOffer/BG ImageButton is missing.")
+	end
+end
+
+local function showQuickHealOfferPanel(offerInfo, token)
+	local panel = getQuickHealOfferPanel()
+	if not panel then
+		warn("[GameController][QuickHeal] MainUI/QuickHealOffer is missing.")
+		return false
+	end
+
+	bindQuickHealOfferButtons(panel)
+	currentQuickHealProductId = math.floor(tonumber(offerInfo.ProductId) or 0)
+
+	local priceRobux = tonumber(offerInfo.PriceRobux) or 10
+	local offerSeconds = math.max(1, tonumber(offerInfo.OfferSeconds) or 3)
+	local buyButton = findGuiButton(panel, QUICK_HEAL_BUY_BUTTON_NAMES)
+
+	setQuickHealOfferText(panel, "PriceText", tostring(priceRobux) .. " Robux")
+	if buyButton then
+		buyButton.AutoButtonColor = currentQuickHealProductId > 0
+	end
+
+	panel.Visible = canShowQuickHealOffer()
+
+	quickHealRemainingSeconds = offerSeconds
+	task.spawn(function()
+		local lastTick = os.clock()
+		while quickHealPending and quickHealToken == token do
+			local now = os.clock()
+			local delta = math.max(0, now - lastTick)
+			lastTick = now
+
+			if not isQuickHealPaused() then
+				quickHealRemainingSeconds = math.max(0, quickHealRemainingSeconds - delta)
+			end
+
+			local secondsLeft = math.max(0, math.ceil(quickHealRemainingSeconds))
+			if secondsLeft <= 0 and (quickHealPromptInProgress or quickHealPurchaseAwaitingReceipt) then
+				setQuickHealOfferText(panel, "TimerText", "Processing...")
+			else
+				setQuickHealOfferText(panel, "TimerText", tostring(secondsLeft) .. "s")
+			end
+
+			if not canShowQuickHealOffer() then
+				panel.Visible = false
+			elseif not (quickHealPromptInProgress or quickHealPurchaseAwaitingReceipt) then
+				panel.Visible = true
+			end
+
+			if quickHealRemainingSeconds <= 0 and not quickHealPromptInProgress and not quickHealPurchaseAwaitingReceipt then
+				break
+			end
+			task.wait(0.1)
+		end
+
+		if quickHealPending and quickHealToken == token and not quickHealPromptInProgress and not quickHealPurchaseAwaitingReceipt then
+			GameController.CancelQuickHealOffer()
+		end
+	end)
+
+	return true
+end
+
+function GameController.BeginQuickHealOffer()
+	if quickHealPromptInProgress or quickHealPurchaseAwaitingReceipt then
+		return true
+	end
+	if not GameController.IsCombatActive and player:GetAttribute("InCombat") ~= true then
+		return false
+	end
+	if player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true then
+		return false
+	end
+
+	local config = Controllers and Controllers.Config
+	local baseHP = (config and config.BASE_HP) or 100
+	local maxHP = math.max(1, math.floor(tonumber(player:GetAttribute("MaxHP")) or baseHP))
+	local hp = math.floor(tonumber(player:GetAttribute("HP")) or maxHP)
+	if hp <= 0 or hp >= maxHP then
+		return false
+	end
+
+	quickHealToken += 1
+	local token = quickHealToken
+	quickHealPending = true
+	currentQuickHealProductId = 0
+	quickHealPromptInProgress = false
+	quickHealPurchaseAwaitingReceipt = false
+	quickHealRemainingSeconds = 0
+
+	task.spawn(function()
+		local offerInfo = requestQuickHealOfferFromServer()
+		if not quickHealPending or quickHealToken ~= token then
+			return
+		end
+
+		if offerInfo.Success == false then
+			GameController.CancelQuickHealOffer()
+			return
+		end
+
+		if offerInfo.GrantNow == true then
+			GameController.CompletePaidQuickHeal()
+			return
+		end
+
+		if not showQuickHealOfferPanel(offerInfo, token) then
+			GameController.CancelQuickHealOffer()
+		end
+	end)
+
+	return true
 end
 
 function GameController.CompletePaidRevive()
@@ -526,6 +871,7 @@ function GameController.CompletePaidRevive()
 	revivePurchaseAwaitingReceipt = false
 	reviveOfferDeadline = 0
 	hideRevivePanel()
+	GameController.CancelQuickHealOffer(true)
 
 	player:SetAttribute("IsRevivePending", false)
 	player:SetAttribute("HP", revivedHP)
@@ -548,7 +894,8 @@ local function bindRevivePanelButtons(panel)
 	if panel:GetAttribute("RevivePanelButtonsBound") then return end
 	panel:SetAttribute("RevivePanelButtonsBound", true)
 
-	local reviveButton = findGuiButton(panel, { "BtnRevive" })
+	local content = getRevivePanelContent(panel)
+	local reviveButton = findGuiButton(content, { "BtnRevive" }) or findGuiButton(panel, { "BtnRevive" })
 	if reviveButton then
 		reviveButton.Activated:Connect(function()
 			if not revivePending then return end
@@ -564,7 +911,7 @@ local function bindRevivePanelButtons(panel)
 		end)
 	end
 
-	local skipButton = findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
+	local skipButton = findGuiButton(content, { "BtnSkip", "BtnCancel", "BtnClose" }) or findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
 	if skipButton then
 		skipButton.Activated:Connect(function()
 			GameController.CancelReviveOffer()
@@ -575,18 +922,19 @@ end
 local function showRevivePanel(offerInfo, token)
 	local panel = getRevivePanel()
 	if not panel then
-		warn("[GameController][Revive] MainUI/RevivePanel is missing.")
+		warn("[GameController][Revive] PlayerGui/RevivePanel or MainUI/RevivePanel is missing.")
 		return false
 	end
 
 	bindRevivePanelButtons(panel)
+	local content = getRevivePanelContent(panel)
 	currentReviveProductId = math.floor(tonumber(offerInfo.ProductId) or 0)
 
 	local priceRobux = tonumber(offerInfo.PriceRobux) or 19
 	local offerSeconds = math.max(1, tonumber(offerInfo.OfferSeconds) or 8)
-	local reviveButton = findGuiButton(panel, { "BtnRevive" })
-	local skipButton = findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
-	local timerFrame = panel:FindFirstChild("Timer", true)
+	local reviveButton = findGuiButton(content, { "BtnRevive" }) or findGuiButton(panel, { "BtnRevive" })
+	local skipButton = findGuiButton(content, { "BtnSkip", "BtnCancel", "BtnClose" }) or findGuiButton(panel, { "BtnSkip", "BtnCancel", "BtnClose" })
+	local timerFrame = content and content:FindFirstChild("Timer", true) or panel:FindFirstChild("Timer", true)
 
 	setRevivePanelText(panel, "TitleText", "Revive?")
 	setRevivePanelText(panel, "MessageText", "Continue this run from here.")
@@ -602,7 +950,7 @@ local function showRevivePanel(offerInfo, token)
 		setButtonText(skipButton, "Give Up")
 	end
 
-	panel.Visible = true
+	setRevivePanelVisible(panel, true)
 
 	local deadline = os.clock() + offerSeconds
 	reviveOfferDeadline = deadline
@@ -641,6 +989,10 @@ function GameController.BeginReviveOffer(deathCFrame)
 	local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
 	if not character or not humanoid or not rootPart or humanoid.Health <= 0 then
 		return false
+	end
+
+	if quickHealPending then
+		hideQuickHealOfferPanel()
 	end
 
 	reviveToken += 1
@@ -690,19 +1042,36 @@ local function setupReviveGrantedListener()
 	reviveGrantedConnected = true
 
 	MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
-		if userId ~= player.UserId or productId ~= currentReviveProductId then
+		if userId ~= player.UserId then
 			return
 		end
 
-		revivePromptInProgress = false
-		revivePurchaseAwaitingReceipt = wasPurchased == true
+		if productId == currentReviveProductId then
+			revivePromptInProgress = false
+			revivePurchaseAwaitingReceipt = wasPurchased == true
 
-		local panel = getRevivePanel()
-		if panel and revivePending then
-			if wasPurchased then
-				setRevivePanelText(panel, "TimerText", "Processing...")
-			elseif reviveOfferDeadline > 0 and os.clock() >= reviveOfferDeadline then
-				GameController.CancelReviveOffer()
+			local panel = getRevivePanel()
+			if panel and revivePending then
+				if wasPurchased then
+					setRevivePanelText(panel, "TimerText", "Processing...")
+				elseif reviveOfferDeadline > 0 and os.clock() >= reviveOfferDeadline then
+					GameController.CancelReviveOffer()
+				end
+			end
+			return
+		end
+
+		if productId == currentQuickHealProductId then
+			quickHealPromptInProgress = false
+			quickHealPurchaseAwaitingReceipt = wasPurchased == true
+
+			local panel = getQuickHealOfferPanel()
+			if panel and quickHealPending then
+				if wasPurchased then
+					setQuickHealOfferText(panel, "TimerText", "Processing...")
+				elseif quickHealRemainingSeconds <= 0 then
+					GameController.CancelQuickHealOffer()
+				end
 			end
 		end
 	end)
@@ -718,6 +1087,16 @@ local function setupReviveGrantedListener()
 		reviveGranted.OnClientEvent:Connect(function()
 			GameController.CompletePaidRevive()
 		end)
+
+		local quickHealGranted = remotes and remotes:WaitForChild("QuickHealGranted", 10)
+		if not quickHealGranted or not quickHealGranted:IsA("RemoteEvent") then
+			warn("[GameController][QuickHeal] QuickHealGranted RemoteEvent is not ready.")
+			return
+		end
+
+		quickHealGranted.OnClientEvent:Connect(function()
+			GameController.CompletePaidQuickHeal()
+		end)
 	end)
 end
 
@@ -726,10 +1105,14 @@ function GameController.Start()
 	GameController.SetupStartButton()
 	GameController.SetupNPC()
 	setupReviveGrantedListener()
+	hideQuickHealOfferPanel()
 	captureLobbyLighting()
 	applyLightingMode(false)
 	safePlaySound("PlayBackground")
 	applyCameraZoomLimit(player:GetAttribute("InCombat") == true)
+	if player:GetAttribute("InCombat") ~= true then
+		clearInviteCoinBonusForRun()
+	end
 	player:GetAttributeChangedSignal("InCombat"):Connect(function()
 		local inCombat = player:GetAttribute("InCombat") == true
 		applyLightingMode(inCombat)
@@ -737,6 +1120,8 @@ function GameController.Start()
 		if inCombat then
 			safePlaySound("PlayBattle")
 		else
+			GameController.CancelQuickHealOffer(true)
+			clearInviteCoinBonusForRun()
 			safePlaySound("PlayBackground")
 		end
 	end)
@@ -744,6 +1129,13 @@ function GameController.Start()
 		player:GetAttributeChangedSignal(attrName):Connect(function()
 			if GameController.IsCombatActive or player:GetAttribute("InCombat") == true then
 				reportRunStats(true)
+			end
+		end)
+	end
+	for _, attrName in ipairs({ "IsLevelingUp", "IsRevivePending" }) do
+		player:GetAttributeChangedSignal(attrName):Connect(function()
+			if player:GetAttribute(attrName) == true and quickHealPending then
+				hideQuickHealOfferPanel()
 			end
 		end)
 	end
@@ -756,8 +1148,14 @@ function GameController.Start()
 		revivePromptInProgress = false
 		revivePurchaseAwaitingReceipt = false
 		reviveOfferDeadline = 0
+		quickHealPending = false
+		currentQuickHealProductId = 0
+		quickHealPromptInProgress = false
+		quickHealPurchaseAwaitingReceipt = false
+		quickHealRemainingSeconds = 0
 		player:SetAttribute("IsRevivePending", false)
 		hideRevivePanel()
+		hideQuickHealOfferPanel()
 		GameController.IsCombatActive = false
 		player:SetAttribute("InCombat", false)
 		reportRunStats(false)
@@ -1054,6 +1452,7 @@ function GameController.EnterCombat(startObjectOverride)
 		Controllers.VFX.ClearGuide()
 
 		GameController.IsCombatActive = true
+		consumeInviteCoinBonusForRun()
 		player:SetAttribute("InCombat", true)
 		debugCombat("Combat state set true", "rootZ=", rootPart.Position.Z, "InCombat=", player:GetAttribute("InCombat"))
 		reportRunStats(true)

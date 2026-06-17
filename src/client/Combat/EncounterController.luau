@@ -12,6 +12,14 @@ EncounterController.ActiveEnemies = {}
 EncounterController.ActiveGateGroups = {}
 EncounterController.ActiveDrops = {}
 
+local function reportAnalyticsEvent(eventName, fields)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local event = remotes and remotes:FindFirstChild("ReportAnalyticsEvent")
+	if event and event:IsA("RemoteEvent") then
+		event:FireServer(eventName, fields or {})
+	end
+end
+
 local currentStage = 1
 local stageConfig = nil
 local stageEndZ = 0
@@ -177,6 +185,11 @@ function EncounterController.UpdatePlayerStage(playerZ)
 
 		if player:GetAttribute("CurrentStage") ~= realStage then
 			player:SetAttribute("CurrentStage", realStage)
+			reportAnalyticsEvent("stage_reached", {
+				stage = realStage,
+				distance = player:GetAttribute("CurrentDistance") or 0,
+				level = player:GetAttribute("Level") or 1,
+			})
 			print(">>> 玩家进入第 " .. tostring(realStage) .. " 关 <<<")
 		end
 	end
@@ -962,7 +975,8 @@ function EncounterController.TriggerDrops(enemyType, enemyPos)
     local numDrops = dropConfig.NumDrops
     local totalExp = dropConfig.Exp
     local coinGainBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
-    local totalCoins = math.max(0, math.floor((dropConfig.Coins or 0) * (1 + coinGainBonus) + 0.5))
+    local inviteCoinBonus = math.max(0, tonumber(player:GetAttribute("RunInviteCoinBonus")) or 0)
+    local totalCoins = math.max(0, math.floor((dropConfig.Coins or 0) * (1 + coinGainBonus + inviteCoinBonus) + 0.5))
 
     local expPerDrop = math.ceil(totalExp / numDrops)
 

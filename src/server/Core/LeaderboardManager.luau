@@ -261,6 +261,9 @@ local function initPlayer(player)
 				local state = runStates[player]
 				if state then
 					updatePlayerDistance(player, state, true)
+					if Services and Services.AnalyticsManager and Services.AnalyticsManager.HandleRunEnded then
+						Services.AnalyticsManager.HandleRunEnded(player, "death")
+					end
 					state.Active = false
 				end
 
@@ -291,6 +294,9 @@ local function startRun(player, clientStartZ)
 		LastDistance = 0,
 	}
 	player:SetAttribute("CurrentDistance", 0)
+	if Services and Services.AnalyticsManager and Services.AnalyticsManager.HandleRunStarted then
+		Services.AnalyticsManager.HandleRunStarted(player)
+	end
 end
 
 -- 更新单个玩家的当前距离与历史最高距离。
@@ -311,6 +317,9 @@ updatePlayerDistance = function(player, state, allowDead)
 
 	state.LastDistance = distance
 	player:SetAttribute("CurrentDistance", distance)
+	if Services and Services.AnalyticsManager and Services.AnalyticsManager.HandleDistanceUpdated then
+		Services.AnalyticsManager.HandleDistanceUpdated(player, distance)
+	end
 
 	local bestDistance = player:GetAttribute("BestDistance") or 0
 	if distance > bestDistance then
@@ -352,6 +361,9 @@ function LeaderboardManager.Start()
 		local state = runStates[player]
 		if state then
 			updatePlayerDistance(player, state, true)
+			if state.Active and Services and Services.AnalyticsManager and Services.AnalyticsManager.HandleRunEnded then
+				Services.AnalyticsManager.HandleRunEnded(player, "leave")
+			end
 		end
 		LeaderboardManager.SubmitPlayerBestDistance(player)
 		runStates[player] = nil

@@ -110,6 +110,16 @@ local GameConfig = {
 			RespawnBackOffset = 8,
 			Unlimited = true,
 		},
+		QuickHeal = {
+			ProductId = 3605087941,
+			PriceRobux = 10,
+			OfferSeconds = 3,
+			HealHPPercent = 1,
+		},
+		Rebirth = {
+			ProductId = 3605119380,
+			PriceRobux = 10,
+		},
 		InstantCoins = {
 			Enabled = true,
 			MinimumBasisCoins = 10000,
@@ -135,12 +145,54 @@ local GameConfig = {
 			},
 		},
 		StarterPack = {
-			ProductId = 0,
+			ProductId = 1880320822,
 			RewardCoins = 5000,
 			RewardPetRarity = "Rare",
 			RewardPetLevel = 50,
 			RewardRebirthCount = 1,
 			OneTime = true,
+		},
+	},
+
+	SOCIAL_REWARD = {
+		Enabled = true,
+		CommunityGroupId = 79387268,
+		RewardTickets = 1,
+		RewardCoins = 10000,
+		RequireCommunity = true,
+		AllowPromptClaimFallback = false,
+	},
+
+	INVITE_REWARD = {
+		Enabled = true,
+		CoinBonus = 0.5,
+		MaxRunBonus = 0.5,
+		TokenLifetimeSeconds = 3600,
+		MessageTopic = "InviteReward_v1",
+		LaunchDataType = "InviteReward",
+		PromptMessage = "Invite friends and get +50% coin bonus next run!",
+	},
+
+	ANALYTICS = {
+		Enabled = true,
+		DebugPrint = false,
+		MaxCustomFields = 20,
+		DistanceMilestones = { 50, 100, 200, 500 },
+		ClientThrottleWindow = 10,
+		ClientEventMaxPerWindow = 80,
+		HighFrequencyEventMaxPerWindow = 50,
+		ClientEventWhitelist = {
+			level_up_triggered = true,
+			level_up_cards_shown = true,
+			level_up_card_selected = true,
+			gate_chosen = true,
+			enemy_killed = true,
+			elite_killed = true,
+			boss_killed = true,
+			shop_open = true,
+			shop_close = true,
+			pet_hatch_open = true,
+			stage_reached = true,
 		},
 	},
 
@@ -217,7 +269,7 @@ local GameConfig = {
 		},
 	},
 
-    -- 5. 关卡(Stage)与遭遇配置中心 (前5关爽感割草期)
+    -- 5. 关卡(Stage)与遭遇配置中心
     STAGES = {
         [1] = {
             Length = 1000,
@@ -244,7 +296,7 @@ local GameConfig = {
         [2] = {
             Length = 1000,
             GateInterval = 300,
-            MobInterval = 80,
+            MobInterval = 100,
             MobsPerGroup = {3, 4},
             EliteCount = 2,
             HasBoss = true,
@@ -266,8 +318,8 @@ local GameConfig = {
         [3] = {
             Length = 1000,
             GateInterval = 300,
-            MobInterval = 70,
-            MobsPerGroup = {4, 5},
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
             EliteCount = 2,
             HasBoss = true,
 
@@ -287,8 +339,8 @@ local GameConfig = {
         [4] = {
             Length = 1000,
             GateInterval = 300,
-            MobInterval = 60,
-            MobsPerGroup = {4, 5},
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
             EliteCount = 3,
             HasBoss = true,
 
@@ -308,12 +360,11 @@ local GameConfig = {
         [5] = {
             Length = 1000,
             GateInterval = 300,
-            MobInterval = 50,
-            MobsPerGroup = {4, 5},
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
             EliteCount = 3,
             HasBoss = true,
 
-            -- 第 5 关作为无尽模式的基底，怪群非常密集
             BasicHP = 70,
             EliteHP = 140,
             BossHP = 500,
@@ -636,6 +687,18 @@ local GameConfig = {
     },
 
     -- 12. 飞剑系统 (御剑流) 初始配置
+    DAMAGE_NUMBER = {
+        Enabled = true,
+        Debug = true,
+        Duration = 0.55,
+        HeadOffset = 2,
+        RandomSpread = 1.2,
+        StartSize = 34,
+        EndSize = 42,
+        TextColor = Color3.fromRGB(255, 60, 60),
+        StrokeColor = Color3.fromRGB(35, 20, 0),
+    },
+
     SWORD_SKILL = {
         BaseDamage = 20,          -- 飞剑初始伤害
         BaseAttackInterval = 3,   -- 飞剑初始攻击间隔(CD)
@@ -715,6 +778,8 @@ local GameConfig = {
         Sword_ATK_Bonus = "rbxassetid://74531224517277", -- 御剑.png
         Sword_CD_Reduction = "rbxassetid://74531224517277", -- 御剑.png
         ALL = "rbxassetid://75710132785084", -- 稀有卡.png
+        Rare = "rbxassetid://17368084270", -- 幸运.png
+        LateralSpeed_Bonus = "rbxassetid://17368052918", -- 移速.png
     },
 
     -- 14. 升级卡美术分类配置；美术可以按 Category 做预制卡片，代码只负责填角标/切换分类层。

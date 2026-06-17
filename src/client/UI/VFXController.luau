@@ -631,4 +631,96 @@ function VFXController.PlayUIBounce(uiElement)
 	end)
 end
 
+-- Floating damage number feedback for local combat hits.
+function VFXController.PlayDamageNumber(enemy, damage, hitPosition)
+	local damageConfig = Controllers.Config and Controllers.Config.DAMAGE_NUMBER
+	if not damageConfig or damageConfig.Enabled == false then
+		if damageConfig and damageConfig.Debug then
+			print("[DamageNumber][VFX] skipped reason=disabled")
+		end
+		return
+	end
+
+	local amount = math.floor(tonumber(damage) or 0)
+	if amount <= 0 then
+		if damageConfig.Debug then
+			print("[DamageNumber][VFX] skipped reason=invalid_damage damage=", damage)
+		end
+		return
+	end
+
+	local enemyPart = enemy and enemy.part
+	if not enemyPart or not enemyPart.Parent then
+		if damageConfig.Debug then
+			print("[DamageNumber][VFX] skipped reason=missing_enemy_part")
+		end
+		return
+	end
+
+	local localProjectiles = Workspace:FindFirstChild("LocalProjectiles")
+	if not localProjectiles then
+		localProjectiles = Instance.new("Folder")
+		localProjectiles.Name = "LocalProjectiles"
+		localProjectiles.Parent = Workspace
+	end
+
+	local duration = damageConfig.Duration or 0.55
+	local headOffset = damageConfig.HeadOffset or 2
+	local spread = damageConfig.RandomSpread or 1.2
+	local basePosition = hitPosition or enemyPart.Position
+	local randomOffset = Vector3.new((math.random() - 0.5) * spread, 0, (math.random() - 0.5) * spread)
+	local startPosition = Vector3.new(
+		basePosition.X,
+		enemyPart.Position.Y + enemyPart.Size.Y * 0.5 + headOffset,
+		basePosition.Z
+	) + randomOffset
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "DamageNumberAnchor"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+	anchor.CFrame = CFrame.new(startPosition)
+	anchor.Parent = localProjectiles
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "DamageNumber"
+	billboard.AlwaysOnTop = true
+	billboard.LightInfluence = 0
+	billboard.MaxDistance = 250
+	billboard.Size = UDim2.fromOffset(130, 54)
+	billboard.Parent = anchor
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "Value"
+	textLabel.BackgroundTransparency = 1
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.Font = Enum.Font.FredokaOne
+	textLabel.Text = "-" .. Controllers.Config.FormatNumber(amount)
+	textLabel.TextColor3 = damageConfig.TextColor or Color3.fromRGB(255, 244, 92)
+	textLabel.TextStrokeColor3 = damageConfig.StrokeColor or Color3.fromRGB(35, 20, 0)
+	textLabel.TextStrokeTransparency = 0
+	textLabel.TextTransparency = 0
+	textLabel.TextScaled = false
+	textLabel.TextSize = damageConfig.StartSize or 34
+	textLabel.Parent = billboard
+
+	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(anchor, tweenInfo, {Position = startPosition + Vector3.new(0, 2.4, 0)}):Play()
+	TweenService:Create(textLabel, tweenInfo, {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+		TextSize = damageConfig.EndSize or 42,
+	}):Play()
+
+	Debris:AddItem(anchor, duration + 0.15)
+
+	if damageConfig.Debug then
+		print("[DamageNumber][VFX] created damage=", amount, "position=", tostring(startPosition))
+	end
+end
+
 return VFXController

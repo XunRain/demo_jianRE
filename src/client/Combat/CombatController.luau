@@ -15,6 +15,14 @@ local Controllers
 
 CombatController.ActiveBullets = {}
 
+local function reportAnalyticsEvent(eventName, fields)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local event = remotes and remotes:FindFirstChild("ReportAnalyticsEvent")
+	if event and event:IsA("RemoteEvent") then
+		event:FireServer(eventName, fields or {})
+	end
+end
+
 function CombatController.Init(deps)
 	Controllers = deps
 end
@@ -196,6 +204,22 @@ local function playEnemyHitJitter(enemy)
     Controllers.VFX.PlayHitJitterVFX(enemy.visual or enemy.part, enemy.baseSize)
 end
 
+local function playEnemyDamageNumber(enemy, damage, source, hitPosition)
+	local damageConfig = Controllers.Config and Controllers.Config.DAMAGE_NUMBER
+	if damageConfig and damageConfig.Debug then
+		print("[DamageNumber][Hit] source=" .. tostring(source), "damage=", damage, "enemy=", enemy and enemy.type)
+	end
+
+	if not Controllers.VFX or type(Controllers.VFX.PlayDamageNumber) ~= "function" then
+		if damageConfig and damageConfig.Debug then
+			print("[DamageNumber][Hit] skipped reason=missing_vfx_controller")
+		end
+		return
+	end
+
+	Controllers.VFX.PlayDamageNumber(enemy, damage, hitPosition)
+end
+
 -- 更新怪物血量数字显示；所有怪物常驻显示，优先使用模型内 HP/SurfaceGui。
 local function updateEnemyHpLabel(enemy)
 	if not enemy or not enemy.label then return end
@@ -238,6 +262,34 @@ local function triggerEliteGoldReward(enemyType)
 end
 
 -- 检查玩家子弹、门、怪物与玩家之间的碰撞，并处理伤害、掉落与结算逻辑。
+local function reportEnemyKilled(enemy, damage, source, isPetDamage)
+	if not enemy then return end
+	local enemyType = enemy.type or "Unknown"
+	reportAnalyticsEvent("enemy_killed", {
+		enemy_type = enemyType,
+		damage = tonumber(damage) or 0,
+		source = tostring(source or "Unknown"),
+		weapon_id = player:GetAttribute("EquippedWeapon") or "DefaultWeapon",
+		is_pet_damage = isPetDamage == true,
+	})
+
+	if enemyType == "Elite" then
+		reportAnalyticsEvent("elite_killed", {
+			stage = player:GetAttribute("CurrentStage") or 1,
+			distance = player:GetAttribute("CurrentDistance") or 0,
+			level = player:GetAttribute("Level") or 1,
+			reward_mode = "EliteGoldGuarantee",
+		})
+	elseif enemyType == "Boss" then
+		reportAnalyticsEvent("boss_killed", {
+			stage = player:GetAttribute("CurrentStage") or 1,
+			distance = player:GetAttribute("CurrentDistance") or 0,
+			level = player:GetAttribute("Level") or 1,
+			reward_mode = "BossGold",
+		})
+	end
+end
+
 function CombatController.CheckCollisions(rootPart)
 	local pPos = rootPart.Position
 	local playerAtk = player:GetAttribute("ATK") or Controllers.Config.BASE_ATK
@@ -291,10 +343,12 @@ function CombatController.CheckCollisions(rootPart)
 
 					for _, targetE in ipairs(targetsToDamage) do
 						targetE.hp = targetE.hp - dmg
+						playEnemyDamageNumber(targetE, dmg, "AOE", targetE.part and targetE.part.Position or bPos)
 						updateEnemyHpLabel(targetE)
 						playEnemyHitJitter(targetE)
 
 						if targetE.hp <= 0 then
+							reportEnemyKilled(targetE, dmg, "AOE", false)
 							local deathVfxName = Controllers.Config.ENEMY_VFX[targetE.type] or "BasicDeath"
 							Controllers.VFX.PlayDeathVFX(deathVfxName, targetE.part.Position)
 
@@ -308,10 +362,12 @@ function CombatController.CheckCollisions(rootPart)
 					b.hitsLeft = 0
 				else
 					e.hp = e.hp - dmg
+					playEnemyDamageNumber(e, dmg, b.isPet and "Pet" or "Bullet", ePos)
 					updateEnemyHpLabel(e)
 					playEnemyHitJitter(e)
 
 					if e.hp <= 0 then
+						reportEnemyKilled(e, dmg, b.isPet and "Pet" or "Bullet", b.isPet == true)
 						local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
 						Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 
@@ -361,6 +417,7 @@ function CombatController.CheckCollisions(rootPart)
 
 		if chosenGate then
 			if sourceVFX and rootPart then Controllers.VFX.PlayGateVFX(rootPart) end
+			local gateHpBefore = player:GetAttribute("HP") or Controllers.Config.BASE_HP
 
 			if chosenGate.attr == "HP_Bonus" then
 				local currentMax = player:GetAttribute("MaxHP") or Controllers.Config.BASE_HP
@@ -408,6 +465,16 @@ function CombatController.CheckCollisions(rootPart)
 				end
 				player:SetAttribute(chosenGate.attr, nextVal)
 			end
+			reportAnalyticsEvent("gate_chosen", {
+				stage = player:GetAttribute("CurrentStage") or 1,
+				distance = player:GetAttribute("CurrentDistance") or 0,
+				level = player:GetAttribute("Level") or 1,
+				gate_attr = tostring(chosenGate.attr),
+				gate_amount = tonumber(chosenGate.amount) or 0,
+				is_buff = (tonumber(chosenGate.amount) or 0) >= 0,
+				hp_before = gateHpBefore,
+				hp_after = player:GetAttribute("HP") or gateHpBefore,
+			})
 
 			if group.left.part then group.left.part:Destroy() end
 			if group.right.part then group.right.part:Destroy() end
@@ -460,6 +527,10 @@ function CombatController.CheckCollisions(rootPart)
 			local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
 			Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 			Controllers.Encounter.TriggerDrops(e.type, ePos)
+
+			if newHp > 0 and Controllers.Game and type(Controllers.Game.BeginQuickHealOffer) == "function" then
+				Controllers.Game.BeginQuickHealOffer()
+			end
 
 			if newHp <= 0 and Controllers.Game and type(Controllers.Game.BeginReviveOffer) == "function" then
 				if humanoid then
@@ -604,8 +675,9 @@ function CombatController.StartSwordSystem()
 		end
 	end
 
-	local function killEnemyBySword(enemy, hitPos, Config)
+	local function killEnemyBySword(enemy, hitPos, Config, damage)
 		local deathVfx = Config.ENEMY_VFX[enemy.type] or "BasicDeath"
+		reportEnemyKilled(enemy, damage or 0, "Sword", false)
 		Controllers.VFX.PlayDeathVFX(deathVfx, hitPos)
 		triggerBossGoldReward(enemy.type)
 		triggerEliteGoldReward(enemy.type)
@@ -759,13 +831,15 @@ function CombatController.StartSwordSystem()
 				if swordData.attackProgress >= 1 then
 					if Controllers.Game.IsCombatActive and not isCombatPaused() and isSwordTargetAlive(targetEnemy) then
 						local hitPos = targetEnemy.part.Position
-						targetEnemy.hp = targetEnemy.hp - (swordData.damage or 0)
+						local swordDamage = swordData.damage or 0
+						targetEnemy.hp = targetEnemy.hp - swordDamage
+						playEnemyDamageNumber(targetEnemy, swordDamage, "Sword", hitPos)
 						updateEnemyHpLabel(targetEnemy)
 						playEnemyHitJitter(targetEnemy)
 						Controllers.VFX.PlayBulletExplosion("DefaultHit", hitPos)
 
 						if targetEnemy.hp <= 0 then
-							killEnemyBySword(targetEnemy, hitPos, Controllers.Config)
+							killEnemyBySword(targetEnemy, hitPos, Controllers.Config, swordDamage)
 						end
 					end
 

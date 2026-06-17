@@ -12,8 +12,18 @@ local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local MarketplaceService = game:GetService("MarketplaceService")
+local SocialService = game:GetService("SocialService")
+local GroupService = game:GetService("GroupService")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
+
+local function reportAnalyticsEvent(eventName, fields)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local event = remotes and remotes:FindFirstChild("ReportAnalyticsEvent")
+	if event and event:IsA("RemoteEvent") then
+		event:FireServer(eventName, fields or {})
+	end
+end
 
 local Controllers -- 全局依赖指针
 
@@ -28,25 +38,36 @@ local function getMainButtonRoot(mainUI)
 	return mainUI:FindFirstChild("MainUI_1")
 end
 
--- 查找 Studio 模板里可能存在的文字节点，兼容不同命名，避免代码强制重建 UI。
-local function updateMainButtonRootVisibility(mainUI)
-	local buttonRoot = getMainButtonRoot(mainUI)
-	if not buttonRoot or not buttonRoot:IsA("GuiObject") then
-		return
+local function getMainButtonRoots(mainUI)
+	if not mainUI then return {} end
+
+	local roots = {}
+	local seen = {}
+	for _, name in ipairs({ "MainUI_1", "MainUI_2" }) do
+		local root = mainUI:FindFirstChild(name)
+		if root and root:IsA("GuiObject") and not seen[root] then
+			seen[root] = true
+			table.insert(roots, root)
+		end
 	end
 
-	local hiddenByPanel = buttonRoot:GetAttribute("HiddenByShopPanel") == true
-		or buttonRoot:GetAttribute("HiddenByHatchPanel") == true
-	buttonRoot.Visible = player:GetAttribute("InCombat") ~= true and not hiddenByPanel
+	return roots
+end
+
+-- 查找 Studio 模板里可能存在的文字节点，兼容不同命名，避免代码强制重建 UI。
+local function updateMainButtonRootVisibility(mainUI)
+	for _, buttonRoot in ipairs(getMainButtonRoots(mainUI)) do
+		local hiddenByPanel = buttonRoot:GetAttribute("HiddenByShopPanel") == true
+			or buttonRoot:GetAttribute("HiddenByHatchPanel") == true
+		buttonRoot.Visible = player:GetAttribute("InCombat") ~= true and not hiddenByPanel
+	end
 end
 
 local function setMainButtonRootHiddenByPanel(mainUI, panelKey, isHidden)
-	local buttonRoot = getMainButtonRoot(mainUI)
-	if not buttonRoot or not buttonRoot:IsA("GuiObject") then
-		return
+	for _, buttonRoot in ipairs(getMainButtonRoots(mainUI)) do
+		buttonRoot:SetAttribute("HiddenBy" .. panelKey .. "Panel", isHidden == true)
 	end
 
-	buttonRoot:SetAttribute("HiddenBy" .. panelKey .. "Panel", isHidden == true)
 	updateMainButtonRootVisibility(mainUI)
 end
 
@@ -256,6 +277,24 @@ function UIController.Start()
 				end
 			end
 			-- 退出按钮
+			local coinBonusUI = mainUI:FindFirstChild("CoinBonusUI", true)
+			if coinBonusUI and coinBonusUI:IsA("GuiObject") then
+				coinBonusUI.Visible = true
+				local bonusText = findTextNode(coinBonusUI, { "TextLabel", "BonusText", "CoinBonusText" })
+					or coinBonusUI:FindFirstChildWhichIsA("TextLabel", true)
+					or coinBonusUI:FindFirstChildWhichIsA("TextButton", true)
+				if bonusText then
+					local rebirthBonus = math.max(0, tonumber(player:GetAttribute("CoinGainBonus")) or 0)
+					local runInviteBonus = math.max(0, tonumber(player:GetAttribute("RunInviteCoinBonus")) or 0)
+					local pendingInviteBonus = math.max(0, tonumber(player:GetAttribute("PendingInviteCoinBonus")) or 0)
+					local inviteBonus = inCombat and runInviteBonus or math.max(runInviteBonus, pendingInviteBonus)
+					local multiplier = 1 + rebirthBonus + inviteBonus
+					local multiplierText = string.format("%.1f", multiplier)
+					multiplierText = string.gsub(multiplierText, "%.0$", "")
+					bonusText.Text = "Coin Bonus: x" .. multiplierText
+				end
+			end
+
 			local exitButton = mainUI:FindFirstChild("ExitButton")
 			if exitButton and exitButton:IsA("GuiButton") then
 				applyExitButtonHoverScale(exitButton)
@@ -287,6 +326,21 @@ function UIController.Start()
 			local rebirthPanel = mainUI:FindFirstChild("RebirthPanel")
 			if rebirthPanel and inCombat then
 				rebirthPanel.Visible = false
+			end
+
+			local starterPackPanel = mainUI:FindFirstChild("StarterPackPanel")
+			if starterPackPanel and inCombat then
+				starterPackPanel.Visible = false
+			end
+
+			local starterPackRewardPanel = mainUI:FindFirstChild("StarterPackRewardPanel")
+			if starterPackRewardPanel and inCombat then
+				starterPackRewardPanel.Visible = false
+			end
+
+			local freeRewardPanel = mainUI:FindFirstChild("FreeRewardPanel")
+			if freeRewardPanel and inCombat then
+				freeRewardPanel.Visible = false
 			end
 
 			local stageHud = findStageHud(mainUI)
@@ -724,6 +778,23 @@ function UIController.Start()
 					local buffId = card:GetAttribute("BuffId") or attr
 					local buffMaxLevel = card:GetAttribute("BuffMaxLevel")
 					if not attr then return end
+					local cardIds = {}
+					local cardAttrs = {}
+					for _, currentCard in ipairs(cards) do
+						if currentCard and currentCard:IsA("GuiButton") then
+							table.insert(cardIds, tostring(currentCard:GetAttribute("BuffId") or currentCard:GetAttribute("BuffAttr") or ""))
+							table.insert(cardAttrs, tostring(currentCard:GetAttribute("BuffAttr") or ""))
+						end
+					end
+					reportAnalyticsEvent("level_up_card_selected", {
+						level = player:GetAttribute("Level") or 1,
+						selected_buff_id = tostring(buffId),
+						selected_attr = tostring(attr),
+						selected_amount = tonumber(amount) or 0,
+						card_ids = cardIds,
+						card_attrs = cardAttrs,
+						reward_mode = player:GetAttribute("LevelUpRewardMode") or "Normal",
+					})
 					if Controllers.Sound then
 						Controllers.Sound.PlaySelect()
 					end
@@ -939,6 +1010,8 @@ function UIController.Start()
 					guaranteedGoldCardIndex = math.random(1, #cards)
 				end
 
+				local shownCardIds = {}
+				local shownCardAttrs = {}
 				for i, card in ipairs(cards) do
 					if card and card:IsA("GuiButton") then
 						if drawTotalWeight <= 0 then
@@ -979,6 +1052,8 @@ function UIController.Start()
 						card:SetAttribute("BuffAmount", buff.Amount)
 						card:SetAttribute("BuffId", getBuffId(buff))
 						card:SetAttribute("BuffMaxLevel", getBuffMaxLevel(buff))
+						table.insert(shownCardIds, tostring(getBuffId(buff)))
+						table.insert(shownCardAttrs, tostring(buff.Attr))
 						applyBuffCardDisplay(card, buff)
 						
 						local targetRotation = cardBaseRotations[card] or 0
@@ -994,6 +1069,12 @@ function UIController.Start()
 						end)
 					end
 				end
+				reportAnalyticsEvent("level_up_cards_shown", {
+					level = player:GetAttribute("Level") or 1,
+					reward_mode = rewardMode,
+					card_ids = shownCardIds,
+					card_attrs = shownCardAttrs,
+				})
 			else
 				levelUpPanel.Visible = false
 				player:SetAttribute("LevelUpRewardMode", "Normal")
@@ -1023,6 +1104,7 @@ function UIController.Start()
 		local shopCameraTween = nil
 		local shopSavedFOV = nil
 		local isApplyingShopVisible = false
+		local shopOpenClock = nil
 		
 		-- 等待美术做好的滑动列表和模板
 		local shopList = shopPanel:WaitForChild("ShopList")
@@ -1253,8 +1335,25 @@ function UIController.Start()
 			tweenShopCamera(isOpen)
 			setMainButtonRootHiddenByPanel(mainUI, "Shop", isOpen)
 
-			if isOpen and refreshShopUI then
-				refreshShopUI()
+			if isOpen then
+				shopOpenClock = os.clock()
+				reportAnalyticsEvent("shop_open", {
+					source = "shop_panel",
+					coins = player:GetAttribute("Coins") or 0,
+					best_distance = player:GetAttribute("BestDistance") or 0,
+					best_level = player:GetAttribute("BestLevel") or 1,
+				})
+				if refreshShopUI then
+					refreshShopUI()
+				end
+			else
+				local durationInShop = shopOpenClock and math.floor(os.clock() - shopOpenClock) or 0
+				shopOpenClock = nil
+				reportAnalyticsEvent("shop_close", {
+					duration_in_shop = durationInShop,
+					close_reason = "panel_closed",
+					coins = player:GetAttribute("Coins") or 0,
+				})
 			end
 		end
 
@@ -1515,7 +1614,22 @@ function UIController.Start()
 			tweenShopCamera(shopPanel.Visible)
 			setMainButtonRootHiddenByPanel(mainUI, "Shop", shopPanel.Visible)
 			if shopPanel.Visible then
+				shopOpenClock = os.clock()
+				reportAnalyticsEvent("shop_open", {
+					source = "shop_visible",
+					coins = player:GetAttribute("Coins") or 0,
+					best_distance = player:GetAttribute("BestDistance") or 0,
+					best_level = player:GetAttribute("BestLevel") or 1,
+				})
 				refreshShopUI()
+			else
+				local durationInShop = shopOpenClock and math.floor(os.clock() - shopOpenClock) or 0
+				shopOpenClock = nil
+				reportAnalyticsEvent("shop_close", {
+					duration_in_shop = durationInShop,
+					close_reason = "visible_changed",
+					coins = player:GetAttribute("Coins") or 0,
+				})
 			end
 		end)
 
@@ -2891,6 +3005,7 @@ function UIController.Start()
 		local closeButton = rebirthPanel:FindFirstChild("BtnClose", true)
 		local confirmButton = rebirthPanel:FindFirstChild("BtnConfirm", true)
 		local cancelButton = rebirthPanel:FindFirstChild("BtnCancel", true)
+		local paidRebirthButton = nil
 
 		local function applySimpleHover(guiObject, attributeName, scaleName, targetScale)
 			if not guiObject or not guiObject:IsA("GuiObject") then return end
@@ -2946,8 +3061,79 @@ function UIController.Start()
 			end
 		end
 
+		local function findRebirthRobuxButton()
+			local function hasRobuxText(button)
+				if not button or not button:IsA("GuiButton") then
+					return false
+				end
+
+				local directText = button:IsA("TextButton") and button.Text or ""
+				if string.find(string.upper(tostring(directText)), "R") then
+					return true
+				end
+
+				local label = button:FindFirstChildWhichIsA("TextLabel", true)
+				return label ~= nil and string.find(string.upper(tostring(label.Text)), "R") ~= nil
+			end
+
+			for _, name in ipairs({
+				"BtnRobuxRebirth",
+				"BtnPaidRebirth",
+				"BtnRebirthRobux",
+				"BtnRobux",
+				"BtnRRebirth",
+				"RobuxRebirthButton",
+			}) do
+				local button = rebirthPanel:FindFirstChild(name, true)
+				if button and button:IsA("GuiButton") then
+					return button
+				end
+			end
+
+			if hasRobuxText(cancelButton) then
+				local button = cancelButton
+				cancelButton = nil
+				return button
+			end
+
+			for _, descendant in ipairs(rebirthPanel:GetDescendants()) do
+				if descendant:IsA("GuiButton") and descendant ~= confirmButton and descendant ~= closeButton and descendant ~= cancelButton then
+					if hasRobuxText(descendant) then
+						return descendant
+					end
+				end
+			end
+
+			return nil
+		end
+
 		local function formatPercent(value)
 			return string.format("+%d%%", math.floor((tonumber(value) or 0) * 100 + 0.5))
+		end
+
+		local warnedMissingRebirthProgress = false
+		local function updateRebirthProgressBar(coins, cost, formatNumber)
+			local progressBar = rebirthPanel:FindFirstChild("ProgressBar", true)
+			local fill = progressBar and progressBar:FindFirstChild("Fill", true)
+			local ratioText = progressBar and findTextNode(progressBar, { "CurrencyRatio" })
+
+			if not progressBar or not fill then
+				if not warnedMissingRebirthProgress then
+					warn("[UIController] Rebirth progress UI missing: RebirthPanel/Content/ProgressBar/Fill.")
+					warnedMissingRebirthProgress = true
+				end
+				return
+			end
+
+			local safeCost = math.max(1, math.floor(tonumber(cost) or 0))
+			local progress = math.clamp((tonumber(coins) or 0) / safeCost, 0, 1)
+			if fill:IsA("GuiObject") then
+				fill.Size = UDim2.new(progress, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+			end
+
+			if ratioText then
+				ratioText.Text = formatNumber(coins) .. "$/" .. formatNumber(safeCost) .. "$"
+			end
 		end
 
 		local function getRebirthSnapshot()
@@ -2964,13 +3150,21 @@ function UIController.Start()
 			local coins = math.max(0, math.floor(tonumber(player:GetAttribute("Coins")) or 0))
 			local formatNumber = Controllers.Config.FormatNumber or tostring
 			local canRebirth = coins >= cost
+			local paidRebirthConfig = ((Controllers.Config.MONETIZATION or {}).Rebirth or {})
+			local paidRebirthProductId = math.max(0, math.floor(tonumber(paidRebirthConfig.ProductId) or 0))
+			local paidRebirthPrice = math.max(0, math.floor(tonumber(paidRebirthConfig.PriceRobux) or 299))
 
 			setText("TitleText", "Rebirth")
 			setText("RebirthCountText", "Rebirths: " .. tostring(rebirthCount))
-			setText("CostText", "Cost: " .. formatNumber(cost) .. " Coins")
+			local oldCostText = findTextNode(rebirthPanel, { "CostText" })
+			if oldCostText then
+				oldCostText.Text = ""
+				oldCostText.Visible = false
+			end
 			setText("CurrentMultiplierText", "Current Coin Bonus: " .. formatPercent(coinGainBonus))
 			setText("NextMultiplierText", "After Rebirth: " .. formatPercent(nextCoinGainBonus))
 			setText("ResetNoticeText", "Resets shop upgrades except Pet Slots.")
+			updateRebirthProgressBar(coins, cost, formatNumber)
 
 			if confirmButton and confirmButton:IsA("GuiButton") then
 				confirmButton:SetAttribute("CanRebirth", canRebirth)
@@ -2979,6 +3173,11 @@ function UIController.Start()
 			end
 			if cancelButton then
 				setButtonText(cancelButton, "Cancel")
+			end
+			if paidRebirthButton and paidRebirthButton:IsA("GuiButton") then
+				paidRebirthButton:SetAttribute("ProductId", paidRebirthProductId)
+				paidRebirthButton.AutoButtonColor = paidRebirthProductId > 0
+				setButtonText(paidRebirthButton, tostring(paidRebirthPrice) .. "R")
 			end
 			if closeButton and closeButton:IsA("TextButton") then
 				closeButton.Text = "X"
@@ -3004,6 +3203,10 @@ function UIController.Start()
 		end
 
 		rebirthPanel.Visible = false
+		paidRebirthButton = findRebirthRobuxButton()
+		if not paidRebirthButton then
+			warn("[UIController] Paid rebirth button not found. Recommended names: BtnRobuxRebirth / BtnPaidRebirth / BtnRebirthRobux / BtnRobux, or a button with text like 299R.")
+		end
 		refreshRebirthUI()
 
 		applySimpleHover(openButton, "RebirthOpenHoverBound", "RebirthOpenHoverScale", petBagConfig.OpenButtonHoverScale or 1.06)
@@ -3022,6 +3225,38 @@ function UIController.Start()
 			applySimpleHover(cancelButton, "RebirthCancelHoverBound", "RebirthCancelHoverScale", petBagConfig.CloseButtonHoverScale or 1.06)
 			cancelButton.Activated:Connect(function()
 				setRebirthOpen(false)
+			end)
+		end
+
+		local paidRebirthPromptInProgress = false
+		if paidRebirthButton and paidRebirthButton:IsA("GuiButton") then
+			applySimpleHover(paidRebirthButton, "PaidRebirthHoverBound", "PaidRebirthHoverScale", 1.06)
+			paidRebirthButton.Activated:Connect(function()
+				if paidRebirthPromptInProgress then return end
+
+				local productId = math.max(0, math.floor(tonumber(paidRebirthButton:GetAttribute("ProductId")) or 0))
+				if productId <= 0 then
+					warn("[UIController] Paid rebirth ProductId is not configured. Set GameConfig.MONETIZATION.Rebirth.ProductId.")
+					refreshRebirthUI()
+					return
+				end
+
+				paidRebirthPromptInProgress = true
+				MarketplaceService:PromptProductPurchase(player, productId)
+				task.delay(1, function()
+					paidRebirthPromptInProgress = false
+				end)
+			end)
+
+			MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId)
+				if userId ~= player.UserId then return end
+				local paidProductId = math.max(0, math.floor(tonumber(paidRebirthButton:GetAttribute("ProductId")) or 0))
+				if paidProductId > 0 and productId ~= paidProductId then
+					return
+				end
+
+				paidRebirthPromptInProgress = false
+				task.delay(0.5, refreshRebirthUI)
 			end)
 		end
 
@@ -3221,11 +3456,105 @@ function UIController.Start()
 		local mainUI = playerGui:WaitForChild("MainUI", 5)
 		if not mainUI then return end
 
-		local buttonRoot = mainUI:FindFirstChild("MainUI_2")
-		local openButton = buttonRoot and buttonRoot:FindFirstChild("BtnStarterPack")
-		local starterPackPanel = mainUI:FindFirstChild("StarterPackPanel")
+		local function waitForNamedDescendant(root, name, timeoutSeconds)
+			if not root then return nil end
+
+			local function normalizeName(value)
+				if type(value) ~= "string" then
+					return ""
+				end
+				return string.match(value, "^%s*(.-)%s*$") or value
+			end
+
+			local function findByTrimmedName()
+				for _, descendant in ipairs(root:GetDescendants()) do
+					if normalizeName(descendant.Name) == name then
+						return descendant
+					end
+				end
+				return nil
+			end
+
+			local existing = root:FindFirstChild(name, true)
+			if existing then
+				return existing
+			end
+			existing = findByTrimmedName()
+			if existing then
+				return existing
+			end
+
+			local found = nil
+			local connection = root.DescendantAdded:Connect(function(descendant)
+				if descendant.Name == name or normalizeName(descendant.Name) == name then
+					found = descendant
+				end
+			end)
+
+			local expiresAt = os.clock() + (timeoutSeconds or 5)
+			while not found and os.clock() < expiresAt do
+				task.wait(0.1)
+				found = root:FindFirstChild(name, true)
+				if not found then
+					found = findByTrimmedName()
+				end
+			end
+
+			connection:Disconnect()
+			return found
+		end
+
+		local function listChildNames(root)
+			if not root then
+				return "none"
+			end
+
+			local names = {}
+			for _, child in ipairs(root:GetChildren()) do
+				table.insert(names, child.Name .. ":" .. child.ClassName)
+				if #names >= 12 then
+					table.insert(names, "...")
+					break
+				end
+			end
+
+			if #names == 0 then
+				return "none"
+			end
+			return table.concat(names, ", ")
+		end
+
+		local buttonRoot = waitForNamedDescendant(mainUI, "MainUI_2", 8)
+		local openButton = buttonRoot and waitForNamedDescendant(buttonRoot, "BtnStarterPack", 8)
+		if not openButton then
+			openButton = waitForNamedDescendant(mainUI, "BtnStarterPack", 2)
+		end
+		local starterPackPanel = waitForNamedDescendant(mainUI, "StarterPackPanel", 8)
 		if not openButton or not openButton:IsA("GuiButton") or not starterPackPanel or not starterPackPanel:IsA("GuiObject") then
-			warn("[UIController] Starter Pack UI missing: MainUI/MainUI_2/BtnStarterPack or MainUI/StarterPackPanel.")
+			local issues = {}
+			if not buttonRoot then
+				table.insert(issues, "MainUI_2 not found under " .. mainUI:GetFullName())
+			elseif not openButton then
+				table.insert(issues, "BtnStarterPack not found under " .. buttonRoot:GetFullName() .. "; children=[" .. listChildNames(buttonRoot) .. "]")
+			elseif not openButton:IsA("GuiButton") then
+				table.insert(issues, "BtnStarterPack must be ImageButton/TextButton, got " .. openButton.ClassName .. " at " .. openButton:GetFullName())
+			end
+
+			if not starterPackPanel then
+				table.insert(issues, "StarterPackPanel not found under " .. mainUI:GetFullName())
+			elseif not starterPackPanel:IsA("GuiObject") then
+				table.insert(issues, "StarterPackPanel must be a GuiObject, got " .. starterPackPanel.ClassName .. " at " .. starterPackPanel:GetFullName())
+			end
+
+			warn("[UIController] Starter Pack UI missing/invalid:", table.concat(issues, "; "))
+			return
+		end
+
+		local purchaseButton = waitForNamedDescendant(starterPackPanel, "ImageButton", 2)
+		if not purchaseButton or not purchaseButton:IsA("GuiButton") then
+			local found = waitForNamedDescendant(starterPackPanel, "ImageButton", 0)
+			local detail = found and (found.ClassName .. " at " .. found:GetFullName()) or ("not found under " .. starterPackPanel:GetFullName())
+			warn("[UIController] Starter Pack UI missing/invalid: StarterPackPanel/ImageButton must be ImageButton/TextButton, got " .. detail)
 			return
 		end
 
@@ -3235,10 +3564,16 @@ function UIController.Start()
 			warn("[UIController] GetStarterPackStatus RemoteFunction is not ready.")
 			return
 		end
+		local starterPackGranted = remotes and remotes:WaitForChild("StarterPackGranted", 5)
+		if starterPackGranted and not starterPackGranted:IsA("RemoteEvent") then
+			warn("[UIController] StarterPackGranted exists but is not a RemoteEvent.")
+			starterPackGranted = nil
+		end
 
 		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
 		local promptInProgress = false
 		local lastStatus = nil
+		local shownStarterPackPurchaseIds = {}
 
 		local function applyHover(guiObject, attributeName, scaleName, targetScale)
 			if not guiObject or not guiObject:IsA("GuiObject") then return end
@@ -3276,44 +3611,62 @@ function UIController.Start()
 			end
 		end
 
-		local function setTextIn(root, names, text)
-			if not root then return end
-			local label = findTextNode(root, names)
-			if label then
-				label.Text = text
-			end
-		end
-
-		local function setButtonText(button, text)
-			if not button then return end
-			if button:IsA("TextButton") then
-				button.Text = text
-			end
-			setTextIn(button, { "TextLabel", "Label", "TitleText" }, text)
-		end
-
-		local function setRewardText(containerName, title, detail)
-			local content = starterPackPanel:FindFirstChild("Content")
-			local container = content and content:FindFirstChild(containerName)
-			if not container then
-				container = starterPackPanel:FindFirstChild(containerName, true)
-			end
-			if not container then return end
-
-			setTextIn(container, { "TitleText" }, title)
-			setTextIn(container, { "DetailText" }, detail)
+		local function isStarterPackPurchased()
+			return player:GetAttribute("StarterPackPurchased") == true
+				or (type(lastStatus) == "table" and lastStatus.Purchased == true)
 		end
 
 		local function setStarterPackVisible()
-			openButton.Visible = player:GetAttribute("InCombat") ~= true
-			if player:GetAttribute("InCombat") == true then
+			local shouldShowButton = player:GetAttribute("InCombat") ~= true and not isStarterPackPurchased()
+			openButton.Visible = shouldShowButton
+			if not shouldShowButton then
 				starterPackPanel.Visible = false
 			end
 		end
 
-		local buyButton = starterPackPanel:FindFirstChild("BtnBuy", true)
-		local closeButton = starterPackPanel:FindFirstChild("BtnClose", true)
-		local ownedText = findTextNode(starterPackPanel, { "OwnedText" })
+		local closeButton = waitForNamedDescendant(starterPackPanel, "BtnClose", 0)
+		local rewardPanel = waitForNamedDescendant(mainUI, "StarterPackRewardPanel", 0)
+		local rewardImageButton = rewardPanel and waitForNamedDescendant(rewardPanel, "ImageButton", 0)
+		local rewardConfirmButton = rewardPanel and waitForNamedDescendant(rewardPanel, "BtnConfirm", 0)
+
+		local function showStarterPackNotice(text)
+			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "Starter Pack claimed!")
+			end
+			if noticeUI and noticeUI:IsA("GuiObject") then
+				noticeUI.Visible = true
+				task.delay(3, function()
+					if noticeUI then
+						noticeUI.Visible = false
+					end
+				end)
+			else
+				warn("[UIController] Starter Pack claimed, but StarterPackRewardPanel and Notice_UI are missing.")
+			end
+		end
+
+		local function showStarterPackReward(payload)
+			payload = type(payload) == "table" and payload or {}
+			local purchaseId = tostring(payload.PurchaseId or "")
+			if purchaseId ~= "" and shownStarterPackPurchaseIds[purchaseId] then
+				return
+			end
+			if purchaseId ~= "" then
+				shownStarterPackPurchaseIds[purchaseId] = true
+			end
+
+			openButton.Visible = false
+			starterPackPanel.Visible = false
+
+			if not rewardPanel or not rewardPanel:IsA("GuiObject") then
+				showStarterPackNotice("Starter Pack claimed!")
+				return
+			end
+
+			rewardPanel.Visible = true
+		end
 
 		local function refreshStarterPackStatus()
 			local success, status = pcall(function()
@@ -3325,35 +3678,20 @@ function UIController.Start()
 			end
 
 			lastStatus = status
-			local formatNumber = Controllers.Config.FormatNumber or tostring
 			local productId = math.max(0, math.floor(tonumber(status.ProductId) or 0))
 			local dataLoaded = status.DataLoaded == true
 			local purchased = status.Purchased == true
 			local canBuy = dataLoaded and productId > 0 and not purchased
-			local rewardCoins = math.max(0, math.floor(tonumber(status.RewardCoins) or 5000))
-			local rewardPetRarity = tostring(status.RewardPetRarity or "Rare")
-			local rewardPetLevel = math.max(1, math.floor(tonumber(status.RewardPetLevel) or 50))
-			local rewardRebirthCount = math.max(0, math.floor(tonumber(status.RewardRebirthCount) or 1))
 
-			setTextIn(starterPackPanel:FindFirstChild("Header") or starterPackPanel, { "TitleText" }, "Starter Pack")
-			setRewardText("PetReward", "Rare Pet", rewardPetRarity .. " Pet Lv." .. tostring(rewardPetLevel) .. " x1")
-			setRewardText("CoinReward", "Coins", "Coins x" .. formatNumber(rewardCoins))
-			setRewardText("RebirthReward", "Rebirth", "Rebirth x" .. tostring(rewardRebirthCount))
+			purchaseButton:SetAttribute("ProductId", productId)
+			purchaseButton:SetAttribute("StarterPackCanBuy", canBuy)
+			purchaseButton:SetAttribute("StarterPackPurchased", purchased)
 
-			if ownedText then
-				ownedText.Text = purchased and "Already purchased." or ""
-				ownedText.Visible = purchased
-			end
-
-			if buyButton and buyButton:IsA("GuiButton") then
-				buyButton:SetAttribute("ProductId", productId)
-				buyButton:SetAttribute("StarterPackCanBuy", canBuy)
-				buyButton.AutoButtonColor = canBuy
-				local buttonText = "Loading..."
-				if dataLoaded then
-					buttonText = purchased and "Purchased" or (productId > 0 and "Buy" or "Unavailable")
-				end
-				setButtonText(buyButton, buttonText)
+			if purchased then
+				openButton.Visible = false
+				starterPackPanel.Visible = false
+			else
+				setStarterPackVisible()
 			end
 		end
 
@@ -3370,6 +3708,10 @@ function UIController.Start()
 
 		applyHover(openButton, "StarterPackOpenHoverBound", "StarterPackOpenHoverScale", petBagConfig.OpenButtonHoverScale or 1.06)
 		openButton.Activated:Connect(function()
+			if isStarterPackPurchased() then
+				setStarterPackVisible()
+				return
+			end
 			setStarterPackOpen(true)
 		end)
 
@@ -3380,45 +3722,686 @@ function UIController.Start()
 			end)
 		end
 
-		if buyButton and buyButton:IsA("GuiButton") then
-			applyHover(buyButton, "StarterPackBuyHoverBound", "StarterPackBuyHoverScale", 1.06)
-			buyButton.Activated:Connect(function()
-				if promptInProgress then return end
-				if not lastStatus then
-					refreshStarterPackStatus()
+		if rewardPanel and rewardPanel:IsA("GuiObject") then
+			rewardPanel.Visible = false
+		end
+		if rewardImageButton and rewardImageButton:IsA("GuiButton") then
+			rewardImageButton.Activated:Connect(function()
+				if rewardPanel and rewardPanel:IsA("GuiObject") then
+					rewardPanel.Visible = false
 				end
-
-				local productId = math.max(0, math.floor(tonumber(buyButton:GetAttribute("ProductId")) or 0))
-				if buyButton:GetAttribute("StarterPackCanBuy") ~= true or productId <= 0 then
-					refreshStarterPackStatus()
-					return
+			end)
+		end
+		if rewardConfirmButton and rewardConfirmButton:IsA("GuiButton") then
+			applyHover(rewardConfirmButton, "StarterPackRewardConfirmHoverBound", "StarterPackRewardConfirmHoverScale", 1.06)
+			rewardConfirmButton.Activated:Connect(function()
+				if rewardPanel and rewardPanel:IsA("GuiObject") then
+					rewardPanel.Visible = false
 				end
-
-				promptInProgress = true
-				MarketplaceService:PromptProductPurchase(player, productId)
-				task.delay(1, function()
-					promptInProgress = false
-				end)
 			end)
 		end
 
-		MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId)
-			if userId ~= player.UserId then return end
-			promptInProgress = false
-			task.delay(0.6, function()
-				if starterPackPanel.Visible then
-					refreshStarterPackStatus()
-				end
+		purchaseButton.Activated:Connect(function()
+			if promptInProgress then return end
+			if not lastStatus then
+				refreshStarterPackStatus()
+			end
+
+			local productId = math.max(0, math.floor(tonumber(purchaseButton:GetAttribute("ProductId")) or 0))
+			if purchaseButton:GetAttribute("StarterPackCanBuy") ~= true or productId <= 0 then
+				refreshStarterPackStatus()
+				return
+			end
+
+			promptInProgress = true
+			MarketplaceService:PromptProductPurchase(player, productId)
+			task.delay(1, function()
+				promptInProgress = false
 			end)
 		end)
+
+		MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId)
+			if userId ~= player.UserId then return end
+			local starterProductId = math.max(0, math.floor(tonumber(purchaseButton:GetAttribute("ProductId")) or 0))
+			if starterProductId > 0 and productId ~= starterProductId then
+				return
+			end
+
+			promptInProgress = false
+			task.delay(0.6, function()
+				refreshStarterPackStatus()
+			end)
+		end)
+
+		if starterPackGranted then
+			starterPackGranted.OnClientEvent:Connect(function(payload)
+				showStarterPackReward(payload)
+				task.delay(0.2, refreshStarterPackStatus)
+			end)
+		end
 
 		player:GetAttributeChangedSignal("InCombat"):Connect(setStarterPackVisible)
 		for _, attrName in ipairs({ "PlayerDataLoaded", "StarterPackPurchased", "Coins", "OwnedPets_JSON", "RebirthCount", "CoinGainBonus" }) do
 			player:GetAttributeChangedSignal(attrName):Connect(function()
+				if attrName == "StarterPackPurchased" and player:GetAttribute("StarterPackPurchased") == true then
+					openButton.Visible = false
+					starterPackPanel.Visible = false
+					return
+				end
+				setStarterPackVisible()
 				if starterPackPanel.Visible then
 					refreshStarterPackStatus()
 				end
 			end)
+		end
+	end
+
+	local function setupInviteUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+
+		local buttonRoot = mainUI:FindFirstChild("MainUI_2")
+		local inviteButton = buttonRoot and buttonRoot:FindFirstChild("BtnInvite")
+		if not inviteButton then
+			inviteButton = mainUI:FindFirstChild("BtnInvite", true)
+		end
+		if not inviteButton or not inviteButton:IsA("GuiButton") then
+			warn("[UIController] Invite UI missing: MainUI/MainUI_2/BtnInvite.")
+			return
+		end
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local getInviteLaunchData = remotes and remotes:WaitForChild("GetInviteLaunchData", 5)
+		if not getInviteLaunchData or not getInviteLaunchData:IsA("RemoteFunction") then
+			warn("[UIController] GetInviteLaunchData RemoteFunction is not ready.")
+			return
+		end
+
+		local promptInProgress = false
+		local promptCooldownUntil = 0
+		local INVITE_PROMPT_COOLDOWN = 5
+		local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+
+		local function setInviteButtonBusy(isBusy)
+			inviteButton:SetAttribute("InvitePromptBusy", isBusy == true)
+			inviteButton.AutoButtonColor = isBusy ~= true
+		end
+
+		local function applyHover(guiObject)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute("InviteHoverBound") then return end
+			guiObject:SetAttribute("InviteHoverBound", true)
+
+			local hoverScale = guiObject:FindFirstChild("InviteHoverScale")
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = "InviteHoverScale"
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function play(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				play(petBagConfig.OpenButtonHoverScale or 1.06)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				play(normalScale)
+			end)
+			guiObject.Activated:Connect(function()
+				play(normalScale)
+			end)
+		end
+
+		local function showNotice(text)
+			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "")
+			end
+
+			if noticeUI and noticeUI:IsA("GuiObject") then
+				noticeUI.Visible = true
+				task.delay(3, function()
+					if noticeUI then
+						noticeUI.Visible = false
+					end
+				end)
+			else
+				warn("[UIController][Invite]", text)
+			end
+		end
+
+		applyHover(inviteButton)
+
+		inviteButton.Activated:Connect(function()
+			if promptInProgress or os.clock() < promptCooldownUntil then return end
+
+			promptInProgress = true
+			promptCooldownUntil = os.clock() + INVITE_PROMPT_COOLDOWN
+			setInviteButtonBusy(true)
+
+			task.delay(INVITE_PROMPT_COOLDOWN, function()
+				if os.clock() >= promptCooldownUntil then
+					promptInProgress = false
+					setInviteButtonBusy(false)
+				end
+			end)
+
+			local success, invitePayload = pcall(function()
+				return getInviteLaunchData:InvokeServer()
+			end)
+
+			if not success or type(invitePayload) ~= "table" or invitePayload.Success ~= true then
+				promptInProgress = false
+				promptCooldownUntil = 0
+				setInviteButtonBusy(false)
+				warn("[UIController] Failed to get invite launch data:", invitePayload)
+				showNotice("Invite is unavailable.")
+				return
+			end
+
+			local canPrompt = true
+			local canSuccess, canResult = pcall(function()
+				return SocialService:CanSendGameInviteAsync(player)
+			end)
+			if canSuccess then
+				canPrompt = canResult == true
+			end
+			if not canPrompt then
+				promptInProgress = false
+				promptCooldownUntil = 0
+				setInviteButtonBusy(false)
+				showNotice("Invite is unavailable.")
+				return
+			end
+
+			local options = nil
+			local optionSuccess, optionResult = pcall(function()
+				local inviteOptions = Instance.new("ExperienceInviteOptions")
+				inviteOptions.LaunchData = tostring(invitePayload.LaunchData or "")
+				if type(invitePayload.PromptMessage) == "string" and invitePayload.PromptMessage ~= "" then
+					pcall(function()
+						inviteOptions.PromptMessage = invitePayload.PromptMessage
+					end)
+				end
+				return inviteOptions
+			end)
+			if optionSuccess then
+				options = optionResult
+			end
+
+			local promptSuccess, promptError = pcall(function()
+				SocialService:PromptGameInvite(player, options)
+			end)
+
+			if not promptSuccess then
+				promptInProgress = false
+				promptCooldownUntil = 0
+				setInviteButtonBusy(false)
+				warn("[UIController] PromptGameInvite failed:", promptError)
+				showNotice("Invite is unavailable.")
+			end
+		end)
+
+		local inviteRewardGranted = remotes:FindFirstChild("InviteRewardGranted")
+		if inviteRewardGranted and inviteRewardGranted:IsA("RemoteEvent") then
+			inviteRewardGranted.OnClientEvent:Connect(function(payload)
+				local bonus = type(payload) == "table" and tonumber(payload.Bonus) or nil
+				local bonusPercent = bonus and math.floor(bonus * 100 + 0.5) or 50
+				showNotice("Invite reward received! Coin Bonus +" .. tostring(bonusPercent) .. "% next run.")
+			end)
+		end
+	end
+
+	local function setupSocialRewardUI()
+		local playerGui = player:WaitForChild("PlayerGui")
+		local mainUI = playerGui:WaitForChild("MainUI", 5)
+		if not mainUI then return end
+
+		local function normalizeName(value)
+			if type(value) ~= "string" then
+				return ""
+			end
+			return string.match(value, "^%s*(.-)%s*$") or value
+		end
+
+		local function findNamedDescendant(root, name, timeoutSeconds)
+			if not root then return nil end
+
+			local function findOnce()
+				if normalizeName(root.Name) == name then
+					return root
+				end
+
+				local direct = root:FindFirstChild(name, true)
+				if direct then
+					return direct
+				end
+
+				for _, descendant in ipairs(root:GetDescendants()) do
+					if normalizeName(descendant.Name) == name then
+						return descendant
+					end
+				end
+
+				return nil
+			end
+
+			local found = findOnce()
+			local expiresAt = os.clock() + math.max(0, tonumber(timeoutSeconds) or 0)
+			while not found and os.clock() < expiresAt do
+				task.wait(0.1)
+				found = findOnce()
+			end
+
+			return found
+		end
+
+		local function listChildNames(root)
+			if not root then
+				return "none"
+			end
+
+			local names = {}
+			for _, child in ipairs(root:GetChildren()) do
+				table.insert(names, child.Name .. ":" .. child.ClassName)
+				if #names >= 12 then
+					table.insert(names, "...")
+					break
+				end
+			end
+
+			if #names == 0 then
+				return "none"
+			end
+
+			return table.concat(names, ", ")
+		end
+
+		local function describeNode(node)
+			if not node then
+				return "not found"
+			end
+
+			return node.ClassName .. " at " .. node:GetFullName()
+		end
+
+		local function showNotice(text)
+			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "")
+			end
+
+			if noticeUI and noticeUI:IsA("GuiObject") then
+				noticeUI.Visible = true
+				task.delay(3, function()
+					if noticeUI then
+						noticeUI.Visible = false
+					end
+				end)
+			else
+				warn("[UIController][SocialReward]", text)
+			end
+		end
+
+		local function applyHover(guiObject, attributeName, scaleName, targetScale)
+			if not guiObject or not guiObject:IsA("GuiObject") then return end
+			if guiObject:GetAttribute(attributeName) then return end
+			guiObject:SetAttribute(attributeName, true)
+
+			local hoverScale = guiObject:FindFirstChild(scaleName)
+			if not hoverScale then
+				hoverScale = Instance.new("UIScale")
+				hoverScale.Name = scaleName
+				hoverScale.Parent = guiObject
+			end
+
+			local normalScale = hoverScale.Scale
+			local petBagConfig = Controllers.Config.PET_BAG_UI or {}
+			local tweenInfo = TweenInfo.new(
+				petBagConfig.HoverTweenTime or 0.12,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			)
+
+			local function play(scale)
+				TweenService:Create(hoverScale, tweenInfo, { Scale = scale }):Play()
+			end
+
+			guiObject.MouseEnter:Connect(function()
+				play(targetScale or 1.06)
+			end)
+			guiObject.MouseLeave:Connect(function()
+				play(normalScale)
+			end)
+			if guiObject:IsA("GuiButton") then
+				guiObject.Activated:Connect(function()
+					play(normalScale)
+				end)
+			end
+		end
+
+		local buttonRoot = findNamedDescendant(mainUI, "MainUI_2", 8)
+		local openButton = buttonRoot and findNamedDescendant(buttonRoot, "BtnFreeReward", 8)
+		if not openButton then
+			openButton = findNamedDescendant(mainUI, "BtnFreeReward", 2)
+		end
+
+		local freeRewardPanel = findNamedDescendant(mainUI, "FreeRewardPanel", 8)
+		local claimButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClaim", 2)
+		local closeButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClose", 2)
+
+		if not openButton or not openButton:IsA("GuiButton")
+			or not freeRewardPanel or not freeRewardPanel:IsA("GuiObject")
+			or not claimButton or not claimButton:IsA("GuiButton")
+			or not closeButton or not closeButton:IsA("GuiButton") then
+			local issues = {}
+			if not buttonRoot then
+				table.insert(issues, "MainUI_2 not found under " .. mainUI:GetFullName() .. "; children=[" .. listChildNames(mainUI) .. "]")
+			end
+			if not openButton then
+				table.insert(issues, "BtnFreeReward not found; MainUI_2 children=[" .. listChildNames(buttonRoot) .. "]")
+			elseif not openButton:IsA("GuiButton") then
+				table.insert(issues, "BtnFreeReward must be ImageButton/TextButton, got " .. describeNode(openButton))
+			end
+			if not freeRewardPanel then
+				table.insert(issues, "FreeRewardPanel not found under " .. mainUI:GetFullName() .. "; children=[" .. listChildNames(mainUI) .. "]")
+			elseif not freeRewardPanel:IsA("GuiObject") then
+				table.insert(issues, "FreeRewardPanel must be GuiObject, got " .. describeNode(freeRewardPanel))
+			end
+			if not claimButton then
+				table.insert(issues, "BtnClaim not found; FreeRewardPanel children=[" .. listChildNames(freeRewardPanel) .. "]")
+			elseif not claimButton:IsA("GuiButton") then
+				table.insert(issues, "BtnClaim must be ImageButton/TextButton, got " .. describeNode(claimButton))
+			end
+			if not closeButton then
+				table.insert(issues, "BtnClose not found; FreeRewardPanel children=[" .. listChildNames(freeRewardPanel) .. "]")
+			elseif not closeButton:IsA("GuiButton") then
+				table.insert(issues, "BtnClose must be ImageButton/TextButton, got " .. describeNode(closeButton))
+			end
+
+			warn("[UIController] Free Reward UI missing/invalid:", table.concat(issues, "; "))
+			return
+		end
+
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local getSocialRewardStatus = remotes and remotes:WaitForChild("GetSocialRewardStatus", 5)
+		local claimSocialReward = remotes and remotes:WaitForChild("ClaimSocialReward", 5)
+		if not getSocialRewardStatus or not getSocialRewardStatus:IsA("RemoteFunction") then
+			warn("[UIController] GetSocialRewardStatus RemoteFunction is not ready.")
+			return
+		end
+		if not claimSocialReward or not claimSocialReward:IsA("RemoteFunction") then
+			warn("[UIController] ClaimSocialReward RemoteFunction is not ready.")
+			return
+		end
+
+		local lastStatus = nil
+		local claimInProgress = false
+		local autoJoinPromptShown = false
+		local autoJoinPromptInProgress = false
+		local lobbyJoinPromptToken = 0
+
+		local function isClaimed()
+			return player:GetAttribute("SocialRewardClaimed") == true
+				or (type(lastStatus) == "table" and lastStatus.Claimed == true)
+		end
+
+		local function setSocialRewardVisible()
+			local shouldShow = player:GetAttribute("InCombat") ~= true and not isClaimed()
+			openButton.Visible = shouldShow
+			if not shouldShow then
+				freeRewardPanel.Visible = false
+			end
+		end
+
+		local function refreshStatus()
+			local success, status = pcall(function()
+				return getSocialRewardStatus:InvokeServer()
+			end)
+			if not success or type(status) ~= "table" then
+				warn("[UIController] Failed to load social reward status:", status)
+				return nil
+			end
+
+			lastStatus = status
+			setSocialRewardVisible()
+			return status
+		end
+
+		local function isJoinedMembershipStatus(status)
+			return status == Enum.GroupMembershipStatus.Joined
+				or status == Enum.GroupMembershipStatus.AlreadyMember
+		end
+
+		local function promptJoinCommunityIfNeeded(forcePrompt, knownStatus)
+			forcePrompt = forcePrompt == true
+			if autoJoinPromptInProgress then
+				return nil
+			end
+			if not forcePrompt and autoJoinPromptShown then
+				return nil
+			end
+			if player:GetAttribute("InCombat") == true then
+				return nil
+			end
+
+			local status = knownStatus
+			if type(status) ~= "table" then
+				status = refreshStatus()
+			end
+			if type(status) ~= "table" then
+				return nil
+			end
+			if status.Claimed == true or status.RequireCommunity ~= true then
+				return nil
+			end
+			if status.GroupConfigured ~= true then
+				warn("[UIController][SocialReward] CommunityGroupId is not configured; auto join prompt skipped.")
+				return nil
+			end
+			if status.IsInCommunity == true then
+				return Enum.GroupMembershipStatus.AlreadyMember
+			end
+
+			local groupId = math.max(0, math.floor(tonumber(status.CommunityGroupId) or 0))
+			if groupId <= 0 then
+				return nil
+			end
+
+			if not forcePrompt then
+				autoJoinPromptShown = true
+			end
+			autoJoinPromptInProgress = true
+
+			local success, promptResult = pcall(function()
+				return GroupService:PromptJoinAsync(groupId)
+			end)
+
+			autoJoinPromptInProgress = false
+			if not success then
+				if not forcePrompt then
+					autoJoinPromptShown = false
+				end
+				warn("[UIController][SocialReward] PromptJoinAsync failed:", promptResult)
+				showNotice("Join the community first.")
+				return nil
+			end
+
+			if isJoinedMembershipStatus(promptResult) then
+				task.delay(0.5, refreshStatus)
+			elseif promptResult == Enum.GroupMembershipStatus.JoinRequestPending then
+				showNotice("Join request sent. Tap Claim after approval.")
+				task.delay(2, refreshStatus)
+			else
+				showNotice("Join the community first.")
+				task.delay(2, refreshStatus)
+			end
+
+			return promptResult
+		end
+
+		local function scheduleLobbyJoinPrompt()
+			lobbyJoinPromptToken += 1
+			local token = lobbyJoinPromptToken
+
+			task.delay(5, function()
+				if token ~= lobbyJoinPromptToken then
+					return
+				end
+				if player:GetAttribute("InCombat") == true then
+					return
+				end
+
+				promptJoinCommunityIfNeeded(false)
+			end)
+		end
+
+		local function getMessageForReason(reason)
+			if reason == "NotConfigured" then
+				return "Community reward is not ready yet."
+			elseif reason == "NotInCommunity" then
+				return "Join the community first."
+			elseif reason == "AlreadyClaimed" then
+				return "Already claimed."
+			elseif reason == "DataNotLoaded" then
+				return "Data is still loading."
+			elseif reason == "Disabled" then
+				return "Reward is unavailable."
+			end
+
+			return "Cannot claim yet."
+		end
+
+		freeRewardPanel.Visible = false
+		setSocialRewardVisible()
+		refreshStatus()
+
+		applyHover(openButton, "FreeRewardOpenHoverBound", "FreeRewardOpenHoverScale", 1.06)
+		applyHover(claimButton, "FreeRewardClaimHoverBound", "FreeRewardClaimHoverScale", 1.04)
+		applyHover(closeButton, "FreeRewardCloseHoverBound", "FreeRewardCloseHoverScale", 1.06)
+
+		openButton.Activated:Connect(function()
+			if isClaimed() then
+				setSocialRewardVisible()
+				return
+			end
+
+			freeRewardPanel.Visible = true
+			refreshStatus()
+		end)
+
+		closeButton.Activated:Connect(function()
+			freeRewardPanel.Visible = false
+		end)
+
+		local function handleClaimResult(result)
+			if result.Success == true then
+				lastStatus = result.Snapshot
+				showNotice("Reward claimed!")
+				openButton.Visible = false
+				freeRewardPanel.Visible = false
+				return true
+			end
+
+			lastStatus = result.Snapshot
+			if result.Reason == "NotInCommunity" then
+				showNotice("Membership is updating. Tap Claim again.")
+			else
+				showNotice(getMessageForReason(result.Reason))
+			end
+			setSocialRewardVisible()
+			return false
+		end
+
+		local function requestClaim()
+			local success, result = pcall(function()
+				return claimSocialReward:InvokeServer()
+			end)
+
+			if not success or type(result) ~= "table" then
+				warn("[UIController] ClaimSocialReward failed:", result)
+				showNotice("Cannot claim yet.")
+				return nil
+			end
+
+			return result
+		end
+
+		claimButton.Activated:Connect(function()
+			if claimInProgress then return end
+			claimInProgress = true
+
+			local status = refreshStatus()
+			if type(status) ~= "table" then
+				claimInProgress = false
+				showNotice("Cannot claim yet.")
+				return
+			end
+
+			if status.CanClaim == true or status.IsInCommunity == true or status.RequireCommunity ~= true then
+				local result = requestClaim()
+				claimInProgress = false
+				if result then
+					handleClaimResult(result)
+				end
+				return
+			end
+
+			if status.Reason == "NotInCommunity" then
+				local promptResult = promptJoinCommunityIfNeeded(true, status)
+				if isJoinedMembershipStatus(promptResult) then
+					task.wait(0.5)
+					local result = requestClaim()
+					if result then
+						handleClaimResult(result)
+					end
+				end
+				claimInProgress = false
+				return
+			end
+
+			claimInProgress = false
+			showNotice(getMessageForReason(status.Reason))
+			setSocialRewardVisible()
+		end)
+
+		player:GetAttributeChangedSignal("InCombat"):Connect(function()
+			setSocialRewardVisible()
+			if player:GetAttribute("InCombat") == true then
+				lobbyJoinPromptToken += 1
+			else
+				scheduleLobbyJoinPrompt()
+			end
+		end)
+		for _, attrName in ipairs({ "PlayerDataLoaded", "SocialRewardClaimed", "PetDrawTickets", "Coins" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				if attrName == "SocialRewardClaimed" and player:GetAttribute("SocialRewardClaimed") == true then
+					openButton.Visible = false
+					freeRewardPanel.Visible = false
+					return
+				end
+
+				setSocialRewardVisible()
+				if freeRewardPanel.Visible then
+					refreshStatus()
+				end
+			end)
+		end
+
+		if player:GetAttribute("InCombat") ~= true then
+			scheduleLobbyJoinPrompt()
 		end
 	end
 
@@ -3620,6 +4603,11 @@ function UIController.Start()
 			if hatchPetEgg and hatchPetEgg:IsA("GuiObject") then
 				hatchPetEgg.Visible = isOpen
 				if isOpen then
+					reportAnalyticsEvent("pet_hatch_open", {
+						source = "pet_egg",
+						coins = player:GetAttribute("Coins") or 0,
+						tickets = player:GetAttribute("PetDrawTickets") or 0,
+					})
 					updateHatchPetEggCards()
 					isApplyingHatchVisible = true
 					hatchScreen.Visible = true
@@ -3886,6 +4874,8 @@ function UIController.Start()
       setupRebirthUI()
       setupInstantCoinsUI()
       setupStarterPackUI()
+      setupInviteUI()
+      setupSocialRewardUI()
       setupPetHatching()
 	end)
 

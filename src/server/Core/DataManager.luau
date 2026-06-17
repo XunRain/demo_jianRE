@@ -35,9 +35,12 @@ local DEFAULT_STATS = {
 	RebirthCount = 0,
 	CoinGainBonus = 0,
 	PaidReviveCredits = 0,
+	PaidQuickHealCredits = 0,
 	PetDrawTickets = 0,
 	ClaimedAchievements_JSON = "{}",
 	StarterPackPurchased = false,
+	SocialRewardClaimed = false,
+	LastLoginDate = "",
 
     -- 记录玩家是否已经看过第二关的引导
 	HasSeenStage2Guide = false,
@@ -145,6 +148,7 @@ function DataManager.LoadPlayerData(player)
 
 	local playerData = buildDefaultPlayerData()
 	local dataLoaded = success == true
+	local isNewPlayer = success == true and data == nil
 	if success and data then
 		for statName, statValue in pairs(data) do
 			playerData[statName] = statValue
@@ -162,6 +166,8 @@ function DataManager.LoadPlayerData(player)
 	end
 
 	-- 服务器端修改属性，会自动下发给客户端同步更新 UI
+	local previousLastLoginDate = tostring(playerData.LastLoginDate or "")
+
 	for statName, statValue in pairs(playerData) do
 		player:SetAttribute(statName, statValue)
 	end
@@ -180,7 +186,17 @@ function DataManager.LoadPlayerData(player)
 		end
 	end
 
-	-- 旧数据渐进迁移：已有个人最高米数的玩家进入游戏后，补写到全服排行榜。
+	-- Analytics must never block player data from becoming usable.
+	if _Services and _Services.AnalyticsManager and _Services.AnalyticsManager.HandlePlayerDataLoaded then
+		local analyticsSuccess, analyticsErr = pcall(function()
+			_Services.AnalyticsManager.HandlePlayerDataLoaded(player, dataLoaded, isNewPlayer, previousLastLoginDate)
+		end)
+		if not analyticsSuccess then
+			warn("[DataManager] Analytics player_data_loaded failed:", analyticsErr)
+		end
+	end
+	player:SetAttribute("LastLoginDate", os.date("!%Y-%m-%d"))
+
 	if _Services and _Services.LeaderboardManager and _Services.LeaderboardManager.SubmitPlayerBestDistance then
 		task.spawn(function()
 			_Services.LeaderboardManager.SubmitPlayerBestDistance(player)
@@ -211,7 +227,10 @@ function DataManager.SavePlayerData(player)
 		RebirthCount = player:GetAttribute("RebirthCount") or 0,
 		CoinGainBonus = player:GetAttribute("CoinGainBonus") or 0,
 		PaidReviveCredits = player:GetAttribute("PaidReviveCredits") or 0,
+		PaidQuickHealCredits = player:GetAttribute("PaidQuickHealCredits") or 0,
 		StarterPackPurchased = player:GetAttribute("StarterPackPurchased") or false,
+		SocialRewardClaimed = player:GetAttribute("SocialRewardClaimed") or false,
+		LastLoginDate = player:GetAttribute("LastLoginDate") or "",
 		Talent_HP = player:GetAttribute("Talent_HP") or 0,
 		Talent_ATK = player:GetAttribute("Talent_ATK") or 0,
 		Talent_ASPD = player:GetAttribute("Talent_ASPD") or 0,

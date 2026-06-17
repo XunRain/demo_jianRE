@@ -7,20 +7,50 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("Configs"):WaitForChild("GameConfig"))
 
 -- 1. 定义服务端服务映射表 (对齐客户端设计)
-local Services = {
-	DataManager    = require(script.Core:WaitForChild("DataManager")),
-	CharacterStatsManager = require(script.Core:WaitForChild("CharacterStatsManager")),
-	LeaderboardManager = require(script.Core:WaitForChild("LeaderboardManager")),
-	AchievementManager = require(script.Core:WaitForChild("AchievementManager")),
-	PurchaseManager = require(script.Core:WaitForChild("PurchaseManager")),
-	NetworkManager = require(script.Network:WaitForChild("NetworkManager")),
+local Services = {}
+local ServiceOrder = {
+	{ Name = "AnalyticsManager", Parent = script.Core },
+	{ Name = "DataManager", Parent = script.Core },
+	{ Name = "CharacterStatsManager", Parent = script.Core },
+	{ Name = "LeaderboardManager", Parent = script.Core },
+	{ Name = "AchievementManager", Parent = script.Core },
+	{ Name = "PurchaseManager", Parent = script.Core },
+	{ Name = "SocialRewardManager", Parent = script.Core },
+	{ Name = "InviteRewardManager", Parent = script.Core },
+	{ Name = "NetworkManager", Parent = script.Network },
 }
+
+local function loadService(spec)
+	local moduleScript = spec.Parent and spec.Parent:FindFirstChild(spec.Name)
+	if not moduleScript then
+		warn("[Server] Service module missing:", spec.Name)
+		return
+	end
+
+	local success, service = pcall(require, moduleScript)
+	if not success then
+		warn("[Server] Service module failed to load:", spec.Name, service)
+		return
+	end
+
+	Services[spec.Name] = service
+end
+
+for _, spec in ipairs(ServiceOrder) do
+	loadService(spec)
+end
 
 -- 2. 第一阶段：执行 Init 依赖注入
 for name, service in pairs(Services) do
 	if type(service.Init) == "function" then
-		service.Init(Services)
-		print("Initialized Server Service: " .. name)
+		local success, err = pcall(function()
+			service.Init(Services)
+		end)
+		if success then
+			print("Initialized Server Service: " .. name)
+		else
+			warn("[Server] Service Init failed:", name, err)
+		end
 	end
 end
 
@@ -28,8 +58,14 @@ end
 for name, service in pairs(Services) do
 	if type(service.Start) == "function" then
 		task.spawn(function()
-			service.Start()
-			print("Started Server Service: " .. name)
+			local success, err = pcall(function()
+				service.Start()
+			end)
+			if success then
+				print("Started Server Service: " .. name)
+			else
+				warn("[Server] Service Start failed:", name, err)
+			end
 		end)
 	end
 end
@@ -38,7 +74,11 @@ end
 
 -- 玩家加进服务器：呼叫数据中心读档
 Players.PlayerAdded:Connect(function(player)
-	Services.DataManager.LoadPlayerData(player)
+	if Services.DataManager and Services.DataManager.LoadPlayerData then
+		Services.DataManager.LoadPlayerData(player)
+	else
+		warn("[Server] DataManager is not available; player data was not loaded:", player.Name)
+	end
 	
 	-- 如果有局外初始血量等非永久存储同步，也可以在服务器的这里顺手做了
 	player.CharacterAdded:Connect(function(character)
@@ -54,12 +94,16 @@ Players.PlayerRemoving:Connect(function(player)
 	if player:GetAttribute("IsSaving") then return end
 	player:SetAttribute("IsSaving", true)
 	
-	Services.DataManager.SavePlayerData(player)
+	if Services.DataManager and Services.DataManager.SavePlayerData then
+		Services.DataManager.SavePlayerData(player)
+	end
 end)
 
 -- Studio 环境防漏人保障
 for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(Services.DataManager.LoadPlayerData, player)
+	if Services.DataManager and Services.DataManager.LoadPlayerData then
+		task.spawn(Services.DataManager.LoadPlayerData, player)
+	end
 end
 
 -- 服务器物理关闭保护（停服/关服时强制保存现场）
@@ -69,7 +113,9 @@ game:BindToClose(function()
 		-- 巡检所有玩家，只抢救那些还没来得及保存的玩家
 		if not player:GetAttribute("IsSaving") then
 			player:SetAttribute("IsSaving", true)
-			Services.DataManager.SavePlayerData(player)
+			if Services.DataManager and Services.DataManager.SavePlayerData then
+				Services.DataManager.SavePlayerData(player)
+			end
 		end
 	end
 	task.wait(1) -- 留出 1 秒线程缓冲给云端 API 写入

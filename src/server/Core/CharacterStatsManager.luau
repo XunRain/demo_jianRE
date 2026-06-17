@@ -293,6 +293,12 @@ local function initPlayer(player)
 	if player:GetAttribute("CurrentRunAttack") == nil then
 		player:SetAttribute("CurrentRunAttack", 0)
 	end
+	if player:GetAttribute("PendingInviteCoinBonus") == nil then
+		player:SetAttribute("PendingInviteCoinBonus", 0)
+	end
+	if player:GetAttribute("RunInviteCoinBonus") == nil then
+		player:SetAttribute("RunInviteCoinBonus", 0)
+	end
 
 	player.CharacterAdded:Connect(function(character)
 		createCharacterStatsUI(player, character)
@@ -312,9 +318,16 @@ end
 local function handleReportRunStats(player, isInCombat, level, attack)
 	local safeLevel = math.clamp(math.floor(tonumber(level) or 1), 1, MAX_REPORT_LEVEL)
 	local safeAttack = math.clamp(math.floor(tonumber(attack) or 0), 0, 999999999)
+	local wasInCombat = player:GetAttribute("RunInCombat") == true
+	local nextInCombat = isInCombat == true
+
 	player:SetAttribute("RunInCombat", isInCombat == true)
 	player:SetAttribute("CurrentRunLevel", safeLevel)
 	player:SetAttribute("CurrentRunAttack", safeAttack)
+
+	if _Services and _Services.InviteRewardManager and _Services.InviteRewardManager.HandleRunStateChanged then
+		_Services.InviteRewardManager.HandleRunStateChanged(player, wasInCombat, nextInCombat)
+	end
 
 	local bestLevel = math.max(1, math.floor(player:GetAttribute("BestLevel") or 1))
 	if safeLevel > bestLevel then
