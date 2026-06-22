@@ -88,6 +88,8 @@ function NetworkManager.Start()
     -- 注册购买天赋的网络信道
 	local buyTalentEvent = remotes:FindFirstChild("BuyTalent") or Instance.new("RemoteEvent", remotes)
 	buyTalentEvent.Name = "BuyTalent"
+	local talentPurchaseFailedEvent = remotes:FindFirstChild("TalentPurchaseFailed") or Instance.new("RemoteEvent", remotes)
+	talentPurchaseFailedEvent.Name = "TalentPurchaseFailed"
 
 	-- 监听客户端的购买请求
 	buyTalentEvent.OnServerEvent:Connect(function(player, talentId)
@@ -138,6 +140,12 @@ function NetworkManager.Start()
 				coins_before = currentCoins,
 				talent_level_before = currentLevel,
 			})
+			talentPurchaseFailedEvent:FireClient(player, {
+				Reason = "MaxLevel",
+				TalentId = tostring(talentId),
+				Cost = cost == math.huge and -1 or cost,
+				Coins = currentCoins,
+			})
 			return
 		end
 
@@ -162,6 +170,12 @@ function NetworkManager.Start()
 				cost = cost == math.huge and -1 or cost,
 				coins_before = currentCoins,
 				talent_level_before = currentLevel,
+			})
+			talentPurchaseFailedEvent:FireClient(player, {
+				Reason = "NotEnoughCoins",
+				TalentId = tostring(talentId),
+				Cost = cost == math.huge and -1 or cost,
+				Coins = currentCoins,
 			})
 		end
 	end)
@@ -428,6 +442,8 @@ function NetworkManager.Start()
 	-- 2. 装备/卸下宠物请求
 	local equipPetEvent = remotes:FindFirstChild("EquipPet") or Instance.new("RemoteEvent", remotes)
 	equipPetEvent.Name = "EquipPet"
+	local equipPetFailedEvent = remotes:FindFirstChild("EquipPetFailed") or Instance.new("RemoteEvent", remotes)
+	equipPetFailedEvent.Name = "EquipPetFailed"
 	
 	equipPetEvent.OnServerEvent:Connect(function(player, petUidOrId)
 		if type(petUidOrId) ~= "string" then
@@ -458,6 +474,10 @@ function NetworkManager.Start()
 		end
 
 		if #equippedUids >= getMaxEquippedPetSlots(player) then
+			equipPetFailedEvent:FireClient(player, {
+				Reason = "EquippedSlotsFull",
+				Message = "Equipped pet slots are full. Please unequip a pet first.",
+			})
 			return
 		end
 

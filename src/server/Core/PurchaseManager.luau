@@ -267,18 +267,50 @@ local function chooseStarterPackPetId(config)
 	return petIds[random:NextInteger(1, #petIds)]
 end
 
+local function isStarterPackGamePass(config)
+	return tostring(config.PurchaseType or "") == "GamePass" or config.IsGamePass == true
+end
+
+local function userOwnsStarterPackGamePass(player, config)
+	local gamePassId = math.floor(tonumber(config.ProductId) or 0)
+	if gamePassId <= 0 then
+		return false, "NotConfigured"
+	end
+
+	local success, ownsPass = pcall(function()
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, gamePassId)
+	end)
+	if not success then
+		warn("[PurchaseManager] Failed to check starter pack game pass ownership:", player.Name, ownsPass)
+		return false, "OwnershipCheckFailed"
+	end
+
+	return ownsPass == true, nil
+end
+
 local function buildStarterPackStatus(player)
 	local config = getStarterPackConfig()
 	local productId = math.floor(tonumber(config.ProductId) or 0)
 	local purchased = player:GetAttribute("StarterPackPurchased") == true
 	local dataLoaded = player:GetAttribute("PlayerDataLoaded") == true
+	local isGamePass = isStarterPackGamePass(config)
+	local ownsGamePass = false
+	local ownershipError = nil
+	if isGamePass and productId > 0 then
+		ownsGamePass, ownershipError = userOwnsStarterPackGamePass(player, config)
+	end
 
 	return {
 		Success = true,
 		DataLoaded = dataLoaded,
 		Purchased = purchased,
 		ProductId = productId,
+		PurchaseType = isGamePass and "GamePass" or "DeveloperProduct",
+		IsGamePass = isGamePass,
+		OwnsGamePass = ownsGamePass,
+		OwnershipError = ownershipError,
 		Available = dataLoaded and productId > 0 and not purchased,
+		CanClaim = dataLoaded and isGamePass and ownsGamePass and not purchased,
 		RewardCoins = math.max(0, math.floor(tonumber(config.RewardCoins) or 5000)),
 		RewardPetRarity = config.RewardPetRarity or "Rare",
 		RewardPetLevel = math.max(1, math.floor(tonumber(config.RewardPetLevel) or 50)),
@@ -376,36 +408,30 @@ local function processPaidRebirthReceipt(receiptInfo)
 	return Enum.ProductPurchaseDecision.PurchaseGranted
 end
 
-local function processStarterPackReceipt(receiptInfo)
-	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
-	if not player then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
-	end
-
-	local config = getStarterPackConfig()
+local function grantStarterPackRewards(player, config, purchaseId)
 	if config.OneTime ~= false and player:GetAttribute("StarterPackPurchased") == true then
-		return Enum.ProductPurchaseDecision.PurchaseGranted
+		return true, "AlreadyPurchased"
 	end
 
 	if player:GetAttribute("PlayerDataLoaded") ~= true then
-		warn("[PurchaseManager] Starter pack receipt delayed until player data is loaded:", player.Name)
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+		warn("[PurchaseManager] Starter pack grant delayed until player data is loaded:", player.Name)
+		return false, "DataNotLoaded"
 	end
 
 	local rewardPetId = chooseStarterPackPetId(config)
 	if not rewardPetId then
 		warn("[PurchaseManager] Starter pack has no available pet with rarity:", config.RewardPetRarity or "Rare")
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+		return false, "NoRewardPet"
 	end
 
 	local ownedPets = decodeOwnedPets(player)
 	if not ownedPets then
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+		return false, "OwnedPetsDecodeFailed"
 	end
 
 	if not Services or not Services.DataManager or type(Services.DataManager.SavePlayerData) ~= "function" then
 		warn("[PurchaseManager] Starter pack cannot save because DataManager is unavailable.")
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+		return false, "DataManagerUnavailable"
 	end
 
 	local snapshot = snapshotAttributes(player, buildStarterPackSnapshotNames())
@@ -431,7 +457,7 @@ local function processStarterPackReceipt(receiptInfo)
 	local saved = Services.DataManager.SavePlayerData(player)
 	if not saved then
 		restoreAttributes(player, snapshot)
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+		return false, "SaveFailed"
 	end
 
 	local petConfig = (GameConfig.PETS or {})[rewardPetId] or {}
@@ -443,10 +469,68 @@ local function processStarterPackReceipt(receiptInfo)
 		PetLevel = rewardPetLevel,
 		RewardCoins = rewardCoins,
 		RewardRebirthCount = rewardRebirthCount,
-		PurchaseId = receiptInfo.PurchaseId,
+		PurchaseId = purchaseId or ("starter-pack-" .. tostring(player.UserId) .. "-" .. tostring(os.time())),
 	})
 
-	return Enum.ProductPurchaseDecision.PurchaseGranted
+	return true, "Granted"
+end
+
+local function processStarterPackReceipt(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+
+	local config = getStarterPackConfig()
+	local granted = grantStarterPackRewards(player, config, receiptInfo.PurchaseId)
+	if granted then
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+local function claimStarterPackGamePass(player)
+	local config = getStarterPackConfig()
+	if not isStarterPackGamePass(config) then
+		return {
+			Success = false,
+			Reason = "NotGamePass",
+		}
+	end
+
+	local productId = math.floor(tonumber(config.ProductId) or 0)
+	if productId <= 0 then
+		return {
+			Success = false,
+			Reason = "NotConfigured",
+		}
+	end
+
+	if config.OneTime ~= false and player:GetAttribute("StarterPackPurchased") == true then
+		return {
+			Success = true,
+			Reason = "AlreadyPurchased",
+			Purchased = true,
+		}
+	end
+
+	local ownsGamePass, ownershipError = userOwnsStarterPackGamePass(player, config)
+	if not ownsGamePass then
+		return {
+			Success = false,
+			Reason = ownershipError or "NotOwned",
+			OwnsGamePass = false,
+		}
+	end
+
+	local granted, reason = grantStarterPackRewards(player, config, "gamepass-" .. tostring(productId) .. "-" .. tostring(player.UserId))
+	return {
+		Success = granted == true,
+		Reason = reason,
+		Purchased = player:GetAttribute("StarterPackPurchased") == true,
+		OwnsGamePass = true,
+	}
 end
 
 local function startReviveOffer(player)
@@ -587,6 +671,8 @@ function PurchaseManager.Start()
 
 	local getStarterPackStatusRemote = getOrCreateRemote("GetStarterPackStatus", "RemoteFunction")
 	getStarterPackStatusRemote.OnServerInvoke = buildStarterPackStatus
+	local claimStarterPackGamePassRemote = getOrCreateRemote("ClaimStarterPackGamePass", "RemoteFunction")
+	claimStarterPackGamePassRemote.OnServerInvoke = claimStarterPackGamePass
 	getOrCreateRemote("StarterPackGranted", "RemoteEvent")
 
 	local cancelReviveOfferRemote = getOrCreateRemote("CancelReviveOffer", "RemoteEvent")
@@ -620,7 +706,7 @@ function PurchaseManager.Start()
 
 		local starterPackConfig = getStarterPackConfig()
 		local starterPackProductId = tonumber(starterPackConfig.ProductId) or 0
-		if starterPackProductId > 0 and receiptInfo.ProductId == starterPackProductId then
+		if not isStarterPackGamePass(starterPackConfig) and starterPackProductId > 0 and receiptInfo.ProductId == starterPackProductId then
 			return processStarterPackReceipt(receiptInfo)
 		end
 

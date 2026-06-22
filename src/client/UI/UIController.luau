@@ -225,6 +225,375 @@ local function findStageHud(mainUI)
 	return nil
 end
 
+local bossProgressState = {
+	AvatarUserId = nil,
+	AvatarImage = nil,
+	AvatarLoading = false,
+	LayoutRetryScheduled = false,
+	LastIconKey = nil,
+	MissingModelWarned = {},
+	MissingUiWarned = false,
+}
+
+local function findBossProgressBar(mainUI)
+	if not mainUI then return nil end
+	local progressBar = mainUI:FindFirstChild("BossProgressBar", true)
+	if progressBar and progressBar:IsA("GuiObject") then
+		return progressBar
+	end
+	return nil
+end
+
+local function findBossProgressViewport(root)
+	if not root then return nil end
+	local viewport = root:FindFirstChild("PetViewport", true)
+	if viewport and viewport:IsA("ViewportFrame") then
+		return viewport
+	end
+
+	return root:FindFirstChildWhichIsA("ViewportFrame", true)
+end
+
+local function clearBossProgressViewport(viewport)
+	if not viewport then return end
+	for _, child in ipairs(viewport:GetChildren()) do
+		if child:GetAttribute("BossProgressGenerated") == true then
+			child:Destroy()
+		end
+	end
+	viewport.CurrentCamera = nil
+end
+
+local function getBossProgressEnemyTemplate(modelName)
+	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
+	local enemiesFolder = modelFolder and modelFolder:FindFirstChild("Enemies")
+	if not enemiesFolder then
+		return nil, modelName
+	end
+
+	local template = enemiesFolder:FindFirstChild(modelName)
+	if template then
+		return template, modelName
+	end
+
+	local fallbackName = (Controllers.Config.ENEMY_MODELS and Controllers.Config.ENEMY_MODELS.Boss) or "Boss"
+	if modelName ~= fallbackName and not bossProgressState.MissingModelWarned[modelName] then
+		bossProgressState.MissingModelWarned[modelName] = true
+		warn("[UIController][BossProgress] Boss model missing:", modelName, "fallback:", fallbackName)
+	end
+
+	return enemiesFolder:FindFirstChild(fallbackName), fallbackName
+end
+
+local function getBossProgressOverride(modelName)
+	local config = Controllers.Config.BOSS_PROGRESS or {}
+	local overrides = config.ViewportModelOverrides
+	if type(overrides) ~= "table" then
+		return {}
+	end
+
+	local override = overrides[modelName]
+	if type(override) ~= "table" then
+		return {}
+	end
+
+	return override
+end
+
+local function getBossProgressNumber(override, configKey, fallback)
+	if type(override) == "table" and override[configKey] ~= nil then
+		return tonumber(override[configKey]) or fallback
+	end
+
+	local config = Controllers.Config.BOSS_PROGRESS or {}
+	if config[configKey] ~= nil then
+		return tonumber(config[configKey]) or fallback
+	end
+
+	return fallback
+end
+
+local function renderBossProgressModel(viewport, template, modelName)
+	clearBossProgressViewport(viewport)
+	if not viewport or not template then
+		return false
+	end
+
+	local clone = template:Clone()
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = "BossProgressWorld"
+	worldModel:SetAttribute("BossProgressGenerated", true)
+	worldModel.Parent = viewport
+	clone.Parent = worldModel
+
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			obj.Anchored = true
+			obj.CanCollide = false
+			obj.CanTouch = false
+			obj.CanQuery = false
+		end
+	end
+
+	local boundsCFrame
+	local boundsSize
+	if clone:IsA("Model") then
+		if not clone.PrimaryPart then
+			clone.PrimaryPart = clone:FindFirstChildWhichIsA("BasePart", true)
+		end
+		if not clone.PrimaryPart then
+			worldModel:Destroy()
+			return false
+		end
+
+		local originalPivot = clone:GetPivot()
+		clone:PivotTo(CFrame.new(0, 0, 0) * originalPivot.Rotation)
+		boundsCFrame, boundsSize = clone:GetBoundingBox()
+		clone:PivotTo(clone:GetPivot() + (-boundsCFrame.Position))
+		boundsCFrame, boundsSize = clone:GetBoundingBox()
+	elseif clone:IsA("BasePart") then
+		clone.Anchored = true
+		clone.CanCollide = false
+		clone.CanTouch = false
+		clone.CanQuery = false
+		clone.CFrame = CFrame.new(0, 0, 0) * clone.CFrame.Rotation
+		boundsCFrame = clone.CFrame
+		boundsSize = clone.Size
+	else
+		worldModel:Destroy()
+		return false
+	end
+
+	local override = getBossProgressOverride(modelName)
+	local pitchDegrees = getBossProgressNumber(override, "ViewportPitchDegrees", 0)
+	local yawDegrees = getBossProgressNumber(override, "ViewportYawDegrees", 0)
+	local rollDegrees = getBossProgressNumber(override, "ViewportRollDegrees", 0)
+	local previewRotation = CFrame.Angles(math.rad(pitchDegrees), math.rad(yawDegrees), math.rad(rollDegrees))
+	if clone:IsA("Model") then
+		clone:PivotTo(previewRotation * clone:GetPivot())
+		boundsCFrame, boundsSize = clone:GetBoundingBox()
+		clone:PivotTo(clone:GetPivot() + (-boundsCFrame.Position))
+		boundsCFrame, boundsSize = clone:GetBoundingBox()
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = previewRotation * clone.CFrame
+		clone.CFrame = clone.CFrame + (-clone.Position)
+		boundsCFrame = clone.CFrame
+		boundsSize = clone.Size
+	end
+
+	local offset = Vector3.new(
+		tonumber(override.OffsetX) or 0,
+		tonumber(override.OffsetY) or 0,
+		tonumber(override.OffsetZ) or 0
+	)
+	if offset.Magnitude > 0 then
+		if clone:IsA("Model") then
+			clone:PivotTo(clone:GetPivot() + offset)
+			boundsCFrame, boundsSize = clone:GetBoundingBox()
+		elseif clone:IsA("BasePart") then
+			clone.CFrame = clone.CFrame + offset
+			boundsCFrame = clone.CFrame
+			boundsSize = clone.Size
+		end
+	end
+
+	local maxSize = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z, 1)
+	local cameraDistanceScale = math.max(0.1, getBossProgressNumber(override, "ViewportCameraDistanceScale", 1.35))
+	local cameraDistance = maxSize * cameraDistanceScale
+	local lookAt = Vector3.new(0, boundsSize.Y * getBossProgressNumber(override, "ViewportLookAtHeightScale", 0.05), 0)
+	local camera = Instance.new("Camera")
+	camera.Name = "BossProgressCamera"
+	camera:SetAttribute("BossProgressGenerated", true)
+	camera.FieldOfView = math.clamp(getBossProgressNumber(override, "ViewportFieldOfView", 30), 1, 120)
+	camera.CFrame = CFrame.lookAt(
+		Vector3.new(
+			cameraDistance * getBossProgressNumber(override, "ViewportCameraXScale", 0.12),
+			boundsSize.Y * getBossProgressNumber(override, "ViewportCameraHeightScale", 0.08),
+			cameraDistance
+		),
+		lookAt
+	)
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+	viewport.Visible = true
+
+	return true
+end
+
+local function getBossProgressSlots(progressBar, strip, visibleSlots)
+	local slots = {}
+	for slotIndex = 1, visibleSlots do
+		local slot = strip:FindFirstChild("Boss-" .. tostring(slotIndex)) or progressBar:FindFirstChild("Boss-" .. tostring(slotIndex), true)
+		if slot and slot:IsA("GuiObject") then
+			table.insert(slots, {
+				Index = slotIndex,
+				Slot = slot,
+				CenterY = slot.AbsolutePosition.Y + slot.AbsoluteSize.Y * 0.5,
+			})
+		end
+	end
+
+	table.sort(slots, function(a, b)
+		if math.abs(a.CenterY - b.CenterY) > 0.5 then
+			return a.CenterY > b.CenterY
+		end
+
+		return a.Index < b.Index
+	end)
+
+	return slots
+end
+
+local function isBossProgressLayoutReady(slots)
+	if #slots <= 1 then
+		return true
+	end
+
+	return math.abs(slots[1].CenterY - slots[#slots].CenterY) > 0.5
+end
+
+local function updateBossProgressIcons(progressBar, visibleSlots, currentStage)
+	local strip = progressBar:FindFirstChild("Strip", true)
+	if not strip then
+		return nil, true
+	end
+
+	local iconKeyParts = {}
+	local slots = getBossProgressSlots(progressBar, strip, visibleSlots)
+	if not isBossProgressLayoutReady(slots) then
+		return strip, false
+	end
+
+	local cycleStart = Controllers.Config.GetBossProgressCycleStart and Controllers.Config.GetBossProgressCycleStart(currentStage) or 1
+	for visualIndex, slotInfo in ipairs(slots) do
+		local slot = slotInfo.Slot
+		local bossIndex = cycleStart + visualIndex - 1
+		local modelName = Controllers.Config.GetBossModelName and Controllers.Config.GetBossModelName(bossIndex) or "Boss"
+		table.insert(iconKeyParts, tostring(modelName))
+
+		local viewport = findBossProgressViewport(slot)
+		if viewport and viewport:GetAttribute("BossProgressModelName") ~= modelName then
+			local template, resolvedModelName = getBossProgressEnemyTemplate(modelName)
+			local ok = renderBossProgressModel(viewport, template, resolvedModelName or modelName)
+			viewport:SetAttribute("BossProgressModelName", modelName)
+			viewport:SetAttribute("BossProgressResolvedModelName", resolvedModelName)
+			viewport.Visible = ok
+		end
+	end
+
+	bossProgressState.LastIconKey = table.concat(iconKeyParts, "|")
+	return strip, true
+end
+
+local function updateBossProgressAvatar(playerIcon)
+	if not playerIcon or not (playerIcon:IsA("ImageLabel") or playerIcon:IsA("ImageButton")) then
+		return
+	end
+
+	if bossProgressState.AvatarUserId == player.UserId and bossProgressState.AvatarImage then
+		playerIcon.Image = bossProgressState.AvatarImage
+		return
+	end
+
+	if bossProgressState.AvatarLoading then
+		return
+	end
+
+	bossProgressState.AvatarLoading = true
+	task.spawn(function()
+		local ok, image = pcall(function()
+			return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+		end)
+
+		bossProgressState.AvatarLoading = false
+		if ok and image then
+			bossProgressState.AvatarUserId = player.UserId
+			bossProgressState.AvatarImage = image
+			if playerIcon and playerIcon.Parent then
+				playerIcon.Image = image
+			end
+		end
+	end)
+end
+
+local function updateBossProgressPlayer(progressBar, strip, ratio)
+	local playerFrame = progressBar:FindFirstChild("Player", true)
+	if not playerFrame or not playerFrame:IsA("GuiObject") then
+		return
+	end
+
+	local playerIcon = playerFrame:IsA("ImageLabel") and playerFrame or playerFrame:FindFirstChild("ImageLabel", true)
+	if playerIcon then
+		updateBossProgressAvatar(playerIcon)
+	end
+
+	local visibleSlots = Controllers.Config.GetBossProgressVisibleSlots and Controllers.Config.GetBossProgressVisibleSlots() or 5
+	local slots = strip and getBossProgressSlots(progressBar, strip, visibleSlots) or {}
+	local bottomSlotInfo = slots[1]
+	local topSlotInfo = slots[#slots]
+	if bottomSlotInfo and topSlotInfo and progressBar.AbsoluteSize.Y > 0 then
+		local bottomY = bottomSlotInfo.CenterY
+		local topY = topSlotInfo.CenterY
+		local bossSegmentCount = math.max(#slots - 1, 1)
+		local visualRatio = math.clamp(ratio, -1 / bossSegmentCount, 1)
+		local targetY = bottomY + (topY - bottomY) * visualRatio
+		local relativeY = targetY - progressBar.AbsolutePosition.Y - playerFrame.AbsoluteSize.Y * 0.5
+		playerFrame.Position = UDim2.new(playerFrame.Position.X.Scale, playerFrame.Position.X.Offset, 0, math.floor(relativeY + 0.5))
+	else
+		local visibleSlots = Controllers.Config.GetBossProgressVisibleSlots and Controllers.Config.GetBossProgressVisibleSlots() or 5
+		local bossSegmentCount = math.max(visibleSlots - 1, 1)
+		local visualRatio = math.clamp(ratio, -1 / bossSegmentCount, 1)
+		local fallbackScale = 1 - visualRatio
+		playerFrame.Position = UDim2.new(playerFrame.Position.X.Scale, playerFrame.Position.X.Offset, math.clamp(fallbackScale, 0, 1), playerFrame.Position.Y.Offset)
+	end
+end
+
+local function updateBossProgressBar(mainUI, inCombat, currentStage, currentDistance)
+	local progressBar = findBossProgressBar(mainUI)
+	if not progressBar then
+		return
+	end
+
+	local config = Controllers.Config.BOSS_PROGRESS or {}
+	local enabled = config.Enabled ~= false
+	progressBar.Visible = enabled and inCombat
+	if not progressBar.Visible then
+		return
+	end
+
+	local visibleSlots = Controllers.Config.GetBossProgressVisibleSlots and Controllers.Config.GetBossProgressVisibleSlots() or 5
+	local strip, layoutReady = updateBossProgressIcons(progressBar, visibleSlots, currentStage)
+	if not strip then
+		if not bossProgressState.MissingUiWarned then
+			bossProgressState.MissingUiWarned = true
+			warn("[UIController][BossProgress] Missing BossProgressBar.Strip.")
+		end
+		return
+	end
+	if layoutReady == false then
+		if not bossProgressState.LayoutRetryScheduled then
+			bossProgressState.LayoutRetryScheduled = true
+			task.delay(0.1, function()
+				bossProgressState.LayoutRetryScheduled = false
+				local playerGui = player:FindFirstChild("PlayerGui")
+				local latestMainUI = playerGui and playerGui:FindFirstChild("MainUI")
+				if latestMainUI then
+					updateBossProgressBar(
+						latestMainUI,
+						player:GetAttribute("InCombat") == true,
+						player:GetAttribute("CurrentStage") or 1,
+						player:GetAttribute("CurrentDistance") or 0
+					)
+				end
+			end)
+		end
+		return
+	end
+
+	local ratio = Controllers.Config.GetBossProgressRatio and Controllers.Config.GetBossProgressRatio(currentStage, currentDistance) or 0
+	updateBossProgressPlayer(progressBar, strip, ratio)
+end
+
 function UIController.Init(deps)
 	Controllers = deps
 end
@@ -265,6 +634,7 @@ function UIController.Start()
 			or player:GetAttribute("IsRevivePending") == true
 			or player:GetAttribute("IsQuickHealPurchasing") == true
       	local currentStage = player:GetAttribute("CurrentStage") or 1
+		local currentDistance = player:GetAttribute("CurrentDistance") or 0
 		local formatNumber = Controllers.Config.FormatNumber
 
 		-- 1. 刷新屏幕 UI 控制
@@ -363,6 +733,8 @@ function UIController.Start()
 			end
 
 			-- Minecraft 风格底部血条/经验条群组控制
+			updateBossProgressBar(mainUI, inCombat, currentStage, currentDistance)
+
 			local combatHub = mainUI:FindFirstChild("CombatHub")
 			if combatHub and combatHub:IsA("Frame") then
 				-- 只有进入战斗且不在升级选择时，显示底部状态条
@@ -1129,6 +1501,24 @@ function UIController.Start()
 		end
 
 		-- 获取或创建商店专用毛玻璃；作为本地后处理，只模糊世界背景，不模糊商店 UI。
+		local function showShopNotice(text, seconds)
+			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "")
+			end
+			if noticeUI and noticeUI:IsA("GuiObject") then
+				noticeUI.Visible = true
+				task.delay(seconds or 3, function()
+					if noticeUI then
+						noticeUI.Visible = false
+					end
+				end)
+			else
+				warn("[UIController][Shop] Notice_UI missing. Notice:", text)
+			end
+		end
+
 		local function getShopBlur()
 			local blur = Lighting:FindFirstChild("ShopBlur")
 			if blur and not blur:IsA("BlurEffect") then
@@ -1317,9 +1707,36 @@ function UIController.Start()
 
 			card.Activated:Connect(function()
 				local currentTalentId = card:GetAttribute("TalentId") or talentId
+				local currentCost = tonumber(card:GetAttribute("TalentCost")) or 0
+				local currentCoins = math.max(0, math.floor(tonumber(player:GetAttribute("Coins")) or 0))
+				if currentCost < 0 then
+					showShopNotice("Already max level.")
+					return
+				end
+				if currentCost > currentCoins then
+					showShopNotice("Not enough coins.")
+					return
+				end
+
 				local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
 				remotes:WaitForChild("BuyTalent"):FireServer(currentTalentId)
 			end)
+		end
+
+		local shopRemotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local talentPurchaseFailedEvent = shopRemotes and shopRemotes:WaitForChild("TalentPurchaseFailed", 5)
+		if talentPurchaseFailedEvent and talentPurchaseFailedEvent:IsA("RemoteEvent") then
+			talentPurchaseFailedEvent.OnClientEvent:Connect(function(payload)
+				payload = type(payload) == "table" and payload or {}
+				local reason = tostring(payload.Reason or "")
+				if reason == "NotEnoughCoins" then
+					showShopNotice("Not enough coins.")
+				elseif reason == "MaxLevel" then
+					showShopNotice("Already max level.")
+				end
+			end)
+		elseif shopRemotes then
+			warn("[UIController][Shop] TalentPurchaseFailed RemoteEvent missing.")
 		end
 
 		local refreshShopUI
@@ -1908,6 +2325,46 @@ function UIController.Start()
 			return equippedUids, equippedMap
 		end
 
+		local function getMaxEquipSlots()
+			local slotUpgradeLevel = math.max(0, math.floor(tonumber(player:GetAttribute("Talent_PET_SLOT")) or 0))
+			return 1 + slotUpgradeLevel
+		end
+
+		local function showPetBagNotice(text, seconds)
+			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
+			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
+			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
+				noticeButton.Text = tostring(text or "")
+			end
+			if noticeUI and noticeUI:IsA("GuiObject") then
+				noticeUI.Visible = true
+				task.delay(seconds or 3, function()
+					if noticeUI then
+						noticeUI.Visible = false
+					end
+				end)
+			else
+				warn("[UIController][PetBag] Notice_UI missing. Notice:", text)
+			end
+		end
+
+		local petBagRemotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local equipPetFailedEvent = petBagRemotes and petBagRemotes:WaitForChild("EquipPetFailed", 5)
+		if equipPetFailedEvent and equipPetFailedEvent:IsA("RemoteEvent") then
+			equipPetFailedEvent.OnClientEvent:Connect(function(payload)
+				payload = type(payload) == "table" and payload or {}
+				local message = tostring(payload.Message or "")
+				if message == "" and payload.Reason == "EquippedSlotsFull" then
+					message = "Equipped pet slots are full. Please unequip a pet first."
+				end
+				if message ~= "" then
+					showPetBagNotice(message)
+				end
+			end)
+		elseif petBagRemotes then
+			warn("[UIController][PetBag] EquipPetFailed RemoteEvent missing.")
+		end
+
 		-- 将宠物实例按配置 SortOrder、等级、名称排序，保证背包每次刷新顺序稳定。
 		local function updateEquippedCountText()
 			if not equippedCountText or not equippedCountText:IsA("TextLabel") then
@@ -1915,8 +2372,7 @@ function UIController.Start()
 			end
 
 			local equippedUids = decodeEquippedPetUids()
-			local slotUpgradeLevel = math.max(0, math.floor(tonumber(player:GetAttribute("Talent_PET_SLOT")) or 0))
-			local maxEquipSlots = 1 + slotUpgradeLevel
+			local maxEquipSlots = getMaxEquipSlots()
 			equippedCountText.Text = tostring(#equippedUids) .. "/" .. tostring(maxEquipSlots)
 		end
 
@@ -2323,6 +2779,14 @@ function UIController.Start()
 				local equipPetEvent = remotes and remotes:WaitForChild("EquipPet", 5)
 				if not equipPetEvent then
 					warn("[UIController][PetBag] EquipPet RemoteEvent missing.")
+					return
+				end
+
+				local petId = detailButton:GetAttribute("PetId")
+				local equippedUids, equippedMap = decodeEquippedPetUids()
+				local isEquipped = equippedMap[petUid] == true or (type(petId) == "string" and equippedMap[petId] == true)
+				if not isEquipped and #equippedUids >= getMaxEquipSlots() then
+					showPetBagNotice("Equipped pet slots are full. Please unequip a pet first.")
 					return
 				end
 
@@ -3552,11 +4016,11 @@ function UIController.Start()
 			return
 		end
 
-		local purchaseButton = waitForNamedDescendant(starterPackPanel, "ImageButton", 2)
+		local purchaseButton = waitForNamedDescendant(starterPackPanel, "BtnClaim", 2)
 		if not purchaseButton or not purchaseButton:IsA("GuiButton") then
-			local found = waitForNamedDescendant(starterPackPanel, "ImageButton", 0)
+			local found = waitForNamedDescendant(starterPackPanel, "BtnClaim", 0)
 			local detail = found and (found.ClassName .. " at " .. found:GetFullName()) or ("not found under " .. starterPackPanel:GetFullName())
-			warn("[UIController] Starter Pack UI missing/invalid: StarterPackPanel/ImageButton must be ImageButton/TextButton, got " .. detail)
+			warn("[UIController] Starter Pack UI missing/invalid: StarterPackPanel/BtnClaim must be ImageButton/TextButton, got " .. detail)
 			return
 		end
 
@@ -3565,6 +4029,11 @@ function UIController.Start()
 		if not getStarterPackStatus or not getStarterPackStatus:IsA("RemoteFunction") then
 			warn("[UIController] GetStarterPackStatus RemoteFunction is not ready.")
 			return
+		end
+		local claimStarterPackGamePass = remotes and remotes:WaitForChild("ClaimStarterPackGamePass", 5)
+		if claimStarterPackGamePass and not claimStarterPackGamePass:IsA("RemoteFunction") then
+			warn("[UIController] ClaimStarterPackGamePass exists but is not a RemoteFunction.")
+			claimStarterPackGamePass = nil
 		end
 		local starterPackGranted = remotes and remotes:WaitForChild("StarterPackGranted", 5)
 		if starterPackGranted and not starterPackGranted:IsA("RemoteEvent") then
@@ -3628,26 +4097,7 @@ function UIController.Start()
 
 		local closeButton = waitForNamedDescendant(starterPackPanel, "BtnClose", 0)
 		local rewardPanel = waitForNamedDescendant(mainUI, "StarterPackRewardPanel", 0)
-		local rewardImageButton = rewardPanel and waitForNamedDescendant(rewardPanel, "ImageButton", 0)
-		local rewardConfirmButton = rewardPanel and waitForNamedDescendant(rewardPanel, "BtnConfirm", 0)
-
-		local function showStarterPackNotice(text)
-			local noticeUI = mainUI:FindFirstChild("Notice_UI", true)
-			local noticeButton = noticeUI and noticeUI:FindFirstChild("Notice_button", true)
-			if noticeButton and (noticeButton:IsA("TextLabel") or noticeButton:IsA("TextButton")) then
-				noticeButton.Text = tostring(text or "Starter Pack claimed!")
-			end
-			if noticeUI and noticeUI:IsA("GuiObject") then
-				noticeUI.Visible = true
-				task.delay(3, function()
-					if noticeUI then
-						noticeUI.Visible = false
-					end
-				end)
-			else
-				warn("[UIController] Starter Pack claimed, but StarterPackRewardPanel and Notice_UI are missing.")
-			end
-		end
+		local refreshStarterPackStatus
 
 		local function showStarterPackReward(payload)
 			payload = type(payload) == "table" and payload or {}
@@ -3661,16 +4111,39 @@ function UIController.Start()
 
 			openButton.Visible = false
 			starterPackPanel.Visible = false
-
-			if not rewardPanel or not rewardPanel:IsA("GuiObject") then
-				showStarterPackNotice("Starter Pack claimed!")
-				return
+			if rewardPanel and rewardPanel:IsA("GuiObject") then
+				rewardPanel.Visible = false
 			end
-
-			rewardPanel.Visible = true
 		end
 
-		local function refreshStarterPackStatus()
+		local function claimStarterPackGamePassReward()
+			if not claimStarterPackGamePass then
+				warn("[UIController] ClaimStarterPackGamePass RemoteFunction is not ready.")
+				return false
+			end
+
+			local success, result = pcall(function()
+				return claimStarterPackGamePass:InvokeServer()
+			end)
+			if not success or type(result) ~= "table" then
+				warn("[UIController] Failed to claim starter pack game pass:", result)
+				return false
+			end
+
+			if result.Success == true or result.Purchased == true then
+				showStarterPackReward({
+					PurchaseId = "gamepass-claim",
+				})
+				task.delay(0.2, refreshStarterPackStatus)
+				return true
+			end
+
+			warn("[UIController] Starter pack game pass claim rejected:", result.Reason or "Unknown")
+			task.delay(0.2, refreshStarterPackStatus)
+			return false
+		end
+
+		refreshStarterPackStatus = function()
 			local success, status = pcall(function()
 				return getStarterPackStatus:InvokeServer()
 			end)
@@ -3681,17 +4154,23 @@ function UIController.Start()
 
 			lastStatus = status
 			local productId = math.max(0, math.floor(tonumber(status.ProductId) or 0))
+			local purchaseType = tostring(status.PurchaseType or (status.IsGamePass and "GamePass" or "DeveloperProduct"))
 			local dataLoaded = status.DataLoaded == true
 			local purchased = status.Purchased == true
 			local canBuy = dataLoaded and productId > 0 and not purchased
 
 			purchaseButton:SetAttribute("ProductId", productId)
+			purchaseButton:SetAttribute("StarterPackPurchaseType", purchaseType)
+			purchaseButton:SetAttribute("StarterPackOwnsGamePass", status.OwnsGamePass == true)
 			purchaseButton:SetAttribute("StarterPackCanBuy", canBuy)
 			purchaseButton:SetAttribute("StarterPackPurchased", purchased)
 
 			if purchased then
 				openButton.Visible = false
 				starterPackPanel.Visible = false
+				if rewardPanel and rewardPanel:IsA("GuiObject") then
+					rewardPanel.Visible = false
+				end
 			else
 				setStarterPackVisible()
 			end
@@ -3722,25 +4201,12 @@ function UIController.Start()
 			closeButton.Activated:Connect(function()
 				setStarterPackOpen(false)
 			end)
+		else
+			warn("[UIController] Starter Pack UI missing/invalid: StarterPackPanel/BtnClose must be ImageButton/TextButton.")
 		end
 
 		if rewardPanel and rewardPanel:IsA("GuiObject") then
 			rewardPanel.Visible = false
-		end
-		if rewardImageButton and rewardImageButton:IsA("GuiButton") then
-			rewardImageButton.Activated:Connect(function()
-				if rewardPanel and rewardPanel:IsA("GuiObject") then
-					rewardPanel.Visible = false
-				end
-			end)
-		end
-		if rewardConfirmButton and rewardConfirmButton:IsA("GuiButton") then
-			applyHover(rewardConfirmButton, "StarterPackRewardConfirmHoverBound", "StarterPackRewardConfirmHoverScale", 1.06)
-			rewardConfirmButton.Activated:Connect(function()
-				if rewardPanel and rewardPanel:IsA("GuiObject") then
-					rewardPanel.Visible = false
-				end
-			end)
 		end
 
 		purchaseButton.Activated:Connect(function()
@@ -3756,7 +4222,20 @@ function UIController.Start()
 			end
 
 			promptInProgress = true
-			MarketplaceService:PromptProductPurchase(player, productId)
+			local purchaseType = tostring(purchaseButton:GetAttribute("StarterPackPurchaseType") or "DeveloperProduct")
+			if purchaseType == "GamePass" then
+				if purchaseButton:GetAttribute("StarterPackOwnsGamePass") == true then
+					promptInProgress = false
+					claimStarterPackGamePassReward()
+					return
+				end
+
+				print("[UIController][StarterPack] PromptGamePassPurchase GamePassId:", productId)
+				MarketplaceService:PromptGamePassPurchase(player, productId)
+			else
+				print("[UIController][StarterPack] PromptProductPurchase ProductId:", productId)
+				MarketplaceService:PromptProductPurchase(player, productId)
+			end
 			task.delay(1, function()
 				promptInProgress = false
 			end)
@@ -3775,6 +4254,41 @@ function UIController.Start()
 			end)
 		end)
 
+		MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(promptPlayerOrGamePassId, gamePassIdOrPurchased, wasPurchasedOrNil)
+			local promptUserId = nil
+			local finishedGamePassId = nil
+			local wasPurchased = nil
+			if typeof(promptPlayerOrGamePassId) == "Instance" and promptPlayerOrGamePassId:IsA("Player") then
+				promptUserId = promptPlayerOrGamePassId.UserId
+				finishedGamePassId = gamePassIdOrPurchased
+				wasPurchased = wasPurchasedOrNil
+			elseif wasPurchasedOrNil == nil then
+				finishedGamePassId = promptPlayerOrGamePassId
+				wasPurchased = gamePassIdOrPurchased
+			else
+				promptUserId = tonumber(promptPlayerOrGamePassId)
+				finishedGamePassId = gamePassIdOrPurchased
+				wasPurchased = wasPurchasedOrNil
+			end
+			if promptUserId and promptUserId ~= player.UserId then return end
+
+			local starterGamePassId = math.max(0, math.floor(tonumber(purchaseButton:GetAttribute("ProductId")) or 0))
+			if starterGamePassId > 0 and tonumber(finishedGamePassId) ~= starterGamePassId then
+				return
+			end
+
+			promptInProgress = false
+			if wasPurchased == true then
+				task.delay(0.6, function()
+					if not claimStarterPackGamePassReward() then
+						task.delay(2, claimStarterPackGamePassReward)
+					end
+				end)
+			else
+				task.delay(0.2, refreshStarterPackStatus)
+			end
+		end)
+
 		if starterPackGranted then
 			starterPackGranted.OnClientEvent:Connect(function(payload)
 				showStarterPackReward(payload)
@@ -3788,6 +4302,9 @@ function UIController.Start()
 				if attrName == "StarterPackPurchased" and player:GetAttribute("StarterPackPurchased") == true then
 					openButton.Visible = false
 					starterPackPanel.Visible = false
+					if rewardPanel and rewardPanel:IsA("GuiObject") then
+						rewardPanel.Visible = false
+					end
 					return
 				end
 				setStarterPackVisible()
@@ -4691,7 +5208,7 @@ function UIController.Start()
 
          -- 玩家响应了引导点击抽卡，清除光束！
 			player:SetAttribute("NeedsGuide", false)
-			Controllers.VFX.ClearGuide()
+			Controllers.VFX.ClearGuide("PetGuide")
 
 			local tickets = player:GetAttribute("PetDrawTickets") or 0
 			local ticketCost = math.max(1, math.floor(Controllers.Config.PET_DRAW_TICKET_COST or 1))
@@ -4799,33 +5316,12 @@ function UIController.Start()
 		end
 
 		-- 宠物蛋 ProximityPrompt 只负责打开 Hatch_Pet_Egg，不直接抽卡。
-		local petGuideCompletionSent = false
 		local function markPetGuideSeen()
-			if player:GetAttribute("HasSeenPetGuide") == true then
-				if Controllers and Controllers.VFX then
-					Controllers.VFX.ClearGuide()
-				end
-				return
-			end
-
-			player:SetAttribute("HasSeenPetGuide", true)
+			player:SetAttribute("NeedsPetGuide", false)
+			player:SetAttribute("PetGuideUseArrow", false)
 			if Controllers and Controllers.VFX then
-				Controllers.VFX.ClearGuide()
+				Controllers.VFX.ClearGuide("PetGuide")
 			end
-			if petGuideCompletionSent then
-				return
-			end
-			petGuideCompletionSent = true
-
-			task.spawn(function()
-				local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
-				local markEvent = remotes and remotes:WaitForChild("MarkPetGuideSeen", 5)
-				if markEvent and markEvent:IsA("RemoteEvent") then
-					markEvent:FireServer()
-				else
-					warn("[UIController] MarkPetGuideSeen RemoteEvent is not ready.")
-				end
-			end)
 		end
 
 		local function handlePetEggTriggered(triggeringPlayer)

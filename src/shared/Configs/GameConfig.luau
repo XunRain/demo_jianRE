@@ -3,6 +3,7 @@
 -- 方便后续添加局外养成系统时，统一修改初始属性
 
 local GameConfig = {
+    LOBBY_WALK_SPEED = 24,    -- Lobby Humanoid.WalkSpeed
     -- 1. 物理与移动控制
     RUN_SPEED = 30,           -- 跑酷基础速度
     RUN_SPEED_INCREMENT = 4,  -- 每过一关，移速增加 4 点
@@ -25,7 +26,7 @@ local GameConfig = {
     -- 相机视线：让相机视线看向玩家前方更远的地方，给上方留出足够的视野看清前方的门和怪
     CAMERA_LOOK_OFFSET = Vector3.new(0, 7, -4),
     LOBBY_CAMERA_ZOOM_ENABLED = true,
-    LOBBY_CAMERA_MIN_ZOOM_DISTANCE = 1,
+    LOBBY_CAMERA_MIN_ZOOM_DISTANCE = 15,
     LOBBY_CAMERA_MAX_ZOOM_DISTANCE = 35,
 
     -- 3. 地图与跑道生成配置
@@ -146,6 +147,7 @@ local GameConfig = {
 		},
 		StarterPack = {
 			ProductId = 1880320822,
+			PurchaseType = "GamePass",
 			RewardCoins = 5000,
 			RewardPetRarity = "Rare",
 			RewardPetLevel = 50,
@@ -687,6 +689,61 @@ local GameConfig = {
     },
 
     -- 12. 飞剑系统 (御剑流) 初始配置
+	BOSS_PROGRESS = {
+		Enabled = true,
+		VisibleBossSlots = 5,
+		BossModelCycle = { "Boss", "Boss2", "Boss3", "Boss4", "Boss5" },
+		StageTransitionGap = 100,
+		ViewportYawDegrees = 0,
+		ViewportPitchDegrees = 0,
+		ViewportRollDegrees = 0,
+		ViewportFieldOfView = 30,
+		ViewportCameraDistanceScale = 1.35,
+		ViewportCameraXScale = 0.12,
+		ViewportCameraHeightScale = 0.08,
+		ViewportLookAtHeightScale = 0.05,
+		-- 左右转身：ViewportYawDegrees
+		-- 前后趴/仰：ViewportPitchDegrees
+		-- 画面里歪头/倾斜：ViewportRollDegrees
+		-- 模型不居中：OffsetX / OffsetY
+		-- 模型太小/太大：ViewportCameraDistanceScale，数值越小模型越大
+		ViewportModelOverrides = {
+			Boss = {
+				-- ViewportYawDegrees = 15,
+				-- ViewportPitchDegrees = 0,
+				-- ViewportRollDegrees = -8,
+				OffsetX = 5,
+				OffsetY = 5,
+				-- ViewportCameraDistanceScale = 1.25,
+			},
+			Boss2 = {
+				-- ViewportYawDegrees = 15,
+				-- ViewportPitchDegrees = 0,
+				-- ViewportRollDegrees = -8,
+				-- OffsetX = 0,
+				OffsetY = 5,
+				-- ViewportCameraDistanceScale = 1.25,
+			},
+			Boss3 = {
+				-- ViewportYawDegrees = 15,
+				-- ViewportPitchDegrees = 0,
+				-- ViewportRollDegrees = -8,
+				-- OffsetX = 0,
+				-- OffsetY = 0,
+				ViewportCameraDistanceScale = 1.5,
+			},
+			Boss4 = {
+				-- ViewportYawDegrees = 15,
+				-- ViewportPitchDegrees = 0,
+				-- ViewportRollDegrees = -8,
+				-- OffsetX = 0,
+				OffsetY = 5,
+				-- ViewportCameraDistanceScale = 1.25,
+			},
+			Boss5 = {},
+		},
+	},
+
     DAMAGE_NUMBER = {
         Enabled = true,
         Debug = true,
@@ -894,6 +951,113 @@ local GameConfig = {
 }
 
 -- 商品计算价格方法，全局共享
+local function normalizePositiveInteger(value, fallback)
+	local number = math.floor(tonumber(value) or fallback or 1)
+	return math.max(1, number)
+end
+
+function GameConfig.GetStageLength(stageNum)
+	local stages = GameConfig.STAGES or {}
+	local normalizedStage = normalizePositiveInteger(stageNum, 1)
+	local stageConfig = stages[normalizedStage] or stages[#stages] or {}
+	return math.max(1, tonumber(stageConfig.Length) or 1000)
+end
+
+function GameConfig.GetBossProgressVisibleSlots()
+	local config = GameConfig.BOSS_PROGRESS or {}
+	return normalizePositiveInteger(config.VisibleBossSlots, 5)
+end
+
+function GameConfig.GetBossProgressCycleStart(bossIndex)
+	local visibleSlots = GameConfig.GetBossProgressVisibleSlots()
+	local normalizedBossIndex = normalizePositiveInteger(bossIndex, 1)
+	return math.floor((normalizedBossIndex - 1) / visibleSlots) * visibleSlots + 1
+end
+
+function GameConfig.GetBossProgressIndex(bossIndex)
+	local config = GameConfig.BOSS_PROGRESS or {}
+	local cycle = config.BossModelCycle or {}
+	local cycleCount = #cycle
+	if cycleCount <= 0 then
+		return 1
+	end
+
+	local visibleSlots = GameConfig.GetBossProgressVisibleSlots()
+	local normalizedBossIndex = normalizePositiveInteger(bossIndex, 1)
+	local roundIndex = math.floor((normalizedBossIndex - 1) / visibleSlots) + 1
+	local slotIndex = ((normalizedBossIndex - 1) % visibleSlots) + 1
+	local modelOrdinal = roundIndex
+	if slotIndex >= visibleSlots then
+		modelOrdinal += 1
+	end
+
+	return ((modelOrdinal - 1) % cycleCount) + 1
+end
+
+function GameConfig.GetBossModelName(bossIndex)
+	local fallbackName = (GameConfig.ENEMY_MODELS and GameConfig.ENEMY_MODELS.Boss) or "Boss"
+	local config = GameConfig.BOSS_PROGRESS or {}
+	local cycle = config.BossModelCycle or {}
+	local cycleCount = #cycle
+	if cycleCount <= 0 then
+		return fallbackName
+	end
+
+	local modelName = cycle[GameConfig.GetBossProgressIndex(bossIndex)]
+	if type(modelName) ~= "string" or modelName == "" then
+		return fallbackName
+	end
+
+	return modelName
+end
+
+function GameConfig.GetStageTransitionGap()
+	local config = GameConfig.BOSS_PROGRESS or {}
+	return math.max(0, tonumber(config.StageTransitionGap) or 100)
+end
+
+function GameConfig.GetStageStartDistance(stageNum)
+	local normalizedStage = normalizePositiveInteger(stageNum, 1)
+	local distance = 0
+	local transitionGap = GameConfig.GetStageTransitionGap()
+	for stage = 1, normalizedStage - 1 do
+		distance += GameConfig.GetStageLength(stage) + transitionGap
+	end
+
+	return distance
+end
+
+function GameConfig.GetBossDistance(stageNum)
+	local normalizedStage = normalizePositiveInteger(stageNum, 1)
+	return GameConfig.GetStageStartDistance(normalizedStage) + GameConfig.GetStageLength(normalizedStage)
+end
+
+function GameConfig.GetBossProgressRatio(currentBossIndex, currentDistance)
+	local visibleSlots = GameConfig.GetBossProgressVisibleSlots()
+	local cycleStart = GameConfig.GetBossProgressCycleStart(currentBossIndex)
+	local distance = math.max(0, tonumber(currentDistance) or 0)
+	local segmentCount = math.max(visibleSlots - 1, 1)
+	local previousDistance = GameConfig.GetStageStartDistance(cycleStart)
+	local previousVisualRatio = -1 / segmentCount
+
+	for slotIndex = 1, visibleSlots do
+		local bossStage = cycleStart + slotIndex - 1
+		local bossDistance = GameConfig.GetBossDistance(bossStage)
+		local bossVisualRatio = (slotIndex - 1) / segmentCount
+
+		if distance <= bossDistance then
+			local segmentDistance = math.max(1, bossDistance - previousDistance)
+			local segmentRatio = math.clamp((distance - previousDistance) / segmentDistance, 0, 1)
+			return previousVisualRatio + (bossVisualRatio - previousVisualRatio) * segmentRatio
+		end
+
+		previousDistance = bossDistance
+		previousVisualRatio = bossVisualRatio
+	end
+
+	return 1
+end
+
 function GameConfig.GetTalentIdByProductId(productId)
 	local normalizedProductId = tonumber(productId)
 	if not normalizedProductId then

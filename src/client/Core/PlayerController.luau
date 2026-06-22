@@ -136,6 +136,7 @@ function PlayerController.OnRenderStepped(dt)
 	-- ─── 阶段 A: 大厅状态 ───
 	if not Controllers.Game.IsCombatActive then
 		clearAllMoveInput()
+		humanoid.WalkSpeed = Controllers.Config.LOBBY_WALK_SPEED or 24
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		humanoid.AutoRotate = true
 		return 

@@ -474,13 +474,26 @@ local function getEnemyFallbackColor(enemyType)
 end
 
 -- 从 ReplicatedStorage 中查找怪物模型模板。
-local function getEnemyModelTemplate(enemyType, Config)
+local function getEnemyModelTemplate(enemyType, Config, modelNameOverride)
 	local modelFolder = ReplicatedStorage:FindFirstChild("Model")
 	local enemiesFolder = modelFolder and modelFolder:FindFirstChild("Enemies")
 	if not enemiesFolder then return nil end
 
-	local modelName = (Config.ENEMY_MODELS and Config.ENEMY_MODELS[enemyType]) or enemyType
-	return enemiesFolder:FindFirstChild(modelName)
+	local modelName = modelNameOverride or (Config.ENEMY_MODELS and Config.ENEMY_MODELS[enemyType]) or enemyType
+	local template = enemiesFolder:FindFirstChild(modelName)
+	if template then
+		return template, modelName
+	end
+
+	if enemyType == "Boss" then
+		local fallbackName = (Config.ENEMY_MODELS and Config.ENEMY_MODELS.Boss) or "Boss"
+		if modelName ~= fallbackName then
+			warn("[EncounterController] Boss model missing:", modelName, "fallback:", fallbackName)
+		end
+		return enemiesFolder:FindFirstChild(fallbackName), fallbackName
+	end
+
+	return nil, modelName
 end
 
 -- 准备怪物展示模型，统一关闭碰撞并补齐 PrimaryPart。
@@ -611,8 +624,8 @@ local function pivotEnemyVisualToHitbox(visual, hitbox, trackSurfaceY)
 end
 
 -- 创建怪物展示模型；模型缺失时返回 nil，由隐藏碰撞盒兜底表现。
-local function createEnemyVisual(enemyType, hitbox, trackSurfaceY, Config)
-	local template = getEnemyModelTemplate(enemyType, Config)
+local function createEnemyVisual(enemyType, hitbox, trackSurfaceY, Config, modelNameOverride)
+	local template, resolvedModelName = getEnemyModelTemplate(enemyType, Config, modelNameOverride)
 	if not template then return nil end
 
 	local visual = prepareEnemyVisual(template:Clone())
@@ -622,6 +635,7 @@ local function createEnemyVisual(enemyType, hitbox, trackSurfaceY, Config)
 	end
 
 	visual.Name = enemyType .. "Visual"
+	visual:SetAttribute("ModelName", resolvedModelName)
 	visual.Parent = hitbox
 	pivotEnemyVisualToHitbox(visual, hitbox, trackSurfaceY)
 	return visual
@@ -644,7 +658,7 @@ local function findEnemyHpDisplay(visual)
 end
 
 -- 创建怪物战斗实体，包含碰撞盒、属性、展示模型和血条文字。
-local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackSurfaceY)
+local function CreateEnemy(enemyType, xOffset, zPos, trackStartX, trackSurfaceY, modelNameOverride)
 	local Config = Controllers.Config
 	local enemy = Instance.new("Part")
 	enemy.Name = enemyType .. "Hitbox"
@@ -690,7 +704,7 @@ local baseHP = currentStageConfig.BasicHP or 30
 	folder.Name = "LocalEncounters"
 	enemy.Parent = folder
 
-	local enemyVisual = createEnemyVisual(enemyType, enemy, trackSurfaceY, Config)
+	local enemyVisual = createEnemyVisual(enemyType, enemy, trackSurfaceY, Config, modelNameOverride)
 	if enemyVisual then
 		enemy.Transparency = 1
 	else
@@ -718,6 +732,7 @@ local baseHP = currentStageConfig.BasicHP or 30
 		hpBillboard = hpBillboard,
 		hpSurfaceGui = hpSurfaceGui,
 		type = enemyType,
+		modelName = modelNameOverride,
 		baseSize = enemy.Size,
 		visual = enemyVisual
 	})
@@ -741,7 +756,8 @@ function EncounterController.SpawnEncountersInBlock(startZ, endZ, trackStartX, t
 
 if bossZ and bossZ <= startZ and bossZ > endZ then
 		local finalZ = bossZ
-		CreateEnemy("Boss", 0, finalZ, trackStartX, trackSurfaceY)
+		local bossModelName = Config.GetBossModelName and Config.GetBossModelName(currentStage) or nil
+		CreateEnemy("Boss", 0, finalZ, trackStartX, trackSurfaceY, bossModelName)
 		spawnedBoss += 1
 		registerEnemyZone(finalZ, 40)
 		bossZ = nil

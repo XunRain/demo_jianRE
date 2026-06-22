@@ -1,4 +1,4 @@
--- 特效与浮动文字模块：负责属性门提示、掉落动画、命中特效和轻量 UI 动效。
+-- VFX and floating text controller.
 local VFXController = {}
 
 local TweenService = game:GetService("TweenService")
@@ -17,6 +17,30 @@ local suspensionTextTemplate = guiFolder and guiFolder:WaitForChild("SuspensionT
 
 local Controllers
 
+local function createFallbackBillboard(part, text, textColor, yOffset)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "SuspensionTextFallback"
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(240, 64)
+	billboard.StudsOffset = Vector3.new(0, 0, 0)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, (part.Size.Y / 2) + (yOffset or 0), 0)
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Text"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Text = tostring(text or "")
+	label.TextColor3 = textColor or Color3.fromRGB(255, 255, 100)
+	label.TextStrokeTransparency = 0.25
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.Font = Enum.Font.Cartoon
+	label.TextScaled = true
+	label.Parent = billboard
+
+	billboard.Parent = part
+	return label
+end
+
 -- 初始化特效模块依赖。
 function VFXController.Init(deps)
 	Controllers = deps
@@ -30,12 +54,12 @@ end
 function VFXController.CreateBillboard(part, text, textColor, yOffset)
 	if not suspensionTextTemplate then
 		warn("[VFXController] 未找到 ReplicatedStorage/GUI/SuspensionText。")
-		return nil
+		return createFallbackBillboard(part, text, textColor, yOffset)
 	end
 
 	local billboard = suspensionTextTemplate:Clone()
 	billboard.StudsOffset = Vector3.new(0, 0, 0)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, (part.Size.Y / 2) + yOffset, 0)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, (part.Size.Y / 2) + (yOffset or 0), 0)
 
 	local label = billboard:FindFirstChild("Text")
 	if label and label:IsA("TextLabel") then
@@ -53,6 +77,15 @@ function VFXController.CreateBillboard(part, text, textColor, yOffset)
 		end
 	else
 		warn("[VFXController] SuspensionText 缺少名为 Text 的 TextLabel。")
+		label = Instance.new("TextLabel")
+		label.Name = "Text"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.TextScaled = true
+		label.Font = Enum.Font.Cartoon
+		label.Parent = billboard
+		label.Text = tostring(text or "")
+		label.TextColor3 = textColor or Color3.fromRGB(255, 255, 100)
 	end
 
 	billboard.Parent = part
@@ -335,6 +368,7 @@ local currentGuideAtt0 = nil
 local currentGuideAtt1 = nil
 local currentGuideLabel = nil
 local currentGuideLabelAnchor = nil
+local currentGuides = {}
 
 -- 移动没有焊接到根节点的特效零件，避免模型特效散件留在原地。
 local function translateLooseVfxParts(root, delta)
@@ -739,6 +773,115 @@ function VFXController.PlayDamageNumber(enemy, damage, hitPosition)
 	if damageConfig.Debug then
 		print("[DamageNumber][VFX] created damage=", amount, "position=", tostring(startPosition))
 	end
+end
+
+local function destroyGuideRecord(record)
+	if not record then return end
+	if record.Beam then record.Beam:Destroy() end
+	if record.Att0 then record.Att0:Destroy() end
+	if record.Att1 then record.Att1:Destroy() end
+	if record.LabelAnchor then
+		record.LabelAnchor:Destroy()
+	elseif record.Label and record.Label.Parent then
+		record.Label.Parent:Destroy()
+	end
+end
+
+function VFXController.HasGuide(guideKey)
+	local record = currentGuides[guideKey]
+	if not record then
+		return false
+	end
+
+	if record.LabelAnchor and record.LabelAnchor.Parent then
+		return true
+	end
+	if record.Beam and record.Beam.Parent then
+		return true
+	end
+
+	currentGuides[guideKey] = nil
+	return false
+end
+
+function VFXController.ClearGuide(guideKey)
+	if guideKey ~= nil then
+		destroyGuideRecord(currentGuides[guideKey])
+		currentGuides[guideKey] = nil
+		return
+	end
+
+	for key, record in pairs(currentGuides) do
+		destroyGuideRecord(record)
+		currentGuides[key] = nil
+	end
+
+	currentGuideBeam = nil
+	currentGuideAtt0 = nil
+	currentGuideAtt1 = nil
+	currentGuideLabel = nil
+	currentGuideLabelAnchor = nil
+end
+
+function VFXController.CreateGuide(targetPart, text, options)
+	options = options or {}
+	local guideKey = options.GuideKey
+	if guideKey == nil then
+		VFXController.ClearGuide()
+		guideKey = "__default"
+	else
+		VFXController.ClearGuide(guideKey)
+	end
+
+	local showBeam = options.ShowBeam ~= false
+	local character = Players.LocalPlayer.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not targetPart then return end
+
+	local record = {}
+	if showBeam and rootPart then
+		record.Att0 = Instance.new("Attachment", rootPart)
+		record.Att1 = Instance.new("Attachment", targetPart)
+
+		record.Beam = Instance.new("Beam")
+		record.Beam.Attachment0 = record.Att1
+		record.Beam.Attachment1 = record.Att0
+		record.Beam.FaceCamera = true
+		record.Beam.Width0 = 2
+		record.Beam.Width1 = 2
+		record.Beam.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+		record.Beam.Texture = "rbxassetid://9006027964"
+		record.Beam.TextureMode = Enum.TextureMode.Wrap
+		record.Beam.TextureSpeed = -3
+		record.Beam.TextureLength = 4
+		record.Beam.LightEmission = 1
+		record.Beam.Parent = rootPart
+	end
+
+	local labelHeight = tonumber(options.LabelHeight) or 4
+	local labelAnchor = Instance.new("Part")
+	labelAnchor.Name = "GuideLabelAnchor"
+	labelAnchor.Anchored = true
+	labelAnchor.CanCollide = false
+	labelAnchor.CanQuery = false
+	labelAnchor.CanTouch = false
+	labelAnchor.Transparency = 1
+	labelAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	labelAnchor.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, targetPart.Size.Y * 0.5 + labelHeight, 0))
+	labelAnchor.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+	record.LabelAnchor = labelAnchor
+	record.Label = VFXController.CreateBillboard(labelAnchor, text, Color3.fromRGB(255, 255, 100), 0)
+	currentGuides[guideKey] = record
+
+	if guideKey == "__default" then
+		currentGuideBeam = record.Beam
+		currentGuideAtt0 = record.Att0
+		currentGuideAtt1 = record.Att1
+		currentGuideLabelAnchor = record.LabelAnchor
+		currentGuideLabel = record.Label
+	end
+
+	return true
 end
 
 return VFXController

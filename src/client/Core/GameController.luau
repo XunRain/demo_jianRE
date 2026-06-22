@@ -19,6 +19,7 @@ local lobbyLightingSnapshot = nil
 local lightingTween = nil
 local SHOP_GUIDE_ARROW_DEATHS = 2
 local DEBUG_COMBAT_FLOW = true
+local DEBUG_PET_GUIDE = true
 local lastDebugAtByKey = {}
 local revivePending = false
 local reviveToken = 0
@@ -42,6 +43,8 @@ local startGuideCompletionSent = false
 local petGuideRequested = false
 local petGuideActive = false
 local currentPetGuideTarget = nil
+local currentPetGuideUseArrow = nil
+local petGuideAllowedAt = math.huge
 
 local function setQuickHealPurchasePaused(isPaused)
 	player:SetAttribute("IsQuickHealPurchasing", isPaused == true)
@@ -61,6 +64,23 @@ local function debugCombatThrottled(key, interval, ...)
 	end
 	lastDebugAtByKey[key] = now
 	-- print("[Debug][CombatFlow]", ...)
+end
+
+local function debugPetGuide(...)
+	if DEBUG_PET_GUIDE then
+		print("[PetGuide]", ...)
+	end
+end
+
+local function debugPetGuideThrottled(key, interval, ...)
+	if not DEBUG_PET_GUIDE then return end
+	local now = os.clock()
+	local guideKey = "pet_guide_" .. tostring(key)
+	if lastDebugAtByKey[guideKey] and now - lastDebugAtByKey[guideKey] < (interval or 1) then
+		return
+	end
+	lastDebugAtByKey[guideKey] = now
+	print("[PetGuide]", ...)
 end
 
 -- 同步本地跑酷状态给服务端头顶进度 UI；服务端展示给所有玩家看。
@@ -370,21 +390,46 @@ local function clearStartGuide()
 	startGuideActive = false
 	currentStartGuideTarget = nil
 	if Controllers and Controllers.VFX then
-		Controllers.VFX.ClearGuide()
+		Controllers.VFX.ClearGuide("StartGuide")
 	end
 end
 
 local function clearPetGuide()
+	currentPetGuideUseArrow = nil
 	if not petGuideActive then
 		currentPetGuideTarget = nil
+		if Controllers and Controllers.VFX then
+			Controllers.VFX.ClearGuide("PetGuide")
+		end
 		return
 	end
 
 	petGuideActive = false
 	currentPetGuideTarget = nil
 	if Controllers and Controllers.VFX then
-		Controllers.VFX.ClearGuide()
+		Controllers.VFX.ClearGuide("PetGuide")
 	end
+end
+
+local function queuePetGuidePresentation()
+	local guideDeathCount = (player:GetAttribute("PetGuideDeathCount") or 0) + 1
+	local useArrow = guideDeathCount <= SHOP_GUIDE_ARROW_DEATHS
+
+	petGuideRequested = true
+	player:SetAttribute("PetGuideDeathCount", guideDeathCount)
+	player:SetAttribute("NeedsPetGuide", true)
+	player:SetAttribute("PetGuideUseArrow", useArrow)
+	debugPetGuide("queued", "count=", guideDeathCount, "useArrow=", useArrow)
+
+	return useArrow
+end
+
+local function queueWeakPetGuidePresentation(reason)
+	petGuideRequested = true
+	player:SetAttribute("PetGuideDeathCount", math.max(player:GetAttribute("PetGuideDeathCount") or 0, SHOP_GUIDE_ARROW_DEATHS))
+	player:SetAttribute("NeedsPetGuide", true)
+	player:SetAttribute("PetGuideUseArrow", false)
+	debugPetGuide("queued weak", "reason=", reason or "unknown", "count=", player:GetAttribute("PetGuideDeathCount"))
 end
 
 local function shouldShowStartGuide()
@@ -429,6 +474,7 @@ local function updateStartGuide()
 	end
 
 	Controllers.VFX.CreateGuide(target, "Run to START!", {
+		GuideKey = "StartGuide",
 		ShowBeam = true,
 	})
 	startGuideActive = true
@@ -438,11 +484,12 @@ end
 local function shouldShowPetGuide()
 	if not petGuideRequested then return false end
 	if player:GetAttribute("PlayerDataLoaded") ~= true then return false end
+	if player:GetAttribute("NeedsPetGuide") ~= true then return false end
 	if player:GetAttribute("HasSeenStartGuide") ~= true then return false end
-	if player:GetAttribute("HasSeenPetGuide") == true then return false end
-	if player:GetAttribute("NeedsGuide") == true then return false end
+	if player:GetAttribute("NeedsGuide") == true and player:GetAttribute("PetGuideUseArrow") ~= false then return false end
 	if player:GetAttribute("IsRevivePending") == true then return false end
 	if GameController.IsCombatActive or isStartingCombat or player:GetAttribute("InCombat") == true then return false end
+	if os.clock() < petGuideAllowedAt then return false end
 	if isLobbyModalOpen() then return false end
 	return true
 end
@@ -455,32 +502,67 @@ end
 local function updatePetGuide()
 	if not Controllers or not Controllers.VFX then return end
 
-	if player:GetAttribute("HasSeenPetGuide") == true then
-		petGuideRequested = false
-		clearPetGuide()
-		return
-	end
-
 	if not shouldShowPetGuide() then
+		debugPetGuideThrottled(
+			"skip",
+			1.5,
+			"skip show",
+			"requested=", petGuideRequested,
+			"needs=", player:GetAttribute("NeedsPetGuide"),
+			"useArrow=", player:GetAttribute("PetGuideUseArrow"),
+			"needsShop=", player:GetAttribute("NeedsGuide"),
+			"inCombat=", GameController.IsCombatActive or player:GetAttribute("InCombat") == true,
+			"modal=", isLobbyModalOpen()
+		)
 		clearPetGuide()
 		return
 	end
 
 	local target = getPetGuideTarget()
 	if not target or not target.Parent then
+		debugPetGuideThrottled("missing_target", 1.5, "missing target")
 		clearPetGuide()
 		return
 	end
 
-	if petGuideActive and currentPetGuideTarget == target then
+	local useArrow = player:GetAttribute("PetGuideUseArrow") ~= false
+	local hasGuide = Controllers.VFX.HasGuide == nil or Controllers.VFX.HasGuide("PetGuide") == true
+	if petGuideActive and currentPetGuideTarget == target and currentPetGuideUseArrow == useArrow and hasGuide then
 		return
 	end
 
 	Controllers.VFX.CreateGuide(target, "Draw pets to boost your firepower!", {
-		ShowBeam = true,
+		GuideKey = "PetGuide",
+		ShowBeam = useArrow,
 	})
+	debugPetGuide("created", "target=", getFullNameSafe(target), "useArrow=", useArrow)
 	petGuideActive = true
 	currentPetGuideTarget = target
+	currentPetGuideUseArrow = useArrow
+end
+
+local function completeShopGuideIfNeeded(source)
+	if player:GetAttribute("NeedsGuide") ~= true then
+		return false
+	end
+
+	local shopGuideHadArrow = player:GetAttribute("ShopGuideUseArrow") ~= false
+	player:SetAttribute("NeedsGuide", false)
+	if Controllers and Controllers.VFX then
+		Controllers.VFX.ClearGuide("ShopGuide")
+	end
+
+	debugPetGuide("shop guide completed", "source=", source or "unknown", "shopHadArrow=", shopGuideHadArrow)
+
+	petGuideAllowedAt = os.clock()
+	if shopGuideHadArrow then
+		queuePetGuidePresentation()
+	else
+		queueWeakPetGuidePresentation("shop_weak")
+	end
+	task.defer(updatePetGuide)
+
+	return true
 end
 
 local function markStartGuideSeen()
@@ -1299,6 +1381,11 @@ function GameController.Start()
 			safePlaySound("PlayBackground")
 		end
 	end)
+	player:GetAttributeChangedSignal("IsShopOpen"):Connect(function()
+		if player:GetAttribute("IsShopOpen") == true and not GameController.IsCombatActive then
+			completeShopGuideIfNeeded("IsShopOpen")
+		end
+	end)
 	for _, attrName in ipairs({ "Level", "ATK_Bonus" }) do
 		player:GetAttributeChangedSignal(attrName):Connect(function()
 			if GameController.IsCombatActive or player:GetAttribute("InCombat") == true then
@@ -1362,9 +1449,19 @@ function GameController.Start()
 				local diedInCombat = GameController.IsCombatActive or player:GetAttribute("InCombat") == true
 				if diedInCombat then
 					local guideDeathCount = (player:GetAttribute("ShopGuideDeathCount") or 0) + 1
+					local useArrow = guideDeathCount <= SHOP_GUIDE_ARROW_DEATHS
 					player:SetAttribute("ShopGuideDeathCount", guideDeathCount)
 					player:SetAttribute("NeedsGuide", true)
-					player:SetAttribute("ShopGuideUseArrow", guideDeathCount <= SHOP_GUIDE_ARROW_DEATHS)
+					player:SetAttribute("ShopGuideUseArrow", useArrow)
+
+					if not useArrow and player:GetAttribute("HasSeenStartGuide") == true then
+						queueWeakPetGuidePresentation("shop_death_weak")
+						petGuideAllowedAt = math.huge
+					else
+						petGuideRequested = false
+						player:SetAttribute("NeedsPetGuide", false)
+						player:SetAttribute("PetGuideUseArrow", false)
+					end
 				end
 
 				-- 如果玩家死在了第二关及以上，打上“需要引导”的思想钢印
@@ -1493,9 +1590,14 @@ function GameController.Start()
 				-- 商店模型暂未加载时才兜底指向宠物蛋，避免引导完全消失。
 				if target then
 					Controllers.VFX.CreateGuide(target, text, {
+						GuideKey = "ShopGuide",
 						ShowBeam = player:GetAttribute("ShopGuideUseArrow") ~= false,
 					})
 				end
+			end
+			if player:GetAttribute("NeedsPetGuide") and not GameController.IsCombatActive then
+				petGuideAllowedAt = os.clock()
+				updatePetGuide()
 			end
 		end)
 	end
@@ -1633,6 +1735,10 @@ function GameController.EnterCombat(startObjectOverride)
 		anchoredRoot = nil
 
 		player:SetAttribute("NeedsGuide", false)
+		petGuideRequested = false
+		player:SetAttribute("NeedsPetGuide", false)
+		player:SetAttribute("PetGuideUseArrow", false)
+		petGuideAllowedAt = math.huge
 		Controllers.VFX.ClearGuide()
 		clearPetGuide()
 		markStartGuideSeen()
@@ -1898,45 +2004,22 @@ function GameController.SetupNPC()
 			end
 		end
 
-		-- 绑定新的 ShopNPC；新商人是 Model 时，Prompt 会挂到 HumanoidRootPart 或第一个 BasePart 上。
+		-- 绑定新的 ShopNPC；交互使用 Studio 中挂在商人模型内的 ProximityPrompt。
 		local function bindShopNPC()
 			disableOldShopPrompts()
 
 			local npc = findLobbyObject("ShopNPC")
 			if not npc then return end
 
-			local promptParent = npc:FindFirstChild("HumanoidRootPart") or getInteractBasePart(npc)
-			if not promptParent then return end
-
-			local prompt = promptParent:FindFirstChildOfClass("ProximityPrompt")
-			if not prompt then
-				prompt = Instance.new("ProximityPrompt")
-				prompt.Name = "ShopPrompt"
-				prompt.Parent = promptParent
-			end
-
-			prompt.ActionText = "Open Shop"
-			prompt.ObjectText = "Merchant"
-			prompt.HoldDuration = 0.2
-			prompt.RequiresLineOfSight = false
-			prompt.MaxActivationDistance = 12
-			prompt.Enabled = true
+			local prompt = npc:IsA("ProximityPrompt") and npc or npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+			if not prompt then return end
 
 			if not prompt:GetAttribute("ClientShopPromptBound") then
 				prompt:SetAttribute("ClientShopPromptBound", true)
 				prompt.Triggered:Connect(function(triggeringPlayer)
 					if triggeringPlayer == player and not GameController.IsCombatActive then
-						local completedShopGuide = player:GetAttribute("NeedsGuide") == true
 						player:SetAttribute("IsShopOpen", true)
-						player:SetAttribute("NeedsGuide", false)
-						-- 告诉 UI 系统：玩家打开了商店
-						player:SetAttribute("IsShopOpen", true)
-						-- 成功打开商店，使命完成，清除光束！
-						player:SetAttribute("NeedsGuide", false)
-						Controllers.VFX.ClearGuide()
-						if completedShopGuide and player:GetAttribute("HasSeenPetGuide") ~= true then
-							petGuideRequested = true
-						end
+						completeShopGuideIfNeeded("ShopNPC")
 					end
 				end)
 			end
