@@ -350,7 +350,7 @@ end
 local function isLobbyModalOpen()
 	for _, attrName in ipairs({ "IsPetBagOpen", "IsShopOpen", "IsLevelingUp", "IsRevivePending" }) do
 		if player:GetAttribute(attrName) == true then
-			debugCombatThrottled("modal_attr_" .. attrName, 1.5, "大厅弹窗/状态阻止开局，Attribute:", attrName, "= true")
+		debugCombatThrottled("modal_attr_" .. attrName, 1.5, "Lobby modal/state blocked run start. Attribute:", attrName, "= true")
 			return true
 		end
 	end
@@ -373,7 +373,7 @@ local function isLobbyModalOpen()
 	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "Hatch_Pet_Egg", "LevelUpPanel", "Achieve", "RebirthPanel", "StarterPackPanel", "StarterPackRewardPanel", "FreeRewardPanel" }) do
 		local panel = mainUI:FindFirstChild(panelName, true)
 		if panel and panel:IsA("GuiObject") and isGuiEffectivelyVisible(panel) then
-			debugCombatThrottled("modal_panel_" .. panelName, 1.5, "大厅 UI 面板阻止开局，Panel effectively visible:", panelName, getFullNameSafe(panel))
+			debugCombatThrottled("modal_panel_" .. panelName, 1.5, "Lobby UI panel blocked run start. Panel effectively visible:", panelName, getFullNameSafe(panel))
 			return true
 		end
 	end
@@ -597,7 +597,7 @@ local function safePlaySound(actionName)
 
 	local ok, err = pcall(soundAction)
 	if not ok then
-		warn("[GameController][Sound] 音效调用失败，不影响主流程:", actionName, err)
+		warn("[GameController][Sound] Sound action failed; gameplay flow continues:", actionName, err)
 	end
 end
 
@@ -1573,7 +1573,7 @@ function GameController.Start()
 						applyCameraZoomLimit(false)
 					end
 					
-					print("画面定格结束，世界实体已彻底卸载清空。")
+					print("Freeze frame ended; world entities have been fully cleared.")
 				end)
 			end)
 		end
@@ -1684,7 +1684,7 @@ function GameController.EnterCombat(startObjectOverride)
 		-- 关键对象缺失时直接退出，不切换 InCombat，避免玩家仍在大厅但状态已经进入战斗。
 		local character = player.Character
 		if not character then
-			warn("[GameController] 进入战斗失败：未找到玩家角色。")
+			warn("[GameController] Failed to enter combat: player character not found.")
 			debugCombat("EnterCombat failed: no character")
 			return
 		end
@@ -1692,7 +1692,7 @@ function GameController.EnterCombat(startObjectOverride)
 		local humanoid = character:FindFirstChild("Humanoid")
 		local rootPart = character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart
 		if not humanoid or humanoid.Health <= 0 or not rootPart then
-			warn("[GameController] 进入战斗失败：角色 Humanoid 或 HumanoidRootPart 不可用。")
+			warn("[GameController] Failed to enter combat: Humanoid or HumanoidRootPart is unavailable.")
 			debugCombat("EnterCombat failed: invalid character parts", "humanoid=", humanoid ~= nil, "health=", humanoid and humanoid.Health, "rootPart=", rootPart ~= nil)
 			return
 		end
@@ -1700,7 +1700,7 @@ function GameController.EnterCombat(startObjectOverride)
 		local startObject = startObjectOverride or waitForStartObject(3)
 		local startCFrame = getStartCFrame(startObject)
 		if not startCFrame then
-			warn("[GameController] 进入战斗失败：未找到可用的 StartZone/StartButton。")
+			warn("[GameController] Failed to enter combat: no usable StartZone/StartButton found.")
 			debugCombat("EnterCombat failed: startCFrame missing", "startObject=", getFullNameSafe(startObject))
 			return
 		end
@@ -1758,11 +1758,11 @@ function GameController.EnterCombat(startObjectOverride)
 		end
 
 		started = true
-		print("[GameController] 进入跑道，单局游戏正式开始。")
+		print("[GameController] Entered runway; run has started.")
 	end, debug.traceback)
 
 	if not ok then
-		warn("[GameController] 进入战斗流程异常：", err)
+		warn("[GameController] Enter combat flow failed:", err)
 		if anchoredRoot then
 			anchoredRoot.Anchored = anchoredWas
 			anchoredRoot = nil

@@ -47,7 +47,7 @@ local function getOrCreateRemote(name, className)
 
 	local remote = remotes:FindFirstChild(name)
 	if remote and not remote:IsA(className) then
-		warn("[LeaderboardManager] Remote 类型不匹配，已重建:", name, className)
+		warn("[LeaderboardManager] Remote type mismatch; recreated:", name, className)
 		remote:Destroy()
 		remote = nil
 	end
@@ -153,7 +153,7 @@ local function refreshRankScanCache(force)
 		rankScanCacheTime = now
 
 	else
-		warn("[LeaderboardManager] 全服排行榜扫描失败:", err)
+		warn("[LeaderboardManager] Global leaderboard scan failed:", err)
 		rankScanCache = rankScanCache or {}
 	end
 
@@ -230,7 +230,7 @@ function LeaderboardManager.SubmitBestDistance(userId, distance)
 		return true
 	end
 
-	warn("[LeaderboardManager] 写入全服排行榜失败:", userId, bestDistance, err)
+	warn("[LeaderboardManager] Failed to write global leaderboard:", userId, bestDistance, err)
 	return false
 end
 

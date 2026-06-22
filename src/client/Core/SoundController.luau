@@ -24,7 +24,7 @@ local function getSound(soundKey)
 	end
 
 	if not warnedMissingSounds[soundKey] then
-		warn("[SoundController] SoundService 缺少音效:", soundName)
+		warn("[SoundController] SoundService is missing sound:", soundName)
 		warnedMissingSounds[soundKey] = true
 	end
 

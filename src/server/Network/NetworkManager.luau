@@ -74,7 +74,7 @@ function NetworkManager.Start()
 
 		-- 安全网闸：过滤各种非法数值，防止作弊刷钱
 		if type(amount) ~= "number" or amount <= 0 or amount > 500 then 
-			warn("⚠️ 拦截到来自玩家 " .. player.Name .. " 的异常加钱请求！")
+			warn("[NetworkManager] Blocked suspicious AddCoins request from player " .. player.Name .. ".")
 			return 
 		end
 		
@@ -370,7 +370,7 @@ function NetworkManager.Start()
 		-- 按宠物配置表权重随机出货
 		local resultId = GameConfig.RollPetId()
 		if not resultId or not GameConfig.PETS[resultId] then
-			warn("宠物抽卡失败：配置表没有可用宠物。")
+			warn("Pet draw failed: no available pets in config.")
 			player:SetAttribute("PetDrawTickets", tickets)
 			return nil
 		end
@@ -397,7 +397,7 @@ function NetworkManager.Start()
 			})
 		end
 
-		print(string.format("%s 抽中了宠物: %s Lv.%d", player.Name, resultId, petInstance.Level))
+		print(string.format("%s drew pet: %s Lv.%d", player.Name, resultId, petInstance.Level))
 		return petInstance -- 将抽奖结果返回给客户端用于展示特效
 	end
 
@@ -573,7 +573,7 @@ function NetworkManager.Start()
 			time_since_join = getTimeSinceJoin(player),
 		})
 		scheduleSave(player, 3)
-		print(player.Name .. " 已触发过第二关引导，打上永久防打扰思想钢印。")
+		print(player.Name .. " has already triggered the stage 2 guide; suppressing future reminders.")
 	end)
 end
 

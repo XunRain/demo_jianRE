@@ -78,7 +78,7 @@ function ProgressionController.AddExp(gainedExp)
 			reward_mode = "Normal",
 		})
 		Controllers.Player.SetMoveDirection(0) 
-		print("玩家升级！当前等级: " .. tostring(currentLevel))
+		print("Player leveled up. Current level: " .. tostring(currentLevel))
 	end
 
 	return actualGainedExp

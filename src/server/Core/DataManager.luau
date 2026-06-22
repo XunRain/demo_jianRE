@@ -139,7 +139,7 @@ end
 -- 业务接口 1：从云端拉取存档
 -- ==========================================
 function DataManager.LoadPlayerData(player)
-	print("正在连接云端，读取玩家数据:", player.Name)
+	print("Connecting to cloud data for player:", player.Name)
 	
 	local success, data = pcall(function()
 		return PlayerDataStore:GetAsync("Player_" .. player.UserId)
@@ -157,9 +157,9 @@ function DataManager.LoadPlayerData(player)
 		for statName, statValue in pairs(data) do
 			playerData[statName] = statValue
 		end
-		print("✅ " .. player.Name .. " 的云端数据读取成功！")
+		print("[DataManager] Cloud data loaded for " .. player.Name .. ".")
 	else
-		print("⚠️ " .. player.Name .. " 读取失败或属首次游玩，使用默认 0 资产。")
+		print("[DataManager] Data load failed or first session for " .. player.Name .. "; using default zero assets.")
 	end
 
 	local resetRewardData = buildResetRewardData(player.UserId)
@@ -168,7 +168,7 @@ function DataManager.LoadPlayerData(player)
 		dataLoaded = true
 		hasPersistedStartGuideFlag = true
 		hasPersistedPetGuideFlag = true
-		print("🧪 测试白名单生效：已清空玩家 " .. player.Name .. " 的记录，并发放金币:", playerData.Coins)
+		print("[DataManager] Reset reward whitelist applied for " .. player.Name .. "; records cleared and coins granted:", playerData.Coins)
 	end
 
 	-- 服务器端修改属性，会自动下发给客户端同步更新 UI
@@ -290,7 +290,7 @@ function DataManager.SavePlayerData(player)
 	end
 
 	if success then
-		print("💾 云端同步完毕！安全保存了玩家 " .. player.Name .. " 的资产。金币:", dataToSave.Coins)
+		print("[DataManager] Cloud sync complete for " .. player.Name .. ". Coins:", dataToSave.Coins)
 		-- 保存个人数据成功后，同步刷新全服排行榜最高米数。
 		if _Services and _Services.LeaderboardManager and _Services.LeaderboardManager.SubmitPlayerBestDistance then
 			task.spawn(function()
@@ -298,7 +298,7 @@ function DataManager.SavePlayerData(player)
 			end)
 		end
 	else
-		warn("❌ 云端同步灾难！玩家 " .. player.Name .. " 存档失败:", err)
+		warn("[DataManager] Cloud sync failed for " .. player.Name .. ":", err)
 	end
 	return success
 end

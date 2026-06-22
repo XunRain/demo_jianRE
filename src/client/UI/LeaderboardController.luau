@@ -261,7 +261,7 @@ local function getLeaderboardSnapshot()
 			return snapshot
 		end
 
-		warn("[LeaderboardController] 获取全服排行榜失败:", snapshot)
+		warn("[LeaderboardController] Failed to fetch global leaderboard:", snapshot)
 	end
 
 	if lastLeaderboardSnapshot then
@@ -363,7 +363,7 @@ function LeaderboardController.Start()
 				missingSince = missingSince or os.clock()
 				local warnDelay = config.MissingWarnDelay or 5
 				if not warnedMissingBoard and (os.clock() - missingSince) >= warnDelay then
-					warn("[LeaderboardController] 未找到排行榜展示板。请确认 LeaderboardBoard 位于 Workspace，或存在名为 LeaderboardSurfaceGui 的 SurfaceGui；如果开启 Streaming，请把展示板设为客户端可见。")
+					warn("[LeaderboardController] Leaderboard board not found. Confirm LeaderboardBoard is in Workspace, or that a LeaderboardSurfaceGui exists; if Streaming is enabled, make sure the board is client-visible.")
 					warnedMissingBoard = true
 				end
 			end

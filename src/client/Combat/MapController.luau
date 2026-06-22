@@ -49,7 +49,7 @@ function MapController.SpawnTrackBlock()
 	local Config = Controllers.Config
 	
 	if not roadTemplate then
-		warn("找不到跑道模型！请确认 ReplicatedStorage/Model/Road 是否存在。")
+		warn("Road model not found. Please confirm ReplicatedStorage/Model/Road exists.")
 		return
 	end
 	

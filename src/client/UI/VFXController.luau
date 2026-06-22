@@ -53,7 +53,7 @@ end
 -- 在 3D 物体上方创建悬浮文字。
 function VFXController.CreateBillboard(part, text, textColor, yOffset)
 	if not suspensionTextTemplate then
-		warn("[VFXController] 未找到 ReplicatedStorage/GUI/SuspensionText。")
+		warn("[VFXController] ReplicatedStorage/GUI/SuspensionText not found.")
 		return createFallbackBillboard(part, text, textColor, yOffset)
 	end
 
@@ -76,7 +76,7 @@ function VFXController.CreateBillboard(part, text, textColor, yOffset)
 			label.LineHeight = 0.8
 		end
 	else
-		warn("[VFXController] SuspensionText 缺少名为 Text 的 TextLabel。")
+		warn("[VFXController] SuspensionText is missing a TextLabel named Text.")
 		label = Instance.new("TextLabel")
 		label.Name = "Text"
 		label.BackgroundTransparency = 1

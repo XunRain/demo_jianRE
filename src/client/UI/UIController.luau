@@ -83,6 +83,37 @@ end
 
 -- 查找 Studio 模板里可能存在的图标节点；只负责绑定图片，不修改图标位置和样式。
 -- 只按指定名称查找图片节点；用于角标等精确绑定，避免误拿到主图标节点。
+local function findGuiObjectByNames(root, names)
+	if not root then return nil end
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and node:IsA("GuiObject") then
+			return node
+		end
+	end
+	return nil
+end
+
+local function findGuiContainerByNames(root, names)
+	if not root then return nil end
+	for _, name in ipairs(names) do
+		local node = root:FindFirstChild(name, true)
+		if node and (node:IsA("GuiObject") or node:IsA("ScreenGui")) then
+			return node
+		end
+	end
+	return nil
+end
+
+local function setGuiNodeVisible(node, isVisible)
+	if not node then return end
+	if node:IsA("ScreenGui") then
+		node.Enabled = isVisible == true
+	elseif node:IsA("GuiObject") then
+		node.Visible = isVisible == true
+	end
+end
+
 local function findNamedImageNode(root, names)
 	for _, name in ipairs(names) do
 		local node = root:FindFirstChild(name, true)
@@ -214,15 +245,23 @@ local function applyExitButtonHoverScale(exitButton)
 end
 
 -- 查找关卡 HUD：优先使用美术做好的图片容器，兼容旧版纯文字 StageLabel。
-local function findStageHud(mainUI)
-	for _, name in ipairs({"StageHUD", "StagePanel", "StageContainer", "StageFrame", "StageLabel"}) do
-		local node = mainUI:FindFirstChild(name, true)
-		if node and node:IsA("GuiObject") then
-			return node
-		end
+local function findCoinContainer(root)
+	local mainUI = root and root:FindFirstChild("MainUI")
+	local coinGui = mainUI and mainUI:FindFirstChild("CoinGui")
+	local coinContainer = coinGui and coinGui:FindFirstChild("CoinContainer")
+	if coinContainer and coinContainer:IsA("GuiObject") then
+		return coinContainer
 	end
 
 	return nil
+end
+
+local function findCoinBonusHud(root)
+	return findGuiObjectByNames(root, { "CoinBonusUI", "CoinBonusHUD", "CoinBonusContainer" })
+end
+
+local function findStageHud(root)
+	return findGuiContainerByNames(root, { "StageHUD", "StageUI", "StageCountUI", "StagePanel", "StageContainer", "StageFrame", "StageLabel", "StageText" })
 end
 
 local bossProgressState = {
@@ -235,13 +274,8 @@ local bossProgressState = {
 	MissingUiWarned = false,
 }
 
-local function findBossProgressBar(mainUI)
-	if not mainUI then return nil end
-	local progressBar = mainUI:FindFirstChild("BossProgressBar", true)
-	if progressBar and progressBar:IsA("GuiObject") then
-		return progressBar
-	end
-	return nil
+local function findBossProgressBar(root)
+	return findGuiObjectByNames(root, { "BossProgressBar" })
 end
 
 local function findBossProgressViewport(root)
@@ -548,8 +582,8 @@ local function updateBossProgressPlayer(progressBar, strip, ratio)
 	end
 end
 
-local function updateBossProgressBar(mainUI, inCombat, currentStage, currentDistance)
-	local progressBar = findBossProgressBar(mainUI)
+local function updateBossProgressBar(hudRoot, inCombat, currentStage, currentDistance)
+	local progressBar = findBossProgressBar(hudRoot)
 	if not progressBar then
 		return
 	end
@@ -576,10 +610,9 @@ local function updateBossProgressBar(mainUI, inCombat, currentStage, currentDist
 			task.delay(0.1, function()
 				bossProgressState.LayoutRetryScheduled = false
 				local playerGui = player:FindFirstChild("PlayerGui")
-				local latestMainUI = playerGui and playerGui:FindFirstChild("MainUI")
-				if latestMainUI then
+				if playerGui then
 					updateBossProgressBar(
-						latestMainUI,
+						playerGui,
 						player:GetAttribute("InCombat") == true,
 						player:GetAttribute("CurrentStage") or 1,
 						player:GetAttribute("CurrentDistance") or 0
@@ -608,7 +641,7 @@ function UIController.Start()
 			end)
 			task.wait(0.1)
 		until success
-		print("原生血条已成功隐藏！")
+	print("Default Roblox health bar hidden.")
 	end)
 
 	-- 动态获取并更新所有 UI 的核心函数
@@ -641,15 +674,13 @@ function UIController.Start()
 		if mainUI then
 
 			-- 金币常驻常显
-			local coinContainer = mainUI:FindFirstChild("CoinContainer")
-			if coinContainer then
-				local coinText = coinContainer:FindFirstChild("CoinText")
-				if coinText and coinText:IsA("TextLabel") then
-					coinText.Text = formatNumber(coins)
-				end
+			local coinContainer = findCoinContainer(playerGui)
+			local coinText = coinContainer and coinContainer:FindFirstChild("CoinText")
+			if coinText and (coinText:IsA("TextLabel") or coinText:IsA("TextButton")) then
+				coinText.Text = formatNumber(coins)
 			end
 			-- 退出按钮
-			local coinBonusUI = mainUI:FindFirstChild("CoinBonusUI", true)
+			local coinBonusUI = findCoinBonusHud(playerGui)
 			if coinBonusUI and coinBonusUI:IsA("GuiObject") then
 				coinBonusUI.Visible = true
 				local bonusText = findTextNode(coinBonusUI, { "TextLabel", "BonusText", "CoinBonusText" })
@@ -715,16 +746,16 @@ function UIController.Start()
 				freeRewardPanel.Visible = false
 			end
 
-			local stageHud = findStageHud(mainUI)
+			local stageHud = findStageHud(playerGui)
 			if stageHud then
 				local showStage = inCombat and not isCombatPaused
-				stageHud.Visible = showStage
+				setGuiNodeVisible(stageHud, showStage)
 
 				local stageText = nil
 				if stageHud:IsA("TextLabel") or stageHud:IsA("TextButton") then
 					stageText = stageHud
 				else
-					stageText = findTextNode(stageHud, {"StageText", "StageLabel", "LevelText", "TextLabel"})
+					stageText = findTextNode(stageHud, {"StageText", "StageLabel", "StageCountText", "LevelText", "Count", "TextLabel"})
 				end
 
 				if stageText then
@@ -733,7 +764,7 @@ function UIController.Start()
 			end
 
 			-- Minecraft 风格底部血条/经验条群组控制
-			updateBossProgressBar(mainUI, inCombat, currentStage, currentDistance)
+			updateBossProgressBar(playerGui, inCombat, currentStage, currentDistance)
 
 			local combatHub = mainUI:FindFirstChild("CombatHub")
 			if combatHub and combatHub:IsA("Frame") then
@@ -791,7 +822,7 @@ function UIController.Start()
 			if card and card:IsA("GuiButton") then
 				table.insert(cards, card)
 			else
-				warn("升级卡 UI 缺失或类型不正确: Card" .. tostring(i))
+				warn("Level-up card UI missing or invalid: Card" .. tostring(i))
 			end
 		end
 
@@ -1288,7 +1319,7 @@ function UIController.Start()
 						if buff then
 							table.insert(sourcePool, buff)
 						else
-							warn("Boss 金色奖励池里找不到 BuffId:", buffId)
+						warn("Boss gold reward pool is missing BuffId:", buffId)
 						end
 					end
 				end
@@ -1341,7 +1372,7 @@ function UIController.Start()
 				end
 
 				if totalWeight <= 0 then
-					warn((useBossGoldPool and "Boss 金色奖励池为空：没有可用的金色升级选项。") or (useEliteGoldGuarantee and "精英怪升级奖励池为空：没有可用的升级选项。") or "升级卡池为空：没有可用的升级选项。")
+					warn((useBossGoldPool and "Boss gold reward pool is empty: no valid gold upgrade options.") or (useEliteGoldGuarantee and "Elite upgrade reward pool is empty: no valid upgrade options.") or "Level-up card pool is empty: no valid upgrade options.")
 					levelUpPanel.Visible = false
 					player:SetAttribute("IsLevelingUp", false)
 					player:SetAttribute("LevelUpRewardMode", "Normal")
@@ -2735,7 +2766,7 @@ function UIController.Start()
 			local equipRoot = equippedContainer and equippedContainer:FindFirstChild("Equip_1", true) or detailButton:FindFirstChild("Equip_1", true)
 			local equipText = equipRoot and findTextNode(equipRoot, {"Equip"}) or findTextNode(detailButton, {"Equip"})
 			if equipText then
-				equipText.Text = isEquipped and "卸载" or "装备"
+				equipText.Text = isEquipped and "Unequip" or "Equip"
 			end
 
 			local gradientRoot = equipRoot or detailButton
@@ -4960,7 +4991,7 @@ function UIController.Start()
 		local function showNotice(text, seconds)
 			seconds = seconds or 3
 			if not noticeUI or not noticeUI:IsA("GuiObject") then
-				warn("[UIController] Notice_UI 不存在，提示内容:", text)
+			warn("[UIController] Notice_UI is missing; notice text:", text)
 				return
 			end
 
@@ -5131,7 +5162,7 @@ function UIController.Start()
 		local function renderEggModel()
 			local eggTemplate = petModels:FindFirstChild("Egg")
 			if not eggTemplate then
-				warn("[UIController] ReplicatedStorage.Model.Pets 中没有找到 Egg 模型。")
+			warn("[UIController] Egg model not found under ReplicatedStorage.Model.Pets.")
 				return false
 			end
 
@@ -5213,7 +5244,7 @@ function UIController.Start()
 			local tickets = player:GetAttribute("PetDrawTickets") or 0
 			local ticketCost = math.max(1, math.floor(Controllers.Config.PET_DRAW_TICKET_COST or 1))
 			if tickets < ticketCost then
-				showNotice("缺少抽奖次数", 3)
+				showNotice("Not enough hatch attempts.", 3)
 				return
 			end
 			
@@ -5226,16 +5257,16 @@ function UIController.Start()
 				return remotes:WaitForChild("RollPet"):InvokeServer()
 			end)
 			if not ok then
-				warn("[UIController] 宠物抽取 RemoteFunction 调用失败:", resultPet)
-				showNotice("抽奖失败，请稍后再试", 3)
+				warn("[UIController] RollPet RemoteFunction call failed:", resultPet)
+				showNotice("Hatch failed. Please try again.", 3)
 				isHatching = false
 				renderIdleEgg()
 				return
 			end
 
 			if not resultPet then
-				warn("[UIController] 宠物抽取失败，未收到有效宠物 ID。")
-				showNotice("缺少抽奖次数", 3)
+				warn("[UIController] Pet hatch failed: no valid pet ID received.")
+				showNotice("Not enough hatch attempts.", 3)
 				isHatching = false
 				renderIdleEgg()
 				return
@@ -5243,8 +5274,8 @@ function UIController.Start()
 			currentResultPetId = type(resultPet) == "table" and resultPet.Id or resultPet
 			currentResultPetLevel = type(resultPet) == "table" and resultPet.Level or (Controllers.Config.PET_LEVEL_MIN or 1)
 			if type(currentResultPetId) ~= "string" then
-				warn("[UIController] 宠物抽取失败，返回数据缺少 Id。")
-				showNotice("抽奖失败，请稍后再试", 3)
+				warn("[UIController] Pet hatch failed: returned data is missing Id.")
+				showNotice("Hatch failed. Please try again.", 3)
 				isHatching = false
 				renderIdleEgg()
 				return
@@ -5368,16 +5399,16 @@ function UIController.Start()
 						return buyPetDrawTicket:InvokeServer()
 					end)
 					if not ok then
-						warn("[UIController] 购买抽奖次数失败:", result)
-						showNotice("购买失败，请稍后再试", 3)
+						warn("[UIController] Failed to buy hatch attempt:", result)
+						showNotice("Purchase failed. Please try again.", 3)
 						return
 					end
 
 					if type(result) == "table" and result.Success then
 						updateHatchPetEggCards()
-						showNotice("购买成功，抽奖次数+1", 3)
+						showNotice("Purchased! Hatch attempts +1.", 3)
 					else
-						showNotice("钱币不足", 3)
+						showNotice("Not enough coins.", 3)
 					end
 				end)
 			end
@@ -5387,8 +5418,8 @@ function UIController.Start()
 				clickArea.Activated:Connect(function()
 					local ok, err = pcall(handleHatchClick)
 					if not ok then
-						warn("[UIController] 抽宠点击流程异常:", err)
-						showNotice("抽奖失败，请稍后再试", 3)
+						warn("[UIController] Pet hatch click flow failed:", err)
+						showNotice("Hatch failed. Please try again.", 3)
 						isHatching = false
 						isShowingResult = false
 						renderIdleEgg()
@@ -5473,10 +5504,9 @@ function UIController.Start()
 		-- 将 UI 动画表现移交给特效模块处理
 		if attributeName == "Coins" then
 			local playerGui = player:FindFirstChild("PlayerGui")
-			local mainUI = playerGui and playerGui:FindFirstChild("MainUI")
 			
 			-- 寻找并弹跳整个 CoinContainer
-			local coinContainer = mainUI and mainUI:FindFirstChild("CoinContainer")
+			local coinContainer = findCoinContainer(playerGui)
 			
 			if coinContainer then
 				-- 呼叫 VFX 模块，传入需要跳动的 UI 控件

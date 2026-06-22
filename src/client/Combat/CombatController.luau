@@ -761,7 +761,7 @@ function CombatController.StartSwordSystem()
 
 			local targetPart = swordPart:IsA("Model") and swordPart.PrimaryPart or swordPart
 			if not targetPart or not targetPart:IsA("BasePart") then
-				warn("[CombatController] FlyingSword 预制体缺少可用的 BasePart，已回退到白模飞剑。")
+				warn("[CombatController] FlyingSword prefab has no usable BasePart; falling back to a placeholder sword.")
 				if swordPart then swordPart:Destroy() end
 				swordPart = Instance.new("Part")
 				swordPart.Size = Vector3.new(0.5, 0.5, 3)

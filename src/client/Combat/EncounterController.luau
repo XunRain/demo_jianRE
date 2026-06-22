@@ -171,7 +171,7 @@ local function LoadStageConfig(stageNum, startZ)
 		stage = stageNum,
 		endZ = stageEndZ
 	})
-	print(string.format(">>> 已加载第 %d 关：起点 %d，终点 %d <<<", stageNum, math.floor(startZ), math.floor(stageEndZ)))
+	print(string.format(">>> Loaded stage %d: start %d, end %d <<<", stageNum, math.floor(startZ), math.floor(stageEndZ)))
 end
 
 -- 根据玩家当前位置更新真实关卡编号，供 UI 和属性同步使用。
@@ -190,7 +190,7 @@ function EncounterController.UpdatePlayerStage(playerZ)
 				distance = player:GetAttribute("CurrentDistance") or 0,
 				level = player:GetAttribute("Level") or 1,
 			})
-			print(">>> 玩家进入第 " .. tostring(realStage) .. " 关 <<<")
+			print(">>> Player entered stage " .. tostring(realStage) .. " <<<")
 		end
 	end
 end
@@ -630,7 +630,7 @@ local function createEnemyVisual(enemyType, hitbox, trackSurfaceY, Config, model
 
 	local visual = prepareEnemyVisual(template:Clone())
 	if not visual then
-		warn("[EncounterController] 怪物模型 " .. tostring(enemyType) .. " 缺少可用 BasePart，将使用兜底表现。")
+		warn("[EncounterController] Enemy model " .. tostring(enemyType) .. " has no usable BasePart; using fallback visuals.")
 		return nil
 	end
 
@@ -944,7 +944,7 @@ local function SpawnSingleDrop(dropType, value, startPos)
     if dropTemplate then
         dropInstance, rootPart = prepareDropInstance(dropTemplate:Clone())
         if not dropInstance or not rootPart then
-            warn("[EncounterController] 掉落物模型 " .. tostring(dropType) .. " 缺少可用的 BasePart，已回退到白模。")
+            warn("[EncounterController] Drop model " .. tostring(dropType) .. " has no usable BasePart; falling back to placeholder visuals.")
             dropTemplate = nil
         end
     end

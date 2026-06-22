@@ -108,7 +108,7 @@ end
 
 -- 服务器物理关闭保护（停服/关服时强制保存现场）
 game:BindToClose(function()
-	print(">>> 警告: 服务器正在关闭，正在执行全体紧急数据回写！ <<<")
+	print(">>> Warning: server is shutting down; flushing all player data. <<<")
 	for _, player in ipairs(Players:GetPlayers()) do
 		-- 巡检所有玩家，只抢救那些还没来得及保存的玩家
 		if not player:GetAttribute("IsSaving") then
