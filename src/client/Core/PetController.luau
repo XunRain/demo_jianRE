@@ -15,7 +15,9 @@ local Controllers
 local currentPetModels = {}
 
 local function isCombatPaused()
-	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+	return player:GetAttribute("IsLevelingUp") == true
+		or player:GetAttribute("IsRevivePending") == true
+		or player:GetAttribute("IsQuickHealPurchasing") == true
 end
 
 -- 获取 Part 或 Model 中第一个可用于定位的 BasePart。

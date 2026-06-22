@@ -43,6 +43,8 @@ local DEFAULT_STATS = {
 	LastLoginDate = "",
 
     -- 记录玩家是否已经看过第二关的引导
+	HasSeenStartGuide = false,
+	HasSeenPetGuide = false,
 	HasSeenStage2Guide = false,
 
     -- 默认装备的武器 ID
@@ -149,6 +151,8 @@ function DataManager.LoadPlayerData(player)
 	local playerData = buildDefaultPlayerData()
 	local dataLoaded = success == true
 	local isNewPlayer = success == true and data == nil
+	local hasPersistedStartGuideFlag = success == true and type(data) == "table" and data.HasSeenStartGuide ~= nil
+	local hasPersistedPetGuideFlag = success == true and type(data) == "table" and data.HasSeenPetGuide ~= nil
 	if success and data then
 		for statName, statValue in pairs(data) do
 			playerData[statName] = statValue
@@ -162,11 +166,28 @@ function DataManager.LoadPlayerData(player)
 	if resetRewardData then
 		playerData = resetRewardData
 		dataLoaded = true
+		hasPersistedStartGuideFlag = true
+		hasPersistedPetGuideFlag = true
 		print("🧪 测试白名单生效：已清空玩家 " .. player.Name .. " 的记录，并发放金币:", playerData.Coins)
 	end
 
 	-- 服务器端修改属性，会自动下发给客户端同步更新 UI
 	local previousLastLoginDate = tostring(playerData.LastLoginDate or "")
+	if not hasPersistedStartGuideFlag then
+		local bestDistance = math.max(0, math.floor(tonumber(playerData.BestDistance) or 0))
+		local bestLevel = math.max(1, math.floor(tonumber(playerData.BestLevel) or 1))
+		if bestDistance > 0 or bestLevel > 1 then
+			playerData.HasSeenStartGuide = true
+		end
+	end
+	if not hasPersistedPetGuideFlag then
+		local bestDistance = math.max(0, math.floor(tonumber(playerData.BestDistance) or 0))
+		local bestLevel = math.max(1, math.floor(tonumber(playerData.BestLevel) or 1))
+		local ownedPetsJson = tostring(playerData.OwnedPets_JSON or "[]")
+		if bestDistance > 0 or bestLevel > 1 or ownedPetsJson ~= "[]" then
+			playerData.HasSeenPetGuide = true
+		end
+	end
 
 	for statName, statValue in pairs(playerData) do
 		player:SetAttribute(statName, statValue)
@@ -242,6 +263,8 @@ function DataManager.SavePlayerData(player)
 		ClaimedAchievements_JSON = player:GetAttribute("ClaimedAchievements_JSON") or "{}",
 
         -- 将第二关引导标记一起存入云端
+		HasSeenStartGuide = player:GetAttribute("HasSeenStartGuide") or false,
+		HasSeenPetGuide = player:GetAttribute("HasSeenPetGuide") or false,
 		HasSeenStage2Guide = player:GetAttribute("HasSeenStage2Guide") or false,
 		EquippedWeapon = player:GetAttribute("EquippedWeapon") or "DefaultWeapon",
 		BestDistance = player:GetAttribute("BestDistance") or 0,

@@ -29,7 +29,9 @@ end
 
 -- 启动战斗循环：根据当前武器和攻速持续发射主武器子弹。
 local function isCombatPaused()
-	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+	return player:GetAttribute("IsLevelingUp") == true
+		or player:GetAttribute("IsRevivePending") == true
+		or player:GetAttribute("IsQuickHealPurchasing") == true
 end
 
 function CombatController.Start()

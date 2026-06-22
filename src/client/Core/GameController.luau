@@ -36,6 +36,16 @@ local quickHealPurchaseAwaitingReceipt = false
 local quickHealRemainingSeconds = 0
 local defaultCameraMinZoomDistance = nil
 local defaultCameraMaxZoomDistance = nil
+local startGuideActive = false
+local currentStartGuideTarget = nil
+local startGuideCompletionSent = false
+local petGuideRequested = false
+local petGuideActive = false
+local currentPetGuideTarget = nil
+
+local function setQuickHealPurchasePaused(isPaused)
+	player:SetAttribute("IsQuickHealPurchasing", isPaused == true)
+end
 
 local function debugCombat(...)
 	if DEBUG_COMBAT_FLOW then
@@ -318,7 +328,7 @@ end
 
 -- 大厅弹窗打开时禁止自动开始；避免玩家操作背包/商店/抽卡时被 Start 区域轮询误触发。
 local function isLobbyModalOpen()
-	for _, attrName in ipairs({ "IsPetBagOpen", "IsShopOpen", "IsLevelingUp" }) do
+	for _, attrName in ipairs({ "IsPetBagOpen", "IsShopOpen", "IsLevelingUp", "IsRevivePending" }) do
 		if player:GetAttribute(attrName) == true then
 			debugCombatThrottled("modal_attr_" .. attrName, 1.5, "大厅弹窗/状态阻止开局，Attribute:", attrName, "= true")
 			return true
@@ -340,7 +350,7 @@ local function isLobbyModalOpen()
 		return guiObject.Visible == true
 	end
 
-	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "Hatch_Pet_Egg", "LevelUpPanel", "Achieve" }) do
+	for _, panelName in ipairs({ "PetBagPanel", "ShopPanel", "Hatch_Pet_Egg", "LevelUpPanel", "Achieve", "RebirthPanel", "StarterPackPanel", "StarterPackRewardPanel", "FreeRewardPanel" }) do
 		local panel = mainUI:FindFirstChild(panelName, true)
 		if panel and panel:IsA("GuiObject") and isGuiEffectivelyVisible(panel) then
 			debugCombatThrottled("modal_panel_" .. panelName, 1.5, "大厅 UI 面板阻止开局，Panel effectively visible:", panelName, getFullNameSafe(panel))
@@ -349,6 +359,153 @@ local function isLobbyModalOpen()
 	end
 
 	return false
+end
+
+local function clearStartGuide()
+	if not startGuideActive then
+		currentStartGuideTarget = nil
+		return
+	end
+
+	startGuideActive = false
+	currentStartGuideTarget = nil
+	if Controllers and Controllers.VFX then
+		Controllers.VFX.ClearGuide()
+	end
+end
+
+local function clearPetGuide()
+	if not petGuideActive then
+		currentPetGuideTarget = nil
+		return
+	end
+
+	petGuideActive = false
+	currentPetGuideTarget = nil
+	if Controllers and Controllers.VFX then
+		Controllers.VFX.ClearGuide()
+	end
+end
+
+local function shouldShowStartGuide()
+	if player:GetAttribute("PlayerDataLoaded") ~= true then return false end
+	if player:GetAttribute("HasSeenStartGuide") == true then return false end
+	if petGuideRequested then return false end
+	if player:GetAttribute("NeedsGuide") == true then return false end
+	if player:GetAttribute("IsRevivePending") == true then return false end
+	if GameController.IsCombatActive or isStartingCombat or player:GetAttribute("InCombat") == true then return false end
+	if isLobbyModalOpen() then return false end
+	return true
+end
+
+local function getStartGuideTarget()
+	local startObject = findStartObject()
+	if not startObject then return nil end
+
+	local hitbox = getStartHitbox(startObject)
+	if hitbox then
+		return hitbox
+	end
+
+	return getInteractBasePart(startObject)
+end
+
+local function updateStartGuide()
+	if not Controllers or not Controllers.VFX then return end
+
+	if not shouldShowStartGuide() then
+		clearStartGuide()
+		return
+	end
+
+	local target = getStartGuideTarget()
+	if not target or not target.Parent then
+		clearStartGuide()
+		return
+	end
+
+	if startGuideActive and currentStartGuideTarget == target then
+		return
+	end
+
+	Controllers.VFX.CreateGuide(target, "Run to START!", {
+		ShowBeam = true,
+	})
+	startGuideActive = true
+	currentStartGuideTarget = target
+end
+
+local function shouldShowPetGuide()
+	if not petGuideRequested then return false end
+	if player:GetAttribute("PlayerDataLoaded") ~= true then return false end
+	if player:GetAttribute("HasSeenStartGuide") ~= true then return false end
+	if player:GetAttribute("HasSeenPetGuide") == true then return false end
+	if player:GetAttribute("NeedsGuide") == true then return false end
+	if player:GetAttribute("IsRevivePending") == true then return false end
+	if GameController.IsCombatActive or isStartingCombat or player:GetAttribute("InCombat") == true then return false end
+	if isLobbyModalOpen() then return false end
+	return true
+end
+
+local function getPetGuideTarget()
+	local petEgg = findLobbyObject("PetEgg")
+	return getInteractBasePart(petEgg)
+end
+
+local function updatePetGuide()
+	if not Controllers or not Controllers.VFX then return end
+
+	if player:GetAttribute("HasSeenPetGuide") == true then
+		petGuideRequested = false
+		clearPetGuide()
+		return
+	end
+
+	if not shouldShowPetGuide() then
+		clearPetGuide()
+		return
+	end
+
+	local target = getPetGuideTarget()
+	if not target or not target.Parent then
+		clearPetGuide()
+		return
+	end
+
+	if petGuideActive and currentPetGuideTarget == target then
+		return
+	end
+
+	Controllers.VFX.CreateGuide(target, "Draw pets to boost your firepower!", {
+		ShowBeam = true,
+	})
+	petGuideActive = true
+	currentPetGuideTarget = target
+end
+
+local function markStartGuideSeen()
+	if player:GetAttribute("HasSeenStartGuide") == true then
+		clearStartGuide()
+		return
+	end
+
+	player:SetAttribute("HasSeenStartGuide", true)
+	clearStartGuide()
+
+	if startGuideCompletionSent then
+		return
+	end
+	startGuideCompletionSent = true
+
+	task.spawn(function()
+		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+		local markEvent = remotes and remotes:WaitForChild("MarkStartGuideSeen", 5)
+		if markEvent and markEvent:IsA("RemoteEvent") then
+			markEvent:FireServer()
+		else
+			warn("[GameController] MarkStartGuideSeen RemoteEvent is not ready.")
+		end
+	end)
 end
 
 local function safePlaySound(actionName)
@@ -623,6 +780,7 @@ end
 
 function GameController.CancelQuickHealOffer(forceCancelServer)
 	if not quickHealPending then
+		setQuickHealPurchasePaused(false)
 		hideQuickHealOfferPanel()
 		return
 	end
@@ -637,12 +795,15 @@ function GameController.CancelQuickHealOffer(forceCancelServer)
 	quickHealPromptInProgress = false
 	quickHealPurchaseAwaitingReceipt = false
 	quickHealRemainingSeconds = 0
+	setQuickHealPurchasePaused(false)
 	hideQuickHealOfferPanel()
 	cancelQuickHealOfferOnServer()
 end
 
 local function isQuickHealPaused()
-	return player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+	return player:GetAttribute("IsLevelingUp") == true
+		or player:GetAttribute("IsRevivePending") == true
+		or player:GetAttribute("IsQuickHealPurchasing") == true
 end
 
 local function canShowQuickHealOffer()
@@ -665,6 +826,7 @@ function GameController.CompletePaidQuickHeal()
 		quickHealPromptInProgress = false
 		quickHealPurchaseAwaitingReceipt = false
 		quickHealRemainingSeconds = 0
+		setQuickHealPurchasePaused(false)
 		hideQuickHealOfferPanel()
 		return
 	end
@@ -673,7 +835,8 @@ function GameController.CompletePaidQuickHeal()
 	local humanoid = character and character:FindFirstChild("Humanoid")
 	if not character or not humanoid then
 		warn("[GameController][QuickHeal] Cannot heal because character is no longer available.")
-		GameController.CancelQuickHealOffer()
+		setQuickHealPurchasePaused(false)
+		GameController.CancelQuickHealOffer(true)
 		return
 	end
 
@@ -689,6 +852,7 @@ function GameController.CompletePaidQuickHeal()
 	quickHealPromptInProgress = false
 	quickHealPurchaseAwaitingReceipt = false
 	quickHealRemainingSeconds = 0
+	setQuickHealPurchasePaused(false)
 	hideQuickHealOfferPanel()
 
 	if revivePending then
@@ -724,7 +888,15 @@ local function bindQuickHealOfferButtons(panel)
 
 			quickHealPromptInProgress = true
 			quickHealPurchaseAwaitingReceipt = false
-			MarketplaceService:PromptProductPurchase(player, currentQuickHealProductId)
+			setQuickHealPurchasePaused(true)
+			local ok, err = pcall(function()
+				MarketplaceService:PromptProductPurchase(player, currentQuickHealProductId)
+			end)
+			if not ok then
+				warn("[GameController][QuickHeal] PromptProductPurchase failed:", err)
+				quickHealPromptInProgress = false
+				setQuickHealPurchasePaused(false)
+			end
 		end)
 	else
 		warn("[GameController][QuickHeal] QuickHealOffer/BG ImageButton is missing.")
@@ -1064,6 +1236,7 @@ local function setupReviveGrantedListener()
 		if productId == currentQuickHealProductId then
 			quickHealPromptInProgress = false
 			quickHealPurchaseAwaitingReceipt = wasPurchased == true
+			setQuickHealPurchasePaused(wasPurchased == true)
 
 			local panel = getQuickHealOfferPanel()
 			if panel and quickHealPending then
@@ -1105,6 +1278,7 @@ function GameController.Start()
 	GameController.SetupStartButton()
 	GameController.SetupNPC()
 	setupReviveGrantedListener()
+	setQuickHealPurchasePaused(false)
 	hideQuickHealOfferPanel()
 	captureLobbyLighting()
 	applyLightingMode(false)
@@ -1139,6 +1313,13 @@ function GameController.Start()
 			end
 		end)
 	end
+	task.spawn(function()
+		while true do
+			updateStartGuide()
+			updatePetGuide()
+			task.wait(0.5)
+		end
+	end)
 	
 	-- 统一的角色重生/复活处理核心函数（彻底收拢生命周期，防止属性回厅变负数）
 	local function onCharacterAdded(newCharacter)
@@ -1153,9 +1334,12 @@ function GameController.Start()
 		quickHealPromptInProgress = false
 		quickHealPurchaseAwaitingReceipt = false
 		quickHealRemainingSeconds = 0
+		setQuickHealPurchasePaused(false)
 		player:SetAttribute("IsRevivePending", false)
 		hideRevivePanel()
 		hideQuickHealOfferPanel()
+		clearStartGuide()
+		clearPetGuide()
 		GameController.IsCombatActive = false
 		player:SetAttribute("InCombat", false)
 		reportRunStats(false)
@@ -1450,6 +1634,8 @@ function GameController.EnterCombat(startObjectOverride)
 
 		player:SetAttribute("NeedsGuide", false)
 		Controllers.VFX.ClearGuide()
+		clearPetGuide()
+		markStartGuideSeen()
 
 		GameController.IsCombatActive = true
 		consumeInviteCoinBonusForRun()
@@ -1740,11 +1926,17 @@ function GameController.SetupNPC()
 				prompt:SetAttribute("ClientShopPromptBound", true)
 				prompt.Triggered:Connect(function(triggeringPlayer)
 					if triggeringPlayer == player and not GameController.IsCombatActive then
+						local completedShopGuide = player:GetAttribute("NeedsGuide") == true
+						player:SetAttribute("IsShopOpen", true)
+						player:SetAttribute("NeedsGuide", false)
 						-- 告诉 UI 系统：玩家打开了商店
 						player:SetAttribute("IsShopOpen", true)
 						-- 成功打开商店，使命完成，清除光束！
 						player:SetAttribute("NeedsGuide", false)
 						Controllers.VFX.ClearGuide()
+						if completedShopGuide and player:GetAttribute("HasSeenPetGuide") ~= true then
+							petGuideRequested = true
+						end
 					end
 				end)
 			end

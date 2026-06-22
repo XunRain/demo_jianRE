@@ -261,7 +261,9 @@ function UIController.Start()
 		local exp = player:GetAttribute("EXP") or 0
 		local requiredExp = player:GetAttribute("RequiredEXP") or Controllers.Config.GetRequiredExp(lvl)
 		local inCombat = player:GetAttribute("InCombat") == true
-		local isCombatPaused = player:GetAttribute("IsLevelingUp") == true or player:GetAttribute("IsRevivePending") == true
+		local isCombatPaused = player:GetAttribute("IsLevelingUp") == true
+			or player:GetAttribute("IsRevivePending") == true
+			or player:GetAttribute("IsQuickHealPurchasing") == true
       	local currentStage = player:GetAttribute("CurrentStage") or 1
 		local formatNumber = Controllers.Config.FormatNumber
 
@@ -4098,14 +4100,11 @@ function UIController.Start()
 			openButton = findNamedDescendant(mainUI, "BtnFreeReward", 2)
 		end
 
-		local freeRewardPanel = findNamedDescendant(mainUI, "FreeRewardPanel", 8)
-		local claimButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClaim", 2)
-		local closeButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClose", 2)
+		local freeRewardPanel = findNamedDescendant(mainUI, "FreeRewardPanel", 0)
+		local claimButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClaim", 0)
+		local closeButton = freeRewardPanel and findNamedDescendant(freeRewardPanel, "BtnClose", 0)
 
-		if not openButton or not openButton:IsA("GuiButton")
-			or not freeRewardPanel or not freeRewardPanel:IsA("GuiObject")
-			or not claimButton or not claimButton:IsA("GuiButton")
-			or not closeButton or not closeButton:IsA("GuiButton") then
+		if not openButton or not openButton:IsA("GuiButton") then
 			local issues = {}
 			if not buttonRoot then
 				table.insert(issues, "MainUI_2 not found under " .. mainUI:GetFullName() .. "; children=[" .. listChildNames(mainUI) .. "]")
@@ -4115,24 +4114,24 @@ function UIController.Start()
 			elseif not openButton:IsA("GuiButton") then
 				table.insert(issues, "BtnFreeReward must be ImageButton/TextButton, got " .. describeNode(openButton))
 			end
-			if not freeRewardPanel then
-				table.insert(issues, "FreeRewardPanel not found under " .. mainUI:GetFullName() .. "; children=[" .. listChildNames(mainUI) .. "]")
-			elseif not freeRewardPanel:IsA("GuiObject") then
-				table.insert(issues, "FreeRewardPanel must be GuiObject, got " .. describeNode(freeRewardPanel))
-			end
-			if not claimButton then
-				table.insert(issues, "BtnClaim not found; FreeRewardPanel children=[" .. listChildNames(freeRewardPanel) .. "]")
-			elseif not claimButton:IsA("GuiButton") then
-				table.insert(issues, "BtnClaim must be ImageButton/TextButton, got " .. describeNode(claimButton))
-			end
-			if not closeButton then
-				table.insert(issues, "BtnClose not found; FreeRewardPanel children=[" .. listChildNames(freeRewardPanel) .. "]")
-			elseif not closeButton:IsA("GuiButton") then
-				table.insert(issues, "BtnClose must be ImageButton/TextButton, got " .. describeNode(closeButton))
-			end
 
 			warn("[UIController] Free Reward UI missing/invalid:", table.concat(issues, "; "))
 			return
+		end
+
+		if freeRewardPanel and not freeRewardPanel:IsA("GuiObject") then
+			warn("[UIController] FreeRewardPanel ignored because it is not a GuiObject:", describeNode(freeRewardPanel))
+			freeRewardPanel = nil
+			claimButton = nil
+			closeButton = nil
+		end
+		if claimButton and not claimButton:IsA("GuiButton") then
+			warn("[UIController] FreeRewardPanel/BtnClaim ignored because it is not a GuiButton:", describeNode(claimButton))
+			claimButton = nil
+		end
+		if closeButton and not closeButton:IsA("GuiButton") then
+			warn("[UIController] FreeRewardPanel/BtnClose ignored because it is not a GuiButton:", describeNode(closeButton))
+			closeButton = nil
 		end
 
 		local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
@@ -4161,7 +4160,7 @@ function UIController.Start()
 		local function setSocialRewardVisible()
 			local shouldShow = player:GetAttribute("InCombat") ~= true and not isClaimed()
 			openButton.Visible = shouldShow
-			if not shouldShow then
+			if freeRewardPanel and not shouldShow then
 				freeRewardPanel.Visible = false
 			end
 		end
@@ -4242,7 +4241,7 @@ function UIController.Start()
 			if isJoinedMembershipStatus(promptResult) then
 				task.delay(0.5, refreshStatus)
 			elseif promptResult == Enum.GroupMembershipStatus.JoinRequestPending then
-				showNotice("Join request sent. Tap Claim after approval.")
+				showNotice("Join request sent. Tap the reward again after approval.")
 				task.delay(2, refreshStatus)
 			else
 				showNotice("Join the community first.")
@@ -4284,7 +4283,9 @@ function UIController.Start()
 			return "Cannot claim yet."
 		end
 
-		freeRewardPanel.Visible = false
+		if freeRewardPanel then
+			freeRewardPanel.Visible = false
+		end
 		setSocialRewardVisible()
 		refreshStatus()
 
@@ -4292,32 +4293,20 @@ function UIController.Start()
 		applyHover(claimButton, "FreeRewardClaimHoverBound", "FreeRewardClaimHoverScale", 1.04)
 		applyHover(closeButton, "FreeRewardCloseHoverBound", "FreeRewardCloseHoverScale", 1.06)
 
-		openButton.Activated:Connect(function()
-			if isClaimed() then
-				setSocialRewardVisible()
-				return
-			end
-
-			freeRewardPanel.Visible = true
-			refreshStatus()
-		end)
-
-		closeButton.Activated:Connect(function()
-			freeRewardPanel.Visible = false
-		end)
-
 		local function handleClaimResult(result)
 			if result.Success == true then
 				lastStatus = result.Snapshot
 				showNotice("Reward claimed!")
 				openButton.Visible = false
-				freeRewardPanel.Visible = false
+				if freeRewardPanel then
+					freeRewardPanel.Visible = false
+				end
 				return true
 			end
 
 			lastStatus = result.Snapshot
 			if result.Reason == "NotInCommunity" then
-				showNotice("Membership is updating. Tap Claim again.")
+				showNotice("Membership is updating. Tap the reward again.")
 			else
 				showNotice(getMessageForReason(result.Reason))
 			end
@@ -4339,9 +4328,18 @@ function UIController.Start()
 			return result
 		end
 
-		claimButton.Activated:Connect(function()
+		local function handleSocialRewardButtonActivated()
 			if claimInProgress then return end
 			claimInProgress = true
+			if freeRewardPanel then
+				freeRewardPanel.Visible = false
+			end
+
+			if isClaimed() then
+				claimInProgress = false
+				setSocialRewardVisible()
+				return
+			end
 
 			local status = refreshStatus()
 			if type(status) ~= "table" then
@@ -4375,7 +4373,17 @@ function UIController.Start()
 			claimInProgress = false
 			showNotice(getMessageForReason(status.Reason))
 			setSocialRewardVisible()
-		end)
+		end
+
+		openButton.Activated:Connect(handleSocialRewardButtonActivated)
+		if claimButton then
+			claimButton.Activated:Connect(handleSocialRewardButtonActivated)
+		end
+		if closeButton and freeRewardPanel then
+			closeButton.Activated:Connect(function()
+				freeRewardPanel.Visible = false
+			end)
+		end
 
 		player:GetAttributeChangedSignal("InCombat"):Connect(function()
 			setSocialRewardVisible()
@@ -4389,12 +4397,14 @@ function UIController.Start()
 			player:GetAttributeChangedSignal(attrName):Connect(function()
 				if attrName == "SocialRewardClaimed" and player:GetAttribute("SocialRewardClaimed") == true then
 					openButton.Visible = false
-					freeRewardPanel.Visible = false
+					if freeRewardPanel then
+						freeRewardPanel.Visible = false
+					end
 					return
 				end
 
 				setSocialRewardVisible()
-				if freeRewardPanel.Visible then
+				if freeRewardPanel and freeRewardPanel.Visible then
 					refreshStatus()
 				end
 			end)
@@ -4427,6 +4437,8 @@ function UIController.Start()
 		local hatchBlurTween = nil
 		local isApplyingHatchVisible = false
 		local noticeSerial = 0
+		local hatchHeader = hatchPetEgg:FindFirstChild("Header", true)
+		local hatchEquippedCountText = hatchHeader and hatchHeader:FindFirstChild("Count", true)
 
 		local function showNotice(text, seconds)
 			seconds = seconds or 3
@@ -4456,6 +4468,48 @@ function UIController.Start()
 			if cards and (cards:IsA("TextLabel") or cards:IsA("TextButton")) then
 				cards.Text = "x" .. tostring(math.max(0, math.floor(player:GetAttribute("PetDrawTickets") or 0)))
 			end
+		end
+
+		local function decodeHatchEquippedPetUids()
+			local success, decoded = pcall(function()
+				return HttpService:JSONDecode(player:GetAttribute("EquippedPets_JSON") or "[]")
+			end)
+
+			local equippedUids = {}
+			local equippedMap = {}
+			if success and type(decoded) == "table" then
+				for _, uid in ipairs(decoded) do
+					if type(uid) == "string" and uid ~= "" and not equippedMap[uid] then
+						equippedMap[uid] = true
+						table.insert(equippedUids, uid)
+					end
+				end
+			end
+
+			local legacyUid = player:GetAttribute("EquippedPetUid") or ""
+			if #equippedUids == 0 and legacyUid ~= "" then
+				equippedMap[legacyUid] = true
+				table.insert(equippedUids, legacyUid)
+			end
+
+			local legacyPetId = player:GetAttribute("EquippedPet") or ""
+			if #equippedUids == 0 and legacyPetId ~= "" then
+				equippedMap[legacyPetId] = true
+				table.insert(equippedUids, legacyPetId)
+			end
+
+			return equippedUids
+		end
+
+		local function updateHatchEquippedCountText()
+			if not hatchEquippedCountText or not hatchEquippedCountText:IsA("TextLabel") then
+				return
+			end
+
+			local equippedUids = decodeHatchEquippedPetUids()
+			local slotUpgradeLevel = math.max(0, math.floor(tonumber(player:GetAttribute("Talent_PET_SLOT")) or 0))
+			local maxEquipSlots = 1 + slotUpgradeLevel
+			hatchEquippedCountText.Text = tostring(#equippedUids) .. "/" .. tostring(maxEquipSlots)
 		end
 
 		local renderIdleEgg
@@ -4609,6 +4663,7 @@ function UIController.Start()
 						tickets = player:GetAttribute("PetDrawTickets") or 0,
 					})
 					updateHatchPetEggCards()
+					updateHatchEquippedCountText()
 					isApplyingHatchVisible = true
 					hatchScreen.Visible = true
 					isApplyingHatchVisible = false
@@ -4744,8 +4799,38 @@ function UIController.Start()
 		end
 
 		-- 宠物蛋 ProximityPrompt 只负责打开 Hatch_Pet_Egg，不直接抽卡。
+		local petGuideCompletionSent = false
+		local function markPetGuideSeen()
+			if player:GetAttribute("HasSeenPetGuide") == true then
+				if Controllers and Controllers.VFX then
+					Controllers.VFX.ClearGuide()
+				end
+				return
+			end
+
+			player:SetAttribute("HasSeenPetGuide", true)
+			if Controllers and Controllers.VFX then
+				Controllers.VFX.ClearGuide()
+			end
+			if petGuideCompletionSent then
+				return
+			end
+			petGuideCompletionSent = true
+
+			task.spawn(function()
+				local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+				local markEvent = remotes and remotes:WaitForChild("MarkPetGuideSeen", 5)
+				if markEvent and markEvent:IsA("RemoteEvent") then
+					markEvent:FireServer()
+				else
+					warn("[UIController] MarkPetGuideSeen RemoteEvent is not ready.")
+				end
+			end)
+		end
+
 		local function handlePetEggTriggered(triggeringPlayer)
 			if triggeringPlayer ~= player or isHatching then return end
+			markPetGuideSeen()
 			setHatchPetEggOpen(true)
 		end
 
@@ -4762,9 +4847,15 @@ function UIController.Start()
 		player:GetAttributeChangedSignal("PetDrawTickets"):Connect(function()
 			updateHatchPetEggCards()
 		end)
+		for _, attrName in ipairs({ "EquippedPet", "EquippedPetUid", "EquippedPets_JSON", "Talent_PET_SLOT" }) do
+			player:GetAttributeChangedSignal(attrName):Connect(function()
+				updateHatchEquippedCountText()
+			end)
+		end
 
 		if hatchPetEgg then
 			updateHatchPetEggCards()
+			updateHatchEquippedCountText()
 			if hatchPetEgg:IsA("GuiObject") and hatchPetEgg.Visible and not isHatching then
 				hatchScreen.Visible = true
 				setMainButtonRootHiddenByPanel(mainUI, "Hatch", true)

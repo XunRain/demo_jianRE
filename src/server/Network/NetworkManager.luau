@@ -510,8 +510,38 @@ function NetworkManager.Start()
 		scheduleSave(player, 3)
 	end)
 
+	local markStartGuideEvent = remotes:FindFirstChild("MarkStartGuideSeen") or Instance.new("RemoteEvent", remotes)
+	markStartGuideEvent.Name = "MarkStartGuideSeen"
+	markStartGuideEvent.OnServerEvent:Connect(function(player)
+		local wasSeen = player:GetAttribute("HasSeenStartGuide") == true
+		player:SetAttribute("HasSeenStartGuide", true)
+		if not wasSeen then
+			trackAnalytics(player, "tutorial_completed", {
+				tutorial_id = "start_guide",
+				complete_stage = player:GetAttribute("CurrentStage") or 0,
+				time_since_join = getTimeSinceJoin(player),
+			})
+		end
+		scheduleSave(player, 3)
+	end)
+
     -- 注册并监听第二关引导标记的写入请求
 	local markGuideEvent = remotes:FindFirstChild("MarkGuideSeen") or Instance.new("RemoteEvent", remotes)
+	local markPetGuideEvent = remotes:FindFirstChild("MarkPetGuideSeen") or Instance.new("RemoteEvent", remotes)
+	markPetGuideEvent.Name = "MarkPetGuideSeen"
+	markPetGuideEvent.OnServerEvent:Connect(function(player)
+		local wasSeen = player:GetAttribute("HasSeenPetGuide") == true
+		player:SetAttribute("HasSeenPetGuide", true)
+		if not wasSeen then
+			trackAnalytics(player, "tutorial_completed", {
+				tutorial_id = "pet_guide",
+				complete_stage = player:GetAttribute("CurrentStage") or 0,
+				time_since_join = getTimeSinceJoin(player),
+			})
+		end
+		scheduleSave(player, 3)
+	end)
+
 	markGuideEvent.Name = "MarkGuideSeen"
 
 	markGuideEvent.OnServerEvent:Connect(function(player)

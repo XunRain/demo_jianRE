@@ -334,6 +334,7 @@ local currentGuideBeam = nil
 local currentGuideAtt0 = nil
 local currentGuideAtt1 = nil
 local currentGuideLabel = nil
+local currentGuideLabelAnchor = nil
 
 -- 移动没有焊接到根节点的特效零件，避免模型特效散件留在原地。
 local function translateLooseVfxParts(root, delta)
@@ -403,7 +404,19 @@ function VFXController.CreateGuide(targetPart, text, options)
 		currentGuideBeam.Parent = rootPart
 	end
 
-	currentGuideLabel = VFXController.CreateBillboard(targetPart, "Need help? " .. text, Color3.fromRGB(255, 255, 100), 4)
+	local labelHeight = tonumber(options.LabelHeight) or 4
+	local labelAnchor = Instance.new("Part")
+	labelAnchor.Name = "GuideLabelAnchor"
+	labelAnchor.Anchored = true
+	labelAnchor.CanCollide = false
+	labelAnchor.CanQuery = false
+	labelAnchor.CanTouch = false
+	labelAnchor.Transparency = 1
+	labelAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	labelAnchor.CFrame = CFrame.new(targetPart.Position + Vector3.new(0, targetPart.Size.Y * 0.5 + labelHeight, 0))
+	labelAnchor.Parent = Workspace:FindFirstChild("LocalProjectiles") or Workspace
+	currentGuideLabelAnchor = labelAnchor
+	currentGuideLabel = VFXController.CreateBillboard(labelAnchor, text, Color3.fromRGB(255, 255, 100), 0)
 end
 
 -- 清除当前引导光束、附件和文字。
@@ -411,6 +424,11 @@ function VFXController.ClearGuide()
 	if currentGuideBeam then currentGuideBeam:Destroy(); currentGuideBeam = nil end
 	if currentGuideAtt0 then currentGuideAtt0:Destroy(); currentGuideAtt0 = nil end
 	if currentGuideAtt1 then currentGuideAtt1:Destroy(); currentGuideAtt1 = nil end
+	if currentGuideLabelAnchor then
+		currentGuideLabelAnchor:Destroy()
+		currentGuideLabelAnchor = nil
+		currentGuideLabel = nil
+	end
 	if currentGuideLabel then
 		currentGuideLabel.Parent:Destroy()
 		currentGuideLabel = nil
