@@ -304,8 +304,8 @@ local GameConfig = {
             HasBoss = true,
 
             BasicHP = 40,
-            EliteHP = 80,
-            BossHP = 100,
+            EliteHP = 60,
+            BossHP = 120,
 
             GATE_ATK_BONUS_MIN = 5,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 5, GATE_ASPD_BONUS_MAX = 15,
@@ -325,8 +325,8 @@ local GameConfig = {
             EliteCount = 2,
             HasBoss = true,
 
-            BasicHP = 50,
-            EliteHP = 100,
+            BasicHP = 60,
+            EliteHP = 120,
             BossHP = 200,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
@@ -346,9 +346,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 60,
-            EliteHP = 120,
-            BossHP = 400,
+            BasicHP = 65,
+            EliteHP = 130,
+            BossHP = 300,
 
            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -390,7 +390,7 @@ local GameConfig = {
 
             BasicHP = 70,
             EliteHP = 140,
-            BossHP = 500,
+            BossHP = 750,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -411,7 +411,7 @@ local GameConfig = {
 
             BasicHP = 70,
             EliteHP = 140,
-            BossHP = 500,
+            BossHP = 1000,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -432,7 +432,7 @@ local GameConfig = {
 
             BasicHP = 70,
             EliteHP = 140,
-            BossHP = 500,
+            BossHP = 1500,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -493,9 +493,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 72,
+            EliteHP = 145,
+            BossHP = 520,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -514,9 +514,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 74,
+            EliteHP = 150,
+            BossHP = 540,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -535,9 +535,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 76,
+            EliteHP = 155,
+            BossHP = 560,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -556,9 +556,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 78,
+            EliteHP = 160,
+            BossHP = 580,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -577,9 +577,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 80,
+            EliteHP = 165,
+            BossHP = 600,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -598,9 +598,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 82,
+            EliteHP = 170,
+            BossHP = 620,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -619,9 +619,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 84,
+            EliteHP = 175,
+            BossHP = 640,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -640,9 +640,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 86,
+            EliteHP = 180,
+            BossHP = 660,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -661,9 +661,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 88,
+            EliteHP = 185,
+            BossHP = 680,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -682,9 +682,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 90,
+            EliteHP = 190,
+            BossHP = 700,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -703,9 +703,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 92,
+            EliteHP = 195,
+            BossHP = 725,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -724,9 +724,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 94,
+            EliteHP = 200,
+            BossHP = 750,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -745,9 +745,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 96,
+            EliteHP = 205,
+            BossHP = 775,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -766,9 +766,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 98,
+            EliteHP = 210,
+            BossHP = 800,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -787,9 +787,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 100,
+            EliteHP = 215,
+            BossHP = 825,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -808,9 +808,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 102,
+            EliteHP = 220,
+            BossHP = 850,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -829,9 +829,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 104,
+            EliteHP = 225,
+            BossHP = 875,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -850,9 +850,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 106,
+            EliteHP = 230,
+            BossHP = 900,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -871,9 +871,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 108,
+            EliteHP = 235,
+            BossHP = 925,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -892,9 +892,9 @@ local GameConfig = {
             EliteCount = 3,
             HasBoss = true,
 
-            BasicHP = 70,
-            EliteHP = 140,
-            BossHP = 500,
+            BasicHP = 110,
+            EliteHP = 240,
+            BossHP = 950,
 
             GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
             GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
@@ -909,11 +909,11 @@ local GameConfig = {
 
     -- 6. 无尽模式难度动态成长配置
     -- 第 5 关之后，怪物血量按关卡和怪物类型分别成长；数值代表“相对上一关增加的比例”。
-    ENEMY_HP_STAGE_SCALE_START = 5,
+    ENEMY_HP_STAGE_SCALE_START = 30,
     ENEMY_HP_STAGE_SCALE_RATE = {
-        Basic = 0.5, -- 普通怪：每关相对上一关 +20%
-        Elite = 0.5, -- 精英怪：每关相对上一关 +40%
-        Boss = 0.6, -- Boss：每关相对上一关 +60%
+        Basic = 0.4, -- 普通怪：第 30 关之后每关相对上一关 +4%
+        Elite = 0.5, -- 精英怪：第 30 关之后每关相对上一关 +5%
+        Boss = 0.6, -- Boss：第 30 关之后每关相对上一关 +6%
     },
     ENEMY_HP_SCALE_DIST = 1000, -- 旧版距离成长配置；当前血量逻辑已改为按关卡成长，保留字段避免旧引用报错
     ENEMY_HP_SCALE_RATE = 0.3,  -- 旧版距离成长配置；当前血量逻辑已改为按关卡成长，保留字段避免旧引用报错
@@ -1493,7 +1493,7 @@ local GameConfig = {
     -- 15. 局内升级可选增益池
     LEVEL_UP_BUFF_POOL = {
         -- 角色属性增益
-        { BuffId = "ATK_Bonus", Name = "Attack Up", Attr = "ATK_Bonus", Amount = 5, Color = Color3.fromRGB(255, 100, 100) },
+        { BuffId = "ATK_Bonus", Name = "Attack Up", Attr = "ATK_Bonus", Amount = 8, Color = Color3.fromRGB(255, 100, 100) },
         { BuffId = "ASPD_Bonus", Name = "Attack Speed Up", Attr = "ASPD_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 100) },
         { BuffId = "MaxHP_Bonus", Name = "Max HP Up", Attr = "MaxHP_Bonus", Amount = 5, Color = Color3.fromRGB(100, 255, 255) },
         { BuffId = "SPD_Bonus", Name = "Bullet Speed Up", Attr = "SPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 150, 100) },
@@ -1502,12 +1502,12 @@ local GameConfig = {
         { BuffId = "EXP_Gain_Bonus", Name = "EXP Gain", Attr = "EXP_Gain_Bonus", Amount = 20, Color = Color3.fromRGB(100, 255, 160), MaxLevel = 5 },
 
         -- 金色强化卡：保留原来的高数值效果，普通升级中低权重出现，Boss 奖励必定从金色池抽取
-        { BuffId = "Gold_ATK_Bonus", Name = "Power Attack", Attr = "ATK_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
+        { BuffId = "Gold_ATK_Bonus", Name = "Power Attack", Attr = "ATK_Bonus", Amount = 25, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
         { BuffId = "Gold_ASPD_Bonus", Name = "Power Attack Speed", Attr = "ASPD_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
         { BuffId = "Gold_MaxHP_Bonus", Name = "Power HP", Attr = "MaxHP_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
         { BuffId = "Gold_RNG_Bonus", Name = "Power Range", Attr = "RNG_Bonus", Amount = 15, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
         { BuffId = "Gold_MagnetRadius_Bonus", Name = "Power Magnet", Attr = "MagnetRadius_Bonus", Amount = 40, Color = Color3.fromRGB(255, 215, 0), Weight = 15 },
-        { BuffId = "Gold_EXP_Gain_Bonus", Name = "EXP Burst", Attr = "EXP_Gain_Bonus", Amount = 100, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 15 },
+        { BuffId = "Gold_EXP_Gain_Bonus", Name = "EXP Burst", Attr = "EXP_Gain_Bonus", Amount = 50, Color = Color3.fromRGB(255, 215, 0), MaxLevel = 3, Weight = 15 },
         { BuffId = "ALL", Name = "All Stats", Attr = "ALL", Amount = 20, Color = Color3.fromRGB(255, 215, 0) , Weight = 20 },
         -- 将弹道增加的权重压低（只有基础属性的40%概率）
         { BuffId = "MultiShot", Name = "Extra Projectile", Attr = "MultiShot", Amount = 1, Color = Color3.fromRGB(255, 100, 200), Weight = 20, CardNote = "Extra projectiles deal 70% damage" },

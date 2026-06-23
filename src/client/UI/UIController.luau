@@ -1510,6 +1510,7 @@ function UIController.Start()
 		local shopSavedFOV = nil
 		local isApplyingShopVisible = false
 		local shopOpenClock = nil
+		local pendingShopPurchaseLevels = {}
 		
 		-- 等待美术做好的滑动列表和模板
 		local shopList = shopPanel:WaitForChild("ShopList")
@@ -1547,6 +1548,17 @@ function UIController.Start()
 				end)
 			else
 				warn("[UIController][Shop] Notice_UI missing. Notice:", text)
+			end
+		end
+
+		local function playShopPurchaseSound()
+			if not Controllers.Sound or not Controllers.Sound.PlayShopPurchase then return end
+
+			local ok, err = pcall(function()
+				Controllers.Sound.PlayShopPurchase()
+			end)
+			if not ok then
+				warn("[UIController][Shop] Shop purchase sound failed:", err)
 			end
 		end
 
@@ -1750,6 +1762,7 @@ function UIController.Start()
 				end
 
 				local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+				pendingShopPurchaseLevels[currentTalentId] = math.max(0, math.floor(tonumber(player:GetAttribute(currentTalentId)) or 0))
 				remotes:WaitForChild("BuyTalent"):FireServer(currentTalentId)
 			end)
 		end
@@ -1764,6 +1777,11 @@ function UIController.Start()
 					showShopNotice("Not enough coins.")
 				elseif reason == "MaxLevel" then
 					showShopNotice("Already max level.")
+				end
+
+				local failedTalentId = payload.TalentId
+				if failedTalentId then
+					pendingShopPurchaseLevels[tostring(failedTalentId)] = nil
 				end
 			end)
 		elseif shopRemotes then
@@ -2047,6 +2065,15 @@ function UIController.Start()
 		-- 当玩家金币或者局外天赋等级变动时，实时计算并刷新商店界面价格
 		player.AttributeChanged:Connect(function(attr)
 			if attr == "Coins" or string.match(attr, "Talent_") then
+				if string.match(attr, "Talent_") then
+					local pendingLevel = pendingShopPurchaseLevels[attr]
+					local newLevel = math.max(0, math.floor(tonumber(player:GetAttribute(attr)) or 0))
+					if pendingLevel ~= nil and newLevel > pendingLevel then
+						pendingShopPurchaseLevels[attr] = nil
+						playShopPurchaseSound()
+					end
+				end
+
 				if shopPanel.Visible then refreshShopUI() end
 			end
 		end)

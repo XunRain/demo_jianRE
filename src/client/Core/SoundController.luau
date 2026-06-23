@@ -9,6 +9,7 @@ local SOUND_NAMES = {
 	Battle = "Battle background music",
 	Select = "Select Sound",
 	Upgrade = "Upgrade Sound",
+	Shop = "Shop Sound",
 }
 
 local warnedMissingSounds = {}
@@ -93,6 +94,10 @@ end
 
 function SoundController.PlayUpgrade()
 	safePlay(getSound("Upgrade"), true)
+end
+
+function SoundController.PlayShopPurchase()
+	safePlay(getSound("Shop"), true)
 end
 
 return SoundController

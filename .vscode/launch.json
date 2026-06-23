@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Config Replacer Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/tools/config-replacer-vscode"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/tools/config-replacer-vscode/out/**/*.js"
+      ],
+      "preLaunchTask": "compile config replacer extension"
+    }
+  ]
+}
