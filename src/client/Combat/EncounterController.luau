@@ -27,9 +27,11 @@ local elitePositions = {}
 local bossZ = nil
 local nextGateZ = 0
 local nextMobZ = 0
+local lastTrackSurfaceY = nil
 local DROP_MODEL_CANDIDATES = {
 	Coin = {"Coin", "Gold", "CoinDrop", "GoldDrop"},
 	Exp = {"Exp", "Experience", "ExpDrop", "ExperienceDrop", "ExpOrb", "ExperienceOrb"},
+	BossRewardChest = {"BossChest"},
 }
 local gateZones = {}
 local enemyZones = {}
@@ -741,6 +743,7 @@ end
 -- 在指定跑道区间内生成 Boss、属性门、精英怪和普通怪。
 function EncounterController.SpawnEncountersInBlock(startZ, endZ, trackStartX, trackSurfaceY)
 	local Config = Controllers.Config
+	lastTrackSurfaceY = trackSurfaceY
 	if not stageConfig then
 		warn("[Debug][EncounterFlow] SpawnEncountersInBlock aborted: stageConfig nil", startZ, endZ)
 		return
@@ -864,6 +867,15 @@ local function getDropModelTemplate(dropType)
         modelFolder:FindFirstChild("Pickups"),
     }
     local candidateNames = DROP_MODEL_CANDIDATES[dropType] or {dropType}
+    if dropType == "BossRewardChest" then
+        local chestConfig = Controllers and Controllers.Config and Controllers.Config.BOSS_REWARD_CHEST or {}
+        local configuredName = chestConfig.ModelName or "BossChest"
+        if configuredName ~= "BossChest" then
+            candidateNames = { configuredName, "BossChest" }
+        else
+            candidateNames = { "BossChest" }
+        end
+    end
 
     for _, folder in ipairs(candidateFolders) do
         if folder then
@@ -918,6 +930,27 @@ local function setDropInstancePosition(instance, rootPart, position)
 end
 
 -- 销毁掉落物实例；模型掉落物会整体删除。
+local function alignDropBottomToGround(instance, rootPart, groundY)
+    if typeof(groundY) ~= "number" then return end
+
+    local bottomY
+    if instance:IsA("Model") then
+        local boundsCFrame, boundsSize = instance:GetBoundingBox()
+        bottomY = boundsCFrame.Position.Y - (boundsSize.Y / 2)
+    else
+        bottomY = rootPart.Position.Y - (rootPart.Size.Y / 2)
+    end
+
+    local deltaY = groundY - bottomY
+    if math.abs(deltaY) <= 0.001 then return end
+
+    if instance:IsA("Model") then
+        instance:PivotTo(instance:GetPivot() + Vector3.new(0, deltaY, 0))
+    else
+        rootPart.Position += Vector3.new(0, deltaY, 0)
+    end
+end
+
 local function destroyDrop(drop)
     local instance = drop and (drop.instance or drop.part)
     if instance then
@@ -937,7 +970,8 @@ local function moveDropBy(drop, delta)
 end
 
 -- 生成单个金币或经验掉落物，模型缺失时使用白模兜底。
-local function SpawnSingleDrop(dropType, value, startPos)
+local function SpawnSingleDrop(dropType, value, startPos, options)
+    options = options or {}
     local dropTemplate = getDropModelTemplate(dropType)
     local dropInstance, rootPart
 
@@ -950,16 +984,22 @@ local function SpawnSingleDrop(dropType, value, startPos)
     end
 
     if not dropTemplate then
+        if dropType == "BossRewardChest" then
+            warn("[EncounterController] ReplicatedStorage.Model.Drops.BossChest is missing or invalid; using placeholder chest.")
+        end
+
         local fallbackPart = Instance.new("Part")
-        fallbackPart.Size = Vector3.new(1.5, 1.5, 1.5)
+        fallbackPart.Size = dropType == "BossRewardChest" and Vector3.new(4, 3, 4) or Vector3.new(1.5, 1.5, 1.5)
         fallbackPart.Anchored = true
         fallbackPart.CanCollide = false
         fallbackPart.CanTouch = false
         fallbackPart.CanQuery = false
-        fallbackPart.Material = Enum.Material.Neon
+        fallbackPart.Material = dropType == "BossRewardChest" and Enum.Material.SmoothPlastic or Enum.Material.Neon
 
         if dropType == "Coin" then
             fallbackPart.Color = Color3.fromRGB(255, 215, 0)
+        elseif dropType == "BossRewardChest" then
+            fallbackPart.Color = Color3.fromRGB(255, 180, 60)
         else
             fallbackPart.Color = Color3.fromRGB(0, 255, 100)
         end
@@ -969,22 +1009,69 @@ local function SpawnSingleDrop(dropType, value, startPos)
     end
 
     setDropInstancePosition(dropInstance, rootPart, startPos)
+    if options.AlignBottomToGround == true then
+        alignDropBottomToGround(dropInstance, rootPart, options.GroundY)
+    end
     local localFolder = Workspace:FindFirstChild("LocalEncounters") or Instance.new("Folder", Workspace)
     localFolder.Name = "LocalEncounters"
     dropInstance.Parent = localFolder
 
-    table.insert(EncounterController.ActiveDrops, {
+    local dropData = {
         instance = dropInstance,
         part = rootPart,
         type = dropType,
         value = value,
         spawnTime = os.clock(),
-    })
+        collectRadius = options.CollectRadius,
+        noMagnet = options.NoMagnet == true,
+    }
 
-    Controllers.VFX.PlayDropExplosion(dropInstance, startPos)
+    table.insert(EncounterController.ActiveDrops, dropData)
+
+    if options.NoExplosion ~= true then
+        Controllers.VFX.PlayDropExplosion(dropInstance, startPos)
+    end
+
+    return dropData
 end
 
 -- 根据被击杀怪物类型生成金币和经验掉落物。
+local function grantBossGoldReward()
+    local bossGoldReward = Controllers.Config.BOSS_GOLD_REWARD
+    if bossGoldReward and bossGoldReward.Enabled == false then return false end
+    if player:GetAttribute("IsRevivePending") then return false end
+
+    player:SetAttribute("LevelUpRewardMode", "BossGold")
+    player:SetAttribute("IsLevelingUp", true)
+
+    if Controllers.Player and Controllers.Player.SetMoveDirection then
+        Controllers.Player.SetMoveDirection(0)
+    end
+
+    return true
+end
+
+function EncounterController.SpawnBossRewardChest(position)
+    local chestConfig = Controllers.Config.BOSS_REWARD_CHEST or {}
+    if chestConfig.Enabled == false then
+        return grantBossGoldReward()
+    end
+    if typeof(position) ~= "Vector3" then return false end
+
+    local groundY = lastTrackSurfaceY or position.Y
+    local spawnPosition = Vector3.new(position.X, groundY, position.Z)
+
+    SpawnSingleDrop("BossRewardChest", 1, spawnPosition, {
+        NoExplosion = true,
+        NoMagnet = true,
+        AlignBottomToGround = true,
+        GroundY = groundY,
+        CollectRadius = tonumber(chestConfig.CollectRadius) or 6,
+    })
+
+    return true
+end
+
 function EncounterController.TriggerDrops(enemyType, enemyPos)
     local Config = Controllers.Config
     local dropConfig = Config.ENEMY_DROPS[enemyType] or Config.ENEMY_DROPS["Basic"]
@@ -1020,8 +1107,9 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 
 		local dPos = drop.part.Position
 		local dist = (pPos - dPos).Magnitude
+		local collectRadius = tonumber(drop.collectRadius) or Config.COLLECT_RADIUS
 
-		if dist < Config.COLLECT_RADIUS then
+		if dist < collectRadius then
 			if drop.type == "Coin" then
 				local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
 				if remotes and remotes:FindFirstChild("AddCoin") then
@@ -1037,6 +1125,8 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 				local expIconId = "rbxassetid://83939430689931"
 				local cleanText = "+" .. Config.FormatNumber(actualExp)
 				Controllers.VFX.PlayLootText(player.Character, cleanText, Color3.fromRGB(100, 255, 100), expIconId)
+			elseif drop.type == "BossRewardChest" then
+				grantBossGoldReward()
 			end
 
 			destroyDrop(drop)
@@ -1044,7 +1134,12 @@ function EncounterController.UpdateMagnetism(dt, rootPart)
 
 		else
 			if (os.clock() - drop.spawnTime) > Config.DROP_MAGNET_DELAY then
-				if dist < currentMagnetRadius then
+				if drop.noMagnet or drop.type == "BossRewardChest" then
+					if dPos.Z > pPos.Z + Config.CLEANUP_BEHIND then
+						destroyDrop(drop)
+						table.remove(EncounterController.ActiveDrops, i)
+					end
+				elseif dist < currentMagnetRadius then
 					local dir = (pPos - dPos).Unit
 					moveDropBy(drop, dir * (Config.MAGNET_SPEED * dt))
 				elseif dPos.Z > pPos.Z + Config.CLEANUP_BEHIND then

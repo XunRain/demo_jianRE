@@ -239,11 +239,17 @@ local function updateEnemyHpLabel(enemy)
 end
 
 -- Boss 被玩家击败后，复用升级面板发放全金色奖励卡。
-local function triggerBossGoldReward(enemyType)
+local function triggerBossGoldReward(enemyType, bossPosition)
 	if enemyType ~= "Boss" then return end
 	local bossGoldReward = Controllers.Config.BOSS_GOLD_REWARD
 	if bossGoldReward and bossGoldReward.Enabled == false then return end
 	if player:GetAttribute("IsRevivePending") then return end
+
+	local chestConfig = Controllers.Config.BOSS_REWARD_CHEST or {}
+	if chestConfig.Enabled ~= false and Controllers.Encounter and Controllers.Encounter.SpawnBossRewardChest then
+		Controllers.Encounter.SpawnBossRewardChest(bossPosition)
+		return
+	end
 
 	player:SetAttribute("LevelUpRewardMode", "BossGold")
 	player:SetAttribute("IsLevelingUp", true)
@@ -354,7 +360,7 @@ function CombatController.CheckCollisions(rootPart)
 							local deathVfxName = Controllers.Config.ENEMY_VFX[targetE.type] or "BasicDeath"
 							Controllers.VFX.PlayDeathVFX(deathVfxName, targetE.part.Position)
 
-							triggerBossGoldReward(targetE.type)
+							triggerBossGoldReward(targetE.type, targetE.part and targetE.part.Position or bPos)
 							triggerEliteGoldReward(targetE.type)
 							Controllers.Encounter.TriggerDrops(targetE.type, targetE.part.Position)
 							targetE.part:Destroy()
@@ -373,7 +379,7 @@ function CombatController.CheckCollisions(rootPart)
 						local deathVfxName = Controllers.Config.ENEMY_VFX[e.type] or "BasicDeath"
 						Controllers.VFX.PlayDeathVFX(deathVfxName, ePos)
 
-						triggerBossGoldReward(e.type)
+						triggerBossGoldReward(e.type, ePos)
 						triggerEliteGoldReward(e.type)
 						e.part:Destroy()
 						table.remove(activeEnemies, j)
@@ -681,7 +687,7 @@ function CombatController.StartSwordSystem()
 		local deathVfx = Config.ENEMY_VFX[enemy.type] or "BasicDeath"
 		reportEnemyKilled(enemy, damage or 0, "Sword", false)
 		Controllers.VFX.PlayDeathVFX(deathVfx, hitPos)
-		triggerBossGoldReward(enemy.type)
+		triggerBossGoldReward(enemy.type, hitPos)
 		triggerEliteGoldReward(enemy.type)
 		Controllers.Encounter.TriggerDrops(enemy.type, hitPos)
 		removeEnemyFromActiveList(enemy)

@@ -480,6 +480,11 @@ function PetController.ShootProjectile(petConfig, petModel, petId, petLevel)
 	local smiteWarningTime = Controllers.Config.SMITE_WARNING_TIME or 0.5
 	local smiteHitWindow = Controllers.Config.SMITE_HIT_WINDOW or 0.08
 
+	if skillType == "SimpleShot" then
+		spawnPos = petPos + Vector3.new(0, 0, -2)
+		playerPos = spawnPos
+	end
+
 	if skillType == "WindBlade" then
 		local character = player.Character
 		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -595,9 +600,21 @@ function PetController.ShootProjectile(petConfig, petModel, petId, petLevel)
 			elseif skillType == "Fireball" then
 				bullet.Size = Vector3.new(4, 4, 4)
 				bullet.Shape = Enum.PartType.Ball
+			elseif skillType == "SimpleShot" then
+				local projectileSize = petConfig.ProjectileSize or 2.4
+				bullet.Size = Vector3.new(projectileSize, projectileSize, projectileSize)
+				bullet.Shape = Enum.PartType.Ball
 			else
-				bullet.Size = Vector3.new(3, 1, 3)
-				bullet.Shape = Enum.PartType.Block
+				bullet.Size = Vector3.new(2.4, 2.4, 2.4)
+				bullet.Shape = Enum.PartType.Ball
+			end
+
+			if bullet.Shape == Enum.PartType.Ball then
+				local light = Instance.new("PointLight")
+				light.Color = bullet.Color
+				light.Brightness = 1.6
+				light.Range = 8
+				light.Parent = bullet
 			end
 
 			bullet.CFrame = CFrame.new(spawnPos)

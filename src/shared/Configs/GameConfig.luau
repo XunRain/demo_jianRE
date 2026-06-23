@@ -379,6 +379,531 @@ local GameConfig = {
             GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
 
             GateBuffChance = 0.5,
+        },
+		[6] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[7] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[8] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[9] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[10] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[11] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[12] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[13] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[14] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[15] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[16] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[17] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[18] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[19] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[20] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[21] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[22] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[23] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[24] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[25] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[26] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[27] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[28] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[29] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
+        },
+		[30] = {
+            Length = 1000,
+            GateInterval = 300,
+            MobInterval = 100,
+            MobsPerGroup = {3, 4},
+            EliteCount = 3,
+            HasBoss = true,
+
+            BasicHP = 70,
+            EliteHP = 140,
+            BossHP = 500,
+
+            GATE_ATK_BONUS_MIN = 10,  GATE_ATK_BONUS_MAX = 15,
+            GATE_ASPD_BONUS_MIN = 10, GATE_ASPD_BONUS_MAX = 15,
+            GATE_HP_BONUS_MIN = 10,  GATE_HP_BONUS_MAX = 30,    -- 恢复或扣除 10%~30% 最大生命
+            GATE_MAXHP_BONUS_MIN = 10, GATE_MAXHP_BONUS_MAX = 15, -- 提升或降低 5%~15% 最大生命上限
+            GATE_SPD_BONUS_MIN = 5,  GATE_SPD_BONUS_MAX = 20,   -- 弹速加成 %
+            GATE_RNG_BONUS_MIN = 5,  GATE_RNG_BONUS_MAX = 20,   -- 射程加成 %
+
+            GateBuffChance = 0.5,
         }
     },
 
@@ -588,6 +1113,96 @@ local GameConfig = {
 			WindBladeMaxWidth = 26, -- 风刃横向范围上限；升级卡片最多把范围推到这里
 			MaxCount = 5, -- 宠物最大数量
 			Color = Color3.fromRGB(150, 255, 150)
+		},
+		["Rabbit"] = {
+			Name = "Rabbit",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 110,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(238, 62, 168)
+		},
+		["Sheep"] = {
+			Name = "Sheep",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 120,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(226, 198, 255)
+		},
+		["Unicorn"] = {
+			Name = "Unicorn",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 130,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(85, 210, 255)
+		},
+		["Bear"] = {
+			Name = "Bear",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 140,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(130, 76, 73)
+		},
+		["Pig"] = {
+			Name = "Pig",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 150,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(255, 100, 185)
+		},
+		["Penguin"] = {
+			Name = "Penguin",
+			Rarity = "Common",
+			Quality = 1,
+			Weight = 10,
+			SortOrder = 160,
+			Description = "Simple Shot",
+			ATK = 10,
+			Cooldown = 4,
+			CastCount = 1,
+			SkillType = "SimpleShot",
+			PierceCount = 1,
+			MaxCount = 5,
+			Color = Color3.fromRGB(28, 34, 68)
 		},
 		["Dragon"] = {
 			Name = "Dragon",
@@ -924,6 +1539,12 @@ local GameConfig = {
             "ALL",
             "MultiShot",
         },
+    },
+
+    BOSS_REWARD_CHEST = {
+        Enabled = true,
+        ModelName = "BossChest",
+        CollectRadius = 6,
     },
 
     -- 精英怪击败奖励：弹出升级卡时，至少保底 1 张金色升级卡。
